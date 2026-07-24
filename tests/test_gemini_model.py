@@ -193,6 +193,43 @@ def test_gemini_model_sends_messages_tools_and_returns_usage() -> None:
     ]
 
 
+def test_gemini_model_sends_initial_reference_image() -> None:
+    model, client = gemini_model([text_response("result")])
+
+    run(
+        model.query(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "reconstruct this"},
+                        {
+                            "type": "input_image",
+                            "image_url": "data:image/png;base64,YWJj",
+                            "detail": "original",
+                        },
+                    ],
+                }
+            ]
+        )
+    )
+
+    assert client.interactions.requests[0]["input"] == [
+        {
+            "type": "user_input",
+            "content": [
+                {"type": "text", "text": "reconstruct this"},
+                {
+                    "type": "image",
+                    "mime_type": "image/png",
+                    "data": "YWJj",
+                    "resolution": "ultra_high",
+                },
+            ],
+        }
+    ]
+
+
 def test_gemini_model_preserves_response_steps_for_tool_results() -> None:
     model, client = gemini_model(
         [
@@ -289,7 +326,12 @@ def test_gemini_model_converts_image_tool_results() -> None:
         "call_id": "call_image",
         "result": [
             {"type": "text", "text": '{"width": 1, "height": 1}'},
-            {"type": "image", "mime_type": "image/png", "data": "YWJj"},
+            {
+                "type": "image",
+                "mime_type": "image/png",
+                "data": "YWJj",
+                "resolution": "high",
+            },
         ],
     }
 

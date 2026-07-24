@@ -128,7 +128,7 @@ class GeminiModel:
                 steps.append(
                     {
                         "type": "user_input",
-                        "content": [{"type": "text", "text": _message_text(message)}],
+                        "content": _user_content(message),
                     }
                 )
         return steps
@@ -153,6 +153,29 @@ def _message_text(message: dict[str, Any]) -> str:
     if not isinstance(content, str):
         raise TypeError("GeminiModel messages must use string content")
     return content
+
+
+def _user_content(message: dict[str, Any]) -> list[dict[str, str]]:
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if not isinstance(content, list):
+        raise TypeError("GeminiModel message content must be a string or list")
+
+    converted: list[dict[str, str]] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "input_text":
+            converted.append({"type": "text", "text": str(item.get("text") or "")})
+        elif item.get("type") == "input_image":
+            image = _image_content(
+                str(item.get("image_url") or ""),
+                str(item.get("detail") or "high"),
+            )
+            if image is not None:
+                converted.append(image)
+    return converted
 
 
 def _tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -191,7 +214,10 @@ def _function_result_content(output: Any) -> list[dict[str, str]]:
         if item.get("type") == "input_text":
             content.append({"type": "text", "text": str(item.get("text") or "")})
         elif item.get("type") == "input_image":
-            image = _image_content(str(item.get("image_url") or ""))
+            image = _image_content(
+                str(item.get("image_url") or ""),
+                str(item.get("detail") or "high"),
+            )
             if image is not None:
                 content.append(image)
     return content or [{"type": "text", "text": json.dumps(output)}]
@@ -203,7 +229,7 @@ def _result_text(output: Any) -> str:
     return json.dumps(output)
 
 
-def _image_content(image_url: str) -> dict[str, str] | None:
+def _image_content(image_url: str, detail: str) -> dict[str, str] | None:
     header, separator, data = image_url.partition(",")
     if not separator or not header.startswith("data:") or not header.endswith(";base64"):
         return None
@@ -211,6 +237,7 @@ def _image_content(image_url: str) -> dict[str, str] | None:
         "type": "image",
         "mime_type": header.removeprefix("data:").removesuffix(";base64"),
         "data": data,
+        "resolution": "ultra_high" if detail == "original" else "high",
     }
 
 
