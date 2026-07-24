@@ -210,13 +210,13 @@ class OpenAIModel:
         new_items: list[dict[str, Any]] = []
         for message in messages[self._last_message_count :]:
             if "type" in message:
-                new_items.append(message)
+                new_items.append(_normalize_image_details(message, self.config.openai_model))
                 continue
             if message["role"] == "system":
                 continue
             if self._previous_response_id is not None and message["role"] == "assistant":
                 continue
-            new_items.append(_input_message(message))
+            new_items.append(_input_message(message, self.config.openai_model))
         return new_items
 
 
@@ -319,8 +319,35 @@ def _instructions(messages: list[dict[str, Any]]) -> str:
     )
 
 
-def _input_message(message: dict[str, Any]) -> dict[str, Any]:
-    return {"role": message["role"], "content": _message_text(message)}
+def _input_message(message: dict[str, Any], model: str) -> dict[str, Any]:
+    content = message["content"]
+    if not isinstance(content, str | list):
+        raise TypeError("OpenAIModel message content must be a string or list")
+    return {
+        "role": message["role"],
+        "content": _normalize_image_details(content, model),
+    }
+
+
+def _normalize_image_details(value: Any, model: str) -> Any:
+    if isinstance(value, list):
+        return [_normalize_image_details(item, model) for item in value]
+    if not isinstance(value, dict):
+        return value
+    item = {key: _normalize_image_details(child, model) for key, child in value.items()}
+    if (
+        item.get("type") == "input_image"
+        and item.get("detail") == "original"
+        and _is_compact_model(model)
+    ):
+        item["detail"] = "high"
+    return item
+
+
+def _is_compact_model(model: str) -> bool:
+    return any(
+        model == name or model.startswith(f"{name}-") for name in ("gpt-5.4-mini", "gpt-5.4-nano")
+    )
 
 
 def _message_text(message: dict[str, Any]) -> str:

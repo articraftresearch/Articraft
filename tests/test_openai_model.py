@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -112,6 +112,25 @@ def test_openai_model_uses_websocket(monkeypatch: pytest.MonkeyPatch) -> None:
             "instructions": "write clean code",
         }
     ]
+
+
+def test_openai_model_sends_initial_reference_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FakeWebSocket([response_event("result")])
+    patch_websocket(monkeypatch, socket)
+    content = [
+        {"type": "input_text", "text": "reconstruct this"},
+        {
+            "type": "input_image",
+            "image_url": "data:image/png;base64,YWJj",
+            "detail": "original",
+        },
+    ]
+
+    run(openai_model().query([{"role": "user", "content": content}]))
+
+    assert socket.sent[0]["input"] == [{"role": "user", "content": content}]
 
 
 def test_openai_model_sends_tools_and_returns_function_calls(
@@ -289,7 +308,7 @@ def test_openai_model_sends_typed_image_tool_output(
         ]
     )
     patch_websocket(monkeypatch, socket)
-    model = openai_model()
+    model = openai_model(openai_model="gpt-5.4-mini")
     messages: list[dict[str, Any]] = [{"role": "user", "content": "inspect"}]
 
     run(model.query(messages, tools=[]))
@@ -301,7 +320,7 @@ def test_openai_model_sends_typed_image_tool_output(
             {
                 "type": "input_image",
                 "image_url": "data:image/png;base64,aW1hZ2U=",
-                "detail": "high",
+                "detail": "original",
             },
         ],
     }
@@ -314,7 +333,8 @@ def test_openai_model_sends_typed_image_tool_output(
     run(model.query(messages, tools=[]))
 
     assert socket.sent[1]["previous_response_id"] == "resp_1"
-    assert socket.sent[1]["input"] == [image_output]
+    sent_output = cast(list[dict[str, Any]], socket.sent[1]["input"])[0]
+    assert sent_output["output"][1]["detail"] == "high"
 
 
 def test_openai_model_uses_incremental_websocket_inputs(
