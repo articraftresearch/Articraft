@@ -236,6 +236,22 @@ def test_renderer_truncates_long_output() -> None:
     assert "line 19" not in out
 
 
+def test_replay_shows_reference_image_metadata() -> None:
+    renderer, console = _renderer()
+
+    renderer.render_row(
+        {
+            "role": "user",
+            "content": "reconstruct this",
+            "images": [{"path": "input/reference.png", "width": 1200, "height": 800}],
+        }
+    )
+
+    out = _text(console)
+    assert "reconstruct this" in out
+    assert "input/reference.png, 1200x800" in out
+
+
 def test_final_summary_success() -> None:
     renderer, console = _renderer()
     summary = renderer.final_summary(

@@ -218,7 +218,15 @@ class RunRenderer:
             case "system", _:
                 self._print(Text("· system prompt loaded", style="dim"))
             case "user", _:
-                self._print_user(str(row.get("content") or ""))
+                content = str(row.get("content") or "")
+                images = row.get("images")
+                if isinstance(images, list) and images and isinstance(images[0], dict):
+                    image = images[0]
+                    content += (
+                        f"\n[image: {image.get('path', '')}, "
+                        f"{image.get('width', '')}x{image.get('height', '')}]"
+                    )
+                self._print_user(content)
             case "assistant", _:
                 self._turn += 1
                 tool_calls = list(row.get("tool_calls") or [])

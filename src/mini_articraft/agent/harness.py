@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import mini_articraft.agent.tools as tools
 from mini_articraft import Environment, Model, package_dir
 from mini_articraft.agent import events
+from mini_articraft.agent.images import PreparedImage, prepare_image
 from mini_articraft.agent.tools import ToolContext
 from mini_articraft.record import Record, append_conversation
 from mini_articraft.settings import DEFAULT_MAX_TURNS
@@ -47,8 +48,15 @@ class Agent:
         if self._on_event is not None:
             self._on_event(event)
 
-    async def run(self, prompt: str, **kwargs: Any) -> dict[str, Any]:
-        run_id = str(kwargs.get("run_id") or _run_id_for_prompt(prompt))
+    async def run(
+        self,
+        prompt: str,
+        *,
+        run_id: str | None = None,
+        image_path: Path | None = None,
+    ) -> dict[str, Any]:
+        image = prepare_image(image_path) if image_path is not None else None
+        run_id = run_id or _run_id_for_prompt(prompt)
         run_dir = self.env.create_run(run_id)
         context = ToolContext(self.env, run_dir, run_dir / "workspace")
         conversation_path = run_dir / "conversation.jsonl"
@@ -59,6 +67,24 @@ class Agent:
         record.result = ""
         record.save(record_path)
 
+        task = _read_prompt("task.md").replace("{{ prompt }}", prompt)
+        task_message: dict[str, Any] = {"role": "user", "content": task}
+        recorded_task = task_message
+        if image is not None:
+            saved_path = _save_input_image(run_dir, image)
+            task_message = {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": task},
+                    image.content_item(),
+                ],
+            }
+            recorded_task = {
+                "role": "user",
+                "content": task,
+                "images": [image.metadata(saved_path)],
+            }
+
         self.messages = [
             {
                 "role": "system",
@@ -68,9 +94,9 @@ class Agent:
                 "role": "user",
                 "content": _read_sdk_quickstart(),
             },
-            {"role": "user", "content": _read_prompt("task.md").replace("{{ prompt }}", prompt)},
+            task_message,
         ]
-        for message in self.messages:
+        for message in [*self.messages[:-1], recorded_task]:
             append_conversation(conversation_path, message)
 
         model_config = getattr(self.model, "config", None)
@@ -472,6 +498,14 @@ def _add_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, i
 
 def _read_prompt(name: str) -> str:
     return (package_dir / "prompts" / name).read_text(encoding="utf-8")
+
+
+def _save_input_image(run_dir: Path, image: PreparedImage) -> str:
+    relative = Path("input") / f"reference{image.suffix}"
+    path = run_dir / relative
+    path.parent.mkdir()
+    path.write_bytes(image.data)
+    return relative.as_posix()
 
 
 def _read_sdk_quickstart() -> str:

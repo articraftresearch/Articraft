@@ -26,6 +26,16 @@ COMMANDS = {"generate", "replay", "view"}
 @app.command()
 def generate(
     prompt: str,
+    image: Path | None = typer.Option(
+        None,
+        "--image",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Local reference image for reconstruction.",
+    ),
     provider: Literal["openai", "gemini"] | None = typer.Option(
         None,
         "--provider",
@@ -54,10 +64,14 @@ def generate(
     """Generate an object from a prompt."""
     settings = _settings(provider, model, output_dir, reasoning_effort, compile_timeout)
     use_tui = tui if tui is not None else sys.stdout.isatty()
-    if use_tui:
-        _generate_with_tui(settings, prompt)
-    else:
-        _print_result(asyncio.run(_generate(settings, prompt)))
+    try:
+        if use_tui:
+            _generate_with_tui(settings, prompt, image)
+        else:
+            _print_result(asyncio.run(_generate(settings, prompt, image_path=image)))
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -97,6 +111,7 @@ async def _generate(
     settings: Settings,
     prompt: str,
     *,
+    image_path: Path | None = None,
     on_event: Callable[[events.Event], None] | None = None,
 ) -> dict[str, Any]:
     model_client = create_model(settings)
@@ -108,16 +123,23 @@ async def _generate(
         agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
         if on_event is not None:
             agent_kwargs["on_event"] = on_event
-        return await Agent(model_client, env, **agent_kwargs).run(prompt)
+        return await Agent(model_client, env, **agent_kwargs).run(prompt, image_path=image_path)
     finally:
         # Agent.run closes the model too; close() is idempotent, and this
         # finally covers failures before the agent loop starts.
         await model_client.close()
 
 
-def _generate_with_tui(settings: Settings, prompt: str) -> None:
+def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> None:
     try:
-        result = run_live(lambda on_event: _generate(settings, prompt, on_event=on_event))
+        result = run_live(
+            lambda on_event: _generate(
+                settings,
+                prompt,
+                image_path=image_path,
+                on_event=on_event,
+            )
+        )
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise typer.Exit(130) from None
 

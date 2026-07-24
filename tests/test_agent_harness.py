@@ -18,6 +18,7 @@ from harness import (
     text,
     tool_call,
 )
+from PIL import Image
 
 import mini_articraft.agent.tools as agent_tools
 from mini_articraft.agent import Agent, events
@@ -190,6 +191,62 @@ def test_agent_sends_typed_image_content_but_records_only_metadata(
     )
     assert isinstance(image_event["output"], str)
     assert "base64" not in image_event["output"]
+
+
+def test_agent_sends_and_saves_initial_reference_image(tmp_path) -> None:
+    image_path = tmp_path / "reference.png"
+    Image.new("RGB", (12, 8), color="white").save(image_path)
+
+    def inspect_image(query: ModelQuery) -> Response:
+        content = query.messages[2]["content"]
+        assert isinstance(content, list)
+        assert content[0]["type"] == "input_text"
+        assert "a box" in content[0]["text"]
+        assert content[1]["type"] == "input_image"
+        assert content[1]["detail"] == "original"
+        assert content[1]["image_url"].startswith("data:image/png;base64,")
+        return calls(
+            tool_call(
+                "write",
+                {"path": "main.py", "content": GOOD_MAIN_PY},
+                call_id="call_write",
+            )
+        )
+
+    model = ScriptedModel(
+        [
+            inspect_image,
+            calls(tool_call("compile", {}, call_id="call_compile")),
+            text("done"),
+        ]
+    )
+    run_dir = tmp_path / "box"
+    result = run(
+        Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run(
+            "a box",
+            run_id="box",
+            image_path=image_path,
+        )
+    )
+
+    assert result["status"] == "success"
+    saved_image = run_dir / "input" / "reference.png"
+    assert saved_image.read_bytes() == image_path.read_bytes()
+    conversation_text = run_dir.joinpath("conversation.jsonl").read_text(encoding="utf-8")
+    assert "base64" not in conversation_text
+    image_event = next(
+        event for event in read_conversation(run_dir / "conversation.jsonl") if event.get("images")
+    )
+    metadata = image_event["images"][0]
+    assert {key: value for key, value in metadata.items() if key != "sha256"} == {
+        "path": "input/reference.png",
+        "mime_type": "image/png",
+        "bytes": len(image_path.read_bytes()),
+        "width": 12,
+        "height": 8,
+        "detail": "original",
+    }
+    assert len(metadata["sha256"]) == 64
 
 
 def test_agent_requires_compile_before_final_response(tmp_path) -> None:

@@ -45,10 +45,17 @@ class FakeAgent:
         self.env = env
         self.kwargs = kwargs
         self.prompt = ""
+        self.image_path: Path | None = None
         self.instances.append(self)
 
-    async def run(self, prompt: str) -> dict[str, object]:
+    async def run(
+        self,
+        prompt: str,
+        *,
+        image_path: Path | None = None,
+    ) -> dict[str, object]:
         self.prompt = prompt
+        self.image_path = image_path
         return self.result
 
 
@@ -102,8 +109,63 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
     }
     assert FakeAgent.instances[0].kwargs == {"max_turns": 123}
     assert FakeAgent.instances[0].prompt == "make a hinge"
+    assert FakeAgent.instances[0].image_path is None
     assert "status: success" in result.output
     assert "run: /tmp/run" in result.output
+
+
+def test_cli_passes_reference_image_to_agent(monkeypatch, tmp_path: Path) -> None:
+    reset_fakes()
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
+    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    image_path = tmp_path / "reference.png"
+    image_path.write_bytes(b"image")
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a hinge", "--image", str(image_path)],
+    )
+
+    assert result.exit_code == 0
+    assert FakeAgent.instances[0].image_path == image_path.resolve()
+
+
+def test_cli_rejects_missing_reference_image(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a hinge", "--image", str(tmp_path / "missing.png")],
+    )
+
+    assert result.exit_code == 2
+    assert "does not exist" in result.output
+
+
+def test_cli_reports_invalid_reference_image_without_traceback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    reset_fakes()
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(
+        mini,
+        "get_settings",
+        lambda: Settings(openai_api_key="sk-test", output_dir=tmp_path / "runs"),
+    )
+    image_path = tmp_path / "reference.png"
+    image_path.write_bytes(b"not an image")
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a hinge", "--image", str(image_path)],
+    )
+
+    assert result.exit_code == 1
+    assert "not a supported PNG, JPEG, GIF, or WebP image" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_cli_selects_gemini_provider(monkeypatch, tmp_path: Path) -> None:

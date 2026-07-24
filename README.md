@@ -38,6 +38,12 @@ Generate an object:
 uv run mini-articraft "a jet engine"
 ```
 
+Add one local reference image when you want to reconstruct an object:
+
+```shell
+uv run mini-articraft --image reference.png "reconstruct this desk lamp"
+```
+
 OpenAI is the default provider. To use Gemini, pass a Gemini API key and select the provider:
 
 ```shell
