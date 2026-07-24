@@ -74,8 +74,16 @@ class Agent:
             append_conversation(conversation_path, message)
 
         model_config = getattr(self.model, "config", None)
-        model_name = getattr(model_config, "openai_model", "")
-        reasoning_effort = getattr(model_config, "openai_reasoning_effort", "")
+        model_name = getattr(
+            model_config,
+            "selected_model",
+            getattr(model_config, "openai_model", ""),
+        )
+        reasoning_effort = getattr(
+            model_config,
+            "selected_reasoning_effort",
+            getattr(model_config, "openai_reasoning_effort", ""),
+        )
         context_window_tokens = int(getattr(self.model, "context_window_tokens", 0) or 0)
         self._emit(
             events.RunStarted(

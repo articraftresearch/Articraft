@@ -66,7 +66,7 @@ def reset_fakes() -> None:
 
 def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "OpenAIModel", FakeOpenAIModel)
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
     monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
     monkeypatch.setattr(mini, "Agent", FakeAgent)
     monkeypatch.setattr(
@@ -106,6 +106,40 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
     assert "run: /tmp/run" in result.output
 
 
+def test_cli_selects_gemini_provider(monkeypatch, tmp_path: Path) -> None:
+    reset_fakes()
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
+    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        mini,
+        "get_settings",
+        lambda: Settings(gemini_api_key="gemini-test", max_turns=123),
+    )
+
+    output_dir = tmp_path / "runs"
+    result = CliRunner().invoke(
+        mini.app,
+        [
+            "generate",
+            "make a hinge",
+            "--provider",
+            "gemini",
+            "--model",
+            "gemini-3.1-pro-preview",
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    settings = FakeOpenAIModel.instances[0].settings
+    assert settings.provider == "gemini"
+    assert settings.gemini_model == "gemini-3.1-pro-preview"
+    assert settings.output_dir == output_dir
+    assert settings.selected_model == "gemini-3.1-pro-preview"
+
+
 def test_cli_warns_on_missing_required_settings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
@@ -122,10 +156,27 @@ def test_cli_warns_on_missing_required_settings(monkeypatch, tmp_path: Path) -> 
     assert "ValidationError" not in result.output
 
 
+def test_cli_warns_on_missing_gemini_key(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a hinge", "--provider", "gemini", "--no-tui"],
+    )
+
+    assert result.exit_code == 1
+    assert "Missing required environment variable" in result.output
+    assert "GEMINI_API_KEY" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_cli_exits_nonzero_when_agent_fails(monkeypatch) -> None:
     reset_fakes()
     FakeAgent.result = {"status": "error", "run": "/tmp/run", "error": "compile failed"}
-    monkeypatch.setattr(mini, "OpenAIModel", FakeOpenAIModel)
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
     monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
     monkeypatch.setattr(mini, "Agent", FakeAgent)
     monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))

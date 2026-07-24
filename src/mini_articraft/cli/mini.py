@@ -4,7 +4,7 @@ import asyncio
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import typer
 from pydantic import ValidationError
@@ -12,7 +12,10 @@ from pydantic import ValidationError
 from mini_articraft.agent import Agent, events
 from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
 from mini_articraft.environments import LocalEnvironment
-from mini_articraft.models import OpenAIModel
+from mini_articraft.models import create_model
+from mini_articraft.models.gemini import (
+    context_window_tokens_for as gemini_context_window_tokens_for,
+)
 from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
 from mini_articraft.viewer import serve_viewer
 
@@ -23,6 +26,12 @@ COMMANDS = {"generate", "replay", "view"}
 @app.command()
 def generate(
     prompt: str,
+    provider: Literal["openai", "gemini"] | None = typer.Option(
+        None,
+        "--provider",
+        case_sensitive=False,
+        help="Model provider to use: openai or gemini.",
+    ),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use."),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
     reasoning_effort: str | None = typer.Option(
@@ -43,7 +52,7 @@ def generate(
     ),
 ) -> None:
     """Generate an object from a prompt."""
-    settings = _settings(model, output_dir, reasoning_effort, compile_timeout)
+    settings = _settings(provider, model, output_dir, reasoning_effort, compile_timeout)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     if use_tui:
         _generate_with_tui(settings, prompt)
@@ -90,7 +99,7 @@ async def _generate(
     *,
     on_event: Callable[[events.Event], None] | None = None,
 ) -> dict[str, Any]:
-    model_client = OpenAIModel(settings)
+    model_client = create_model(settings)
     try:
         env = LocalEnvironment(
             output_dir=settings.output_dir,
@@ -129,6 +138,7 @@ def _default_output_dir() -> Path:
 
 
 def _settings(
+    provider: Literal["openai", "gemini"] | None,
     model: str | None,
     output_dir: Path | None,
     reasoning_effort: str | None,
@@ -137,7 +147,7 @@ def _settings(
     updates = {
         key: value
         for key, value in (
-            ("openai_model", model),
+            ("provider", provider),
             ("output_dir", output_dir),
             ("openai_reasoning_effort", reasoning_effort),
             ("compile_timeout_seconds", compile_timeout),
@@ -149,7 +159,36 @@ def _settings(
     except ValidationError as exc:
         _report_settings_error(exc)
         raise typer.Exit(1) from None
-    return settings.model_copy(update=updates)
+    settings = settings.model_copy(update=updates)
+
+    if model is not None:
+        model_key = "gemini_model" if settings.provider == "gemini" else "openai_model"
+        settings = settings.model_copy(update={model_key: model})
+
+    if (
+        settings.provider == "gemini"
+        and gemini_context_window_tokens_for(settings.gemini_model) is None
+    ):
+        print_settings_error(
+            detail=(
+                "unsupported Gemini model: "
+                f"{settings.gemini_model}. Supported models: gemini-3.1-pro-preview, "
+                "gemini-3.6-flash"
+            )
+        )
+        raise typer.Exit(1)
+
+    missing = _missing_provider_settings(settings)
+    if missing:
+        print_settings_error(missing=missing)
+        raise typer.Exit(1)
+    return settings
+
+
+def _missing_provider_settings(settings: Settings) -> list[str]:
+    if settings.provider == "gemini":
+        return [] if (settings.gemini_api_key or "").strip() else ["GEMINI_API_KEY"]
+    return [] if settings.openai_api_key else ["OPENAI_API_KEY"]
 
 
 def _report_settings_error(exc: ValidationError) -> None:

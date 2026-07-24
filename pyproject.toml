@@ -21,6 +21,7 @@ classifiers = [
 keywords = ["build123d", "agent", "cad", "articulation", "usd"]
 dependencies = [
     "build123d>=0.11.0",
+    "google-genai>=2.14.0",
     "libigl>=2.6.2,<2.7",
     "manifold3d>=3.3.2",
     "numpy>=2.3.1,<3",

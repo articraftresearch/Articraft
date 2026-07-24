@@ -48,6 +48,8 @@ _MODEL_ALIASES = {"gpt-5.6": "gpt-5.6-sol"}
 class OpenAIModel:
     def __init__(self, settings: Settings | None = None):
         self.config = settings or get_settings()
+        if not self.config.openai_api_key:
+            raise ModelError("OpenAI credentials are required. Set OPENAI_API_KEY.")
         self._websocket: Any = None
         self._input_items: list[dict[str, Any]] = []
         self._last_message_count = 0

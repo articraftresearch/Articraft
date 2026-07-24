@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,6 +13,10 @@ DEFAULT_COMPILE_TIMEOUT_SECONDS = 900.0
 DEFAULT_OPENAI_MODEL = "gpt-5.5-2026-04-23"
 DEFAULT_OPENAI_MAX_ATTEMPTS = 4
 DEFAULT_OPENAI_REQUEST_TIMEOUT_SECONDS = 900.0
+DEFAULT_PROVIDER = "openai"
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+DEFAULT_GEMINI_MAX_ATTEMPTS = 4
+DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS = 900.0
 
 
 class Settings(BaseSettings):
@@ -26,6 +31,10 @@ class Settings(BaseSettings):
         default=DEFAULT_OUTPUT_DIR,
         validation_alias="MINI_ARTICRAFT_OUTPUT_DIR",
     )
+    provider: Literal["openai", "gemini"] = Field(
+        default=DEFAULT_PROVIDER,
+        validation_alias="MINI_ARTICRAFT_PROVIDER",
+    )
     openai_model: str = Field(
         default=DEFAULT_OPENAI_MODEL,
         validation_alias="MINI_ARTICRAFT_MODEL",
@@ -34,7 +43,7 @@ class Settings(BaseSettings):
         default="high",
         validation_alias="MINI_ARTICRAFT_REASONING_EFFORT",
     )
-    openai_api_key: str = Field(validation_alias="OPENAI_API_KEY")
+    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     openai_max_attempts: int = Field(
         default=DEFAULT_OPENAI_MAX_ATTEMPTS,
         ge=1,
@@ -45,6 +54,24 @@ class Settings(BaseSettings):
         gt=0.0,
         validation_alias="MINI_ARTICRAFT_OPENAI_REQUEST_TIMEOUT_SECONDS",
     )
+    gemini_model: str = Field(
+        default=DEFAULT_GEMINI_MODEL,
+        validation_alias="MINI_ARTICRAFT_GEMINI_MODEL",
+    )
+    gemini_api_key: str | None = Field(
+        default=None,
+        validation_alias="GEMINI_API_KEY",
+    )
+    gemini_max_attempts: int = Field(
+        default=DEFAULT_GEMINI_MAX_ATTEMPTS,
+        ge=1,
+        validation_alias="MINI_ARTICRAFT_GEMINI_MAX_ATTEMPTS",
+    )
+    gemini_request_timeout_seconds: float = Field(
+        default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
+        gt=0.0,
+        validation_alias="MINI_ARTICRAFT_GEMINI_REQUEST_TIMEOUT_SECONDS",
+    )
     max_turns: int = Field(default=DEFAULT_MAX_TURNS, validation_alias="MINI_ARTICRAFT_MAX_TURNS")
     compile_timeout_seconds: float = Field(
         default=DEFAULT_COMPILE_TIMEOUT_SECONDS,
@@ -52,9 +79,19 @@ class Settings(BaseSettings):
         validation_alias="MINI_ARTICRAFT_COMPILE_TIMEOUT_SECONDS",
     )
 
+    @property
+    def selected_model(self) -> str:
+        if self.provider == "gemini":
+            return self.gemini_model
+        return self.openai_model
+
+    @property
+    def selected_reasoning_effort(self) -> str:
+        if self.provider == "openai":
+            return self.openai_reasoning_effort
+        return ""
+
 
 @cache
 def get_settings() -> Settings:
-    # openai_api_key has no default on purpose: it is populated from the
-    # environment (OPENAI_API_KEY / .env) when the settings load.
     return Settings()  # pyright: ignore[reportCallIssue]
