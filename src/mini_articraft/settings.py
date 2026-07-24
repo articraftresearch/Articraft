@@ -4,7 +4,7 @@ from functools import cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, computed_field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_OUTPUT_DIR = Path("runs")
@@ -79,14 +79,12 @@ class Settings(BaseSettings):
         validation_alias="MINI_ARTICRAFT_COMPILE_TIMEOUT_SECONDS",
     )
 
-    @computed_field
     @property
     def selected_model(self) -> str:
         if self.provider == "gemini":
             return self.gemini_model
         return self.openai_model
 
-    @computed_field
     @property
     def selected_reasoning_effort(self) -> str:
         if self.provider == "openai":

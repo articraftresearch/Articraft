@@ -4,7 +4,7 @@ import asyncio
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import typer
 from pydantic import ValidationError
@@ -16,9 +16,6 @@ from mini_articraft.models import create_model
 from mini_articraft.models.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
-from mini_articraft.models.gemini import (
-    gemini_api_key_value,
-)
 from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
 from mini_articraft.viewer import serve_viewer
 
@@ -29,9 +26,10 @@ COMMANDS = {"generate", "replay", "view"}
 @app.command()
 def generate(
     prompt: str,
-    provider: str | None = typer.Option(
+    provider: Literal["openai", "gemini"] | None = typer.Option(
         None,
         "--provider",
+        case_sensitive=False,
         help="Model provider to use: openai or gemini.",
     ),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use."),
@@ -140,7 +138,7 @@ def _default_output_dir() -> Path:
 
 
 def _settings(
-    provider: str | None,
+    provider: Literal["openai", "gemini"] | None,
     model: str | None,
     output_dir: Path | None,
     reasoning_effort: str | None,
@@ -149,7 +147,7 @@ def _settings(
     updates = {
         key: value
         for key, value in (
-            ("provider", provider.strip().lower() if provider is not None else None),
+            ("provider", provider),
             ("output_dir", output_dir),
             ("openai_reasoning_effort", reasoning_effort),
             ("compile_timeout_seconds", compile_timeout),
@@ -163,15 +161,14 @@ def _settings(
         raise typer.Exit(1) from None
     settings = settings.model_copy(update=updates)
 
-    if settings.provider not in {"openai", "gemini"}:
-        print_settings_error(detail=f"unsupported provider: {settings.provider}")
-        raise typer.Exit(1)
-
     if model is not None:
         model_key = "gemini_model" if settings.provider == "gemini" else "openai_model"
         settings = settings.model_copy(update={model_key: model})
 
-    if settings.provider == "gemini" and gemini_context_window_tokens_for(settings.gemini_model) is None:
+    if (
+        settings.provider == "gemini"
+        and gemini_context_window_tokens_for(settings.gemini_model) is None
+    ):
         print_settings_error(
             detail=(
                 "unsupported Gemini model: "
@@ -190,7 +187,7 @@ def _settings(
 
 def _missing_provider_settings(settings: Settings) -> list[str]:
     if settings.provider == "gemini":
-        return [] if gemini_api_key_value(settings) else ["GEMINI_API_KEY"]
+        return [] if (settings.gemini_api_key or "").strip() else ["GEMINI_API_KEY"]
     return [] if settings.openai_api_key else ["OPENAI_API_KEY"]
 
 
