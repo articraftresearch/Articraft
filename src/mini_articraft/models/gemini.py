@@ -1,25 +1,13 @@
 from __future__ import annotations
 
-import asyncio
-import base64
 import json
-import logging
-import random
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_GEMINI_MODEL, Settings, get_settings
 
-logger = logging.getLogger(__name__)
-
-_RETRY_BASE_SECONDS = 0.5
-_RETRY_MAX_SECONDS = 20.0
-_SUPPORTED_MODELS = {
-    "gemini-3.6-flash",
-    "gemini-3.1-pro-preview",
-}
+_LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
 
 
 @dataclass(frozen=True)
@@ -28,29 +16,18 @@ class _ModelSpec:
     input_price: float
     cached_input_price: float
     output_price: float
-    prompt_tier_threshold_tokens: int | None = None
-    input_price_above_threshold: float | None = None
-    cached_input_price_above_threshold: float | None = None
-    output_price_above_threshold: float | None = None
+    long_context_prices: tuple[float, float, float] | None = None
 
 
 # Prices are USD per million tokens for the Gemini Developer API Standard tier.
 _MODELS = {
-    "gemini-3.6-flash": _ModelSpec(
-        context_window_tokens=1_000_000,
-        input_price=1.50,
-        cached_input_price=0.15,
-        output_price=7.50,
-    ),
+    "gemini-3.6-flash": _ModelSpec(1_048_576, 1.50, 0.15, 7.50),
     "gemini-3.1-pro-preview": _ModelSpec(
-        context_window_tokens=1_000_000,
-        input_price=2.00,
-        cached_input_price=0.20,
-        output_price=12.00,
-        prompt_tier_threshold_tokens=200_000,
-        input_price_above_threshold=4.00,
-        cached_input_price_above_threshold=0.40,
-        output_price_above_threshold=18.00,
+        1_048_576,
+        2.00,
+        0.20,
+        12.00,
+        long_context_prices=(4.00, 0.40, 18.00),
     ),
 }
 
@@ -60,7 +37,8 @@ class GeminiModel:
         self.config = settings or get_settings()
         _raise_for_unsupported_model(self.config.gemini_model)
         self._client = client
-        self._tool_call_names: dict[str, str] = {}
+        self._history: list[Any] = []
+        self._last_message_count = 0
 
     @property
     def context_window_tokens(self) -> int:
@@ -73,16 +51,30 @@ class GeminiModel:
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Query Gemini and return the response shape used by the agent."""
-        contents = _contents(messages, self._tool_call_names)
-        config = _generate_config(_instructions(messages), tools)
-        response = await self._send_with_retries(contents, config)
-        text = _response_text(response)
-        tool_calls = _response_tool_calls(response)
-        for call in tool_calls:
-            self._tool_call_names[str(call["id"])] = str(call["name"])
-        if not text and not tool_calls:
-            raise ModelError("Gemini response did not contain text or tool calls")
+        new_steps = self._new_input_steps(messages)
+        input_steps = [*self._history, *new_steps]
+        try:
+            response = await self._client_or_create().aio.interactions.create(
+                model=self.config.gemini_model,
+                input=input_steps,
+                system_instruction=_instructions(messages) or None,
+                tools=_tools(tools or []) or None,
+                store=False,
+            )
+        except ModelError:
+            raise
+        except Exception as exc:
+            raise ModelError(f"Gemini request failed: {_format_exception(exc)}") from exc
 
+        response_steps = _response_steps(response)
+        text = _response_text(response_steps)
+        tool_calls = _response_tool_calls(response_steps)
+        _raise_for_bad_status(response, tool_calls)
+        if not text and not tool_calls and not _response_has_thoughts(response_steps):
+            raise ModelError("Gemini response did not contain text, thoughts, or tool calls")
+
+        self._history = [*input_steps, *response_steps]
+        self._last_message_count = len(messages)
         token_usage = _response_token_usage(response)
         return {
             "text": text,
@@ -93,58 +85,59 @@ class GeminiModel:
         }
 
     async def close(self) -> None:
-        return None
-
-    async def _send_with_retries(self, contents: list[Any], config: Any) -> Any:
-        for attempt in range(1, self.config.gemini_max_attempts + 1):
-            try:
-                return await self._send(contents, config)
-            except Exception as exc:
-                if attempt >= self.config.gemini_max_attempts or not _should_retry(exc):
-                    if isinstance(exc, ModelError):
-                        raise
-                    raise ModelError(f"Gemini request failed: {_format_exception(exc)}") from exc
-                delay = random.random() * min(
-                    _RETRY_MAX_SECONDS,
-                    _RETRY_BASE_SECONDS * (2 ** (attempt - 1)),
-                )
-                logger.warning(
-                    "Gemini request failed (attempt %s/%s), retrying in %.2fs: %s",
-                    attempt,
-                    self.config.gemini_max_attempts,
-                    delay,
-                    _format_exception(exc),
-                )
-                await asyncio.sleep(delay)
-        raise AssertionError("retry loop did not return or raise")
-
-    async def _send(self, contents: list[Any], config: Any) -> Any:
-        async def request() -> Any:
-            return await self._client_or_create().aio.models.generate_content(
-                model=self.config.gemini_model,
-                contents=contents,
-                config=config,
-            )
-
-        return await asyncio.wait_for(request(), timeout=self.config.gemini_request_timeout_seconds)
+        client = self._client
+        self._client = None
+        if client is not None:
+            close = getattr(getattr(client, "aio", None), "aclose", None)
+            if close is not None:
+                await close()
 
     def _client_or_create(self) -> Any:
-        if self._client is None:
-            api_key = gemini_api_key_value(self.config)
-            if not api_key:
-                raise ModelError("Gemini credentials are required. Set GEMINI_API_KEY.")
-            try:
-                from google import genai  # type: ignore
-            except Exception as exc:
-                raise ModelError(
-                    "Gemini provider selected but the `google-genai` package is not installed."
-                ) from exc
-            self._client = genai.Client(api_key=api_key)
+        if self._client is not None:
+            return self._client
+
+        api_key = (self.config.gemini_api_key or "").strip()
+        if not api_key:
+            raise ModelError("Gemini credentials are required. Set GEMINI_API_KEY.")
+
+        from google import genai  # type: ignore
+
+        self._client = genai.Client(
+            api_key=api_key,
+            http_options={
+                "timeout": max(1, round(self.config.gemini_request_timeout_seconds * 1_000)),
+                "retry_options": {"attempts": self.config.gemini_max_attempts},
+            },
+        )
         return self._client
 
+    def _new_input_steps(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        steps: list[dict[str, Any]] = []
+        for message in messages[self._last_message_count :]:
+            if message.get("type") == "function_call_output":
+                call_id = str(message.get("call_id") or "")
+                steps.append(
+                    {
+                        "type": "function_result",
+                        "name": self._tool_name(call_id),
+                        "call_id": call_id,
+                        "result": _function_result_content(message.get("output")),
+                    }
+                )
+            elif message.get("role") == "user":
+                steps.append(
+                    {
+                        "type": "user_input",
+                        "content": [{"type": "text", "text": _message_text(message)}],
+                    }
+                )
+        return steps
 
-def gemini_api_key_value(settings: Settings) -> str:
-    return (settings.gemini_api_key or "").strip()
+    def _tool_name(self, call_id: str) -> str:
+        for step in reversed(self._history):
+            if _value(step, "type") == "function_call" and _value(step, "id") == call_id:
+                return str(_value(step, "name") or "")
+        raise ModelError(f"Gemini tool result has unknown call id: {call_id}")
 
 
 def _instructions(messages: list[dict[str, Any]]) -> str:
@@ -155,115 +148,6 @@ def _instructions(messages: list[dict[str, Any]]) -> str:
     )
 
 
-def _contents(messages: list[dict[str, Any]], tool_call_names: dict[str, str]) -> list[Any]:
-    return [
-        content
-        for message in messages
-        if (content := _content(message, tool_call_names)) is not None
-    ]
-
-
-def _content(message: dict[str, Any], tool_call_names: dict[str, str]) -> Any | None:
-    if message.get("role") == "system":
-        return None
-    if message.get("type") == "function_call_output":
-        return _function_response_content(message, tool_call_names)
-    if message.get("role") == "assistant":
-        return _assistant_content(message, tool_call_names)
-    if message.get("role") == "user":
-        return _text_content("user", _message_text(message))
-    return None
-
-
-def _text_content(role: str, text: str) -> Any:
-    from google.genai import types  # type: ignore
-
-    return types.Content(role=role, parts=[types.Part(text=text)])
-
-
-def _assistant_content(message: dict[str, Any], tool_call_names: dict[str, str]) -> Any | None:
-    from google.genai import types  # type: ignore
-
-    parts: list[Any] = []
-    text = _message_text(message)
-    if text:
-        parts.append(types.Part(text=text))
-
-    for call in message.get("tool_calls") or []:
-        if not isinstance(call, dict):
-            continue
-        call_id = str(call.get("id") or "")
-        name = str(call.get("name") or "")
-        if call_id and name:
-            tool_call_names[call_id] = name
-        signature = _decode_signature(
-            call.get("thought_signature")
-            or call.get("extra_content", {}).get("google", {}).get("thought_signature")
-        )
-        parts.append(
-            types.Part(
-                function_call=types.FunctionCall(name=name, args=_arguments(call)),
-                thought_signature=signature,
-            )
-        )
-
-    if not parts:
-        return None
-    return types.Content(role="model", parts=parts)
-
-
-def _function_response_content(
-    message: dict[str, Any],
-    tool_call_names: dict[str, str],
-) -> Any:
-    from google.genai import types  # type: ignore
-
-    call_id = str(message.get("call_id") or "")
-    name = tool_call_names.get(call_id) or call_id
-    return types.Content(
-        role="user",
-        parts=[
-            types.Part(
-                function_response=types.FunctionResponse(
-                    name=name,
-                    response=_tool_response_body(message.get("output")),
-                )
-            )
-        ],
-    )
-
-
-def _tool_response_body(output: Any) -> Any:
-    if isinstance(output, list):
-        for item in output:
-            if isinstance(item, dict) and item.get("type") == "input_text":
-                return _json_body(item.get("text"))
-        return {"output": output}
-    return _json_body(output)
-
-
-def _json_body(value: Any) -> Any:
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return {"output": value}
-    return value if isinstance(value, dict) else {"output": value}
-
-
-def _arguments(call: dict[str, Any]) -> dict[str, Any]:
-    raw = call.get("arguments") or "{}"
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return {"_raw": raw}
-        return parsed if isinstance(parsed, dict) else {"_raw": raw}
-    return {"_raw": raw}
-
-
 def _message_text(message: dict[str, Any]) -> str:
     content = message.get("content", "")
     if not isinstance(content, str):
@@ -271,260 +155,192 @@ def _message_text(message: dict[str, Any]) -> str:
     return content
 
 
-def _generate_config(system_instruction: str, tools: list[dict[str, Any]] | None) -> Any:
-    from google.genai import types  # type: ignore
-
-    declarations = _function_declarations(tools or [])
-    return types.GenerateContentConfig(
-        system_instruction=system_instruction or None,
-        tools=[types.Tool(function_declarations=declarations)] if declarations else None,
-    )
-
-
-def _function_declarations(tools: list[dict[str, Any]]) -> list[Any]:
-    from google.genai import types  # type: ignore
-
-    declarations: list[Any] = []
-    for tool in tools:
-        if not isinstance(tool, dict) or tool.get("type") != "function":
-            continue
-        declarations.append(
-            types.FunctionDeclaration(
-                name=str(tool.get("name") or ""),
-                description=str(tool.get("description") or ""),
-                parameters=_strip_unsupported_schema_keys(tool.get("parameters")),
-            )
-        )
-    return declarations
+def _tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "function",
+            "name": str(tool.get("name") or ""),
+            "description": str(tool.get("description") or ""),
+            "parameters": _strip_unsupported_schema_keys(tool.get("parameters") or {}),
+        }
+        for tool in tools
+        if tool.get("type") == "function"
+    ]
 
 
-def _strip_unsupported_schema_keys(schema: Any) -> Any:
-    if isinstance(schema, dict):
+def _strip_unsupported_schema_keys(value: Any) -> Any:
+    if isinstance(value, dict):
         return {
-            key: _strip_unsupported_schema_keys(value)
-            for key, value in schema.items()
+            key: _strip_unsupported_schema_keys(child)
+            for key, child in value.items()
             if key not in {"additionalProperties", "strict"}
         }
-    if isinstance(schema, list):
-        return [_strip_unsupported_schema_keys(item) for item in schema]
-    return schema
+    if isinstance(value, list):
+        return [_strip_unsupported_schema_keys(child) for child in value]
+    return value
 
 
-def _response_text(response: Any) -> str:
-    return "".join(
-        str(part.text)
-        for part in _response_parts(response)
-        if getattr(part, "text", None) and not getattr(part, "thought", False)
-    )
+def _function_result_content(output: Any) -> list[dict[str, str]]:
+    if not isinstance(output, list):
+        return [{"type": "text", "text": _result_text(output)}]
 
-
-def _response_tool_calls(response: Any) -> list[dict[str, Any]]:
-    calls: list[dict[str, Any]] = []
-    for part in _response_parts(response):
-        function_call = getattr(part, "function_call", None)
-        if function_call is None:
+    content: list[dict[str, str]] = []
+    for item in output:
+        if not isinstance(item, dict):
             continue
-        args = getattr(function_call, "args", None)
-        if args is None:
-            args = getattr(function_call, "arguments", None)
-        call_id = str(getattr(function_call, "id", None) or f"call_{uuid.uuid4().hex}")
-        call: dict[str, Any] = {
-            "id": call_id,
-            "name": str(getattr(function_call, "name", "") or ""),
-            "arguments": json.dumps(args) if isinstance(args, (dict, list)) else str(args or "{}"),
-        }
-        signature = _encode_signature(
-            getattr(part, "thought_signature", None)
-            or getattr(function_call, "thought_signature", None)
+        if item.get("type") == "input_text":
+            content.append({"type": "text", "text": str(item.get("text") or "")})
+        elif item.get("type") == "input_image":
+            image = _image_content(str(item.get("image_url") or ""))
+            if image is not None:
+                content.append(image)
+    return content or [{"type": "text", "text": json.dumps(output)}]
+
+
+def _result_text(output: Any) -> str:
+    if isinstance(output, str):
+        return output
+    return json.dumps(output)
+
+
+def _image_content(image_url: str) -> dict[str, str] | None:
+    header, separator, data = image_url.partition(",")
+    if not separator or not header.startswith("data:") or not header.endswith(";base64"):
+        return None
+    return {
+        "type": "image",
+        "mime_type": header.removeprefix("data:").removesuffix(";base64"),
+        "data": data,
+    }
+
+
+def _response_steps(response: Any) -> list[Any]:
+    steps = getattr(response, "steps", None)
+    if not steps:
+        return []
+    return [
+        step.model_dump(mode="json", by_alias=True, exclude_none=True)
+        if hasattr(step, "model_dump")
+        else step
+        for step in steps
+    ]
+
+
+def _response_text(steps: list[Any]) -> str:
+    parts: list[str] = []
+    for step in steps:
+        if _value(step, "type") != "model_output":
+            continue
+        for content in _value(step, "content") or []:
+            text = _value(content, "text")
+            if _value(content, "type") == "text" and isinstance(text, str):
+                parts.append(text)
+    return "".join(parts)
+
+
+def _response_tool_calls(steps: list[Any]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for step in steps:
+        if _value(step, "type") != "function_call":
+            continue
+        call_id = str(_value(step, "id") or "")
+        name = str(_value(step, "name") or "")
+        if not call_id or not name:
+            raise ModelError("Gemini returned a function call without an id or name")
+        arguments = _value(step, "arguments")
+        calls.append(
+            {
+                "id": call_id,
+                "name": name,
+                "arguments": json.dumps(arguments if isinstance(arguments, dict) else {}),
+            }
         )
-        if signature:
-            call["thought_signature"] = signature
-            call["extra_content"] = {"google": {"thought_signature": signature}}
-        calls.append(call)
     return calls
 
 
-def _response_parts(response: Any) -> list[Any]:
-    candidates = getattr(response, "candidates", None) or []
-    if not candidates:
-        return []
-    content = getattr(candidates[0], "content", None)
-    raw_parts = getattr(content, "parts", None) or []
-    if isinstance(raw_parts, list):
-        return raw_parts
-    try:
-        return list(raw_parts)
-    except TypeError:
-        return [raw_parts]
+def _response_has_thoughts(steps: list[Any]) -> bool:
+    return any(_value(step, "type") == "thought" for step in steps)
 
 
 def _response_token_usage(response: Any) -> dict[str, int]:
-    meta = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
-    if meta is None:
+    usage = getattr(response, "usage", None)
+    if usage is None:
         return {}
 
-    prompt_tokens = _usage_int(meta, "prompt_token_count")
-    candidates_tokens = _usage_int(meta, "candidates_token_count")
-    total_tokens = _usage_int(meta, "total_token_count") or prompt_tokens + candidates_tokens
-    cached_tokens = _usage_int(meta, "cached_content_token_count")
+    input_tokens = _usage_int(usage, "total_input_tokens")
+    cached_tokens = _usage_int(usage, "total_cached_tokens")
+    output_tokens = _usage_int(usage, "total_output_tokens")
+    thought_tokens = _usage_int(usage, "total_thought_tokens")
+    total_tokens = (
+        _usage_int(usage, "total_tokens") or input_tokens + output_tokens + thought_tokens
+    )
     return {
-        "prompt_tokens": prompt_tokens,
-        "cached_tokens": cached_tokens,
-        "candidates_tokens": candidates_tokens,
-        "input_tokens": prompt_tokens,
+        "input_tokens": input_tokens,
         "cached_input_tokens": cached_tokens,
-        "output_tokens": candidates_tokens,
+        "output_tokens": output_tokens,
+        "thought_tokens": thought_tokens,
         "total_tokens": total_tokens,
     }
 
 
-def _usage_int(meta: Any, name: str) -> int:
-    value = meta.get(name) if isinstance(meta, dict) else getattr(meta, name, None)
+def _usage_int(usage: Any, name: str) -> int:
+    value = _value(usage, name)
     try:
         return int(value)
     except (TypeError, ValueError):
         return 0
 
 
+def _value(value: Any, name: str) -> Any:
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
 def _response_cost(model: str, usage: dict[str, int]) -> float:
-    spec = _model_spec(model)
+    spec = _MODELS.get(model)
     if spec is None or not usage:
         return 0.0
 
-    input_price = spec.input_price
-    cached_input_price = spec.cached_input_price
-    output_price = spec.output_price
-    prompt_tokens = usage.get("prompt_tokens", 0)
-    if (
-        spec.prompt_tier_threshold_tokens is not None
-        and prompt_tokens > spec.prompt_tier_threshold_tokens
-    ):
-        input_price = spec.input_price_above_threshold or input_price
-        cached_input_price = spec.cached_input_price_above_threshold or cached_input_price
-        output_price = spec.output_price_above_threshold or output_price
+    prices = (spec.input_price, spec.cached_input_price, spec.output_price)
+    input_tokens = usage.get("input_tokens", 0)
+    if input_tokens > _LONG_CONTEXT_THRESHOLD_TOKENS and spec.long_context_prices is not None:
+        prices = spec.long_context_prices
 
-    cached_tokens = usage.get("cached_tokens", 0)
-    uncached_tokens = max(0, prompt_tokens - cached_tokens)
+    input_price, cached_input_price, output_price = prices
+    cached_tokens = usage.get("cached_input_tokens", 0)
+    uncached_tokens = max(0, input_tokens - cached_tokens)
+    billed_output_tokens = usage.get("output_tokens", 0) + usage.get("thought_tokens", 0)
     return round(
         (
             uncached_tokens * input_price
             + cached_tokens * cached_input_price
-            + usage.get("candidates_tokens", 0) * output_price
+            + billed_output_tokens * output_price
         )
         / 1_000_000,
         8,
     )
 
 
-def _model_spec(model: str) -> _ModelSpec | None:
-    return _MODELS.get(model)
-
-
 def context_window_tokens_for(model: str) -> int | None:
-    spec = _model_spec(model)
+    spec = _MODELS.get(model)
     return spec.context_window_tokens if spec is not None else None
 
 
 def _raise_for_unsupported_model(model: str) -> None:
-    if model not in _SUPPORTED_MODELS:
-        supported = ", ".join(sorted(_SUPPORTED_MODELS))
+    if model not in _MODELS:
+        supported = ", ".join(sorted(_MODELS))
         raise ModelError(f"Unsupported Gemini model: {model}. Supported models: {supported}")
 
 
-def _http_status(exc: BaseException) -> int | None:
-    for attr in ("status_code", "http_status", "status", "code"):
-        value = getattr(exc, attr, None)
-        try:
-            if callable(value):
-                value = value()
-        except Exception:
-            value = None
-        if isinstance(value, int) and 100 <= value <= 599:
-            return value
-
-    response = getattr(exc, "response", None)
-    status = getattr(response, "status_code", None) or getattr(response, "status", None)
-    return status if isinstance(status, int) and 100 <= status <= 599 else None
-
-
-def _should_retry(exc: BaseException) -> bool:
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
-        return True
-
-    status = _http_status(exc)
-    if status is not None:
-        if status in {408, 409, 425, 429} or status >= 500:
-            return True
-        if 400 <= status < 500:
-            return False
-
-    message = str(exc).lower()
-    if any(
-        token in message
-        for token in (
-            "overloaded",
-            "temporarily unavailable",
-            "service unavailable",
-            "timeout",
-            "timed out",
-            "deadline exceeded",
-            "rate limit",
-            "too many requests",
-            "resource exhausted",
-            "connection reset",
-            "connection aborted",
-            "connection refused",
-            "internal error",
-            "backend error",
-        )
-    ):
-        return True
-    if any(
-        token in message
-        for token in (
-            "api key",
-            "unauthorized",
-            "permission denied",
-            "forbidden",
-            "invalid argument",
-            "not found",
-        )
-    ):
-        return False
-    return False
+def _raise_for_bad_status(response: Any, tool_calls: list[dict[str, Any]]) -> None:
+    status = _value(response, "status")
+    if status in {None, "completed"} or (status == "requires_action" and tool_calls):
+        return
+    raise ModelError(f"Gemini interaction ended with status {status}")
 
 
 def _format_exception(exc: BaseException) -> str:
-    status = _http_status(exc)
     message = str(exc).strip()
-    summary = type(exc).__name__
-    if status is not None:
-        summary += f" (HTTP {status})"
-    return f"{summary}: {message or repr(exc)}"
+    return f"{type(exc).__name__}: {message or repr(exc)}"
 
 
-def _encode_signature(signature: bytes | str | None) -> str | None:
-    if signature is None:
-        return None
-    if isinstance(signature, bytes):
-        return base64.b64encode(signature).decode("utf-8")
-    return signature
-
-
-def _decode_signature(signature: bytes | str | None) -> bytes | None:
-    if signature is None:
-        return None
-    if isinstance(signature, bytes):
-        return signature
-    try:
-        return base64.b64decode(signature)
-    except Exception:
-        return signature.encode("utf-8")
-
-
-__all__ = [
-    "DEFAULT_GEMINI_MODEL",
-    "GeminiModel",
-    "context_window_tokens_for",
-    "gemini_api_key_value",
-]
+__all__ = ["DEFAULT_GEMINI_MODEL", "GeminiModel", "context_window_tokens_for"]
