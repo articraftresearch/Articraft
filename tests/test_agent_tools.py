@@ -13,6 +13,7 @@ import time
 import pytest
 from PIL import Image
 
+from mini_articraft.agent.images import LIMITS, prepare_image
 from mini_articraft.agent.tools import ToolContext, get, schemas
 from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.tools._exec import ExecSessions
@@ -150,7 +151,7 @@ def test_read_rejects_images_and_view_image_returns_typed_content(tmp_path) -> N
     assert result.output["mime_type"] == "image/png"
     assert result.output["width"] == 1
     assert result.output["height"] == 1
-    assert result.output["detail"] == "high"
+    assert result.output["detail"] == "original"
     image_url = result.content_items[0]["image_url"]
     assert image_url.startswith("data:image/png;base64,")
     assert base64.b64decode(image_url.split(",", 1)[1]) == image_bytes
@@ -183,7 +184,54 @@ def test_view_image_never_enlarges_or_exceeds_the_patch_limit(tmp_path) -> None:
     output_size = (result.output["width"], result.output["height"])
     assert output_size[0] <= source_size[0]
     assert output_size[1] <= source_size[1]
-    assert math.ceil(output_size[0] / 32) * math.ceil(output_size[1] / 32) <= 2_500
+    assert (
+        math.ceil(output_size[0] / 32) * math.ceil(output_size[1] / 32)
+        <= LIMITS["original"].max_patches
+    )
+    high = run(
+        get("view_image").run(
+            ctx,
+            {"path": "near-limit.png", "detail": "high"},
+        )
+    )
+    assert (
+        math.ceil(high.output["width"] / 32) * math.ceil(high.output["height"] / 32)
+        <= LIMITS["high"].max_patches
+    )
+
+
+def test_prepare_image_rotates_converts_and_bounds_images(tmp_path) -> None:
+    jpeg_path = tmp_path / "rotated.jpg"
+    exif = Image.Exif()
+    exif[274] = 6
+    Image.new("RGB", (40, 20), color="white").save(jpeg_path, exif=exif)
+    rotated = prepare_image(jpeg_path)
+    assert (rotated.width, rotated.height) == (20, 40)
+
+    gif_path = tmp_path / "still.gif"
+    Image.new("RGB", (20, 10), color="white").save(gif_path)
+    converted = prepare_image(gif_path)
+    assert converted.mime_type == "image/png"
+
+    large_path = tmp_path / "large.png"
+    Image.new("RGB", (6_100, 100), color="white").save(large_path)
+    bounded = prepare_image(large_path)
+    assert bounded.width == 6_000
+    assert bounded.height < 100
+
+
+def test_prepare_image_rejects_animated_and_oversized_files(monkeypatch, tmp_path) -> None:
+    animated_path = tmp_path / "animated.gif"
+    frames = [Image.new("RGB", (2, 2), color=color) for color in ("white", "black")]
+    frames[0].save(animated_path, save_all=True, append_images=frames[1:])
+    with pytest.raises(ValueError, match="animated GIF"):
+        prepare_image(animated_path)
+
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (1, 1), color="white").save(image_path)
+    monkeypatch.setattr("mini_articraft.agent.images.MAX_IMAGE_BYTES", 1)
+    with pytest.raises(ValueError, match="image exceeds"):
+        prepare_image(image_path)
 
 
 def test_edit_replaces_unique_text(tmp_path) -> None:
