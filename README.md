@@ -38,16 +38,11 @@ Generate an object:
 uv run mini-articraft "a jet engine"
 ```
 
-OpenAI is the default provider. To use Gemini, add a Gemini API key:
+OpenAI is the default provider. To use Gemini, pass a Gemini API key and select the provider:
 
 ```shell
-GEMINI_API_KEY=your_key_here
-```
-
-Then select Gemini from the CLI:
-
-```shell
-uv run mini-articraft --provider gemini --model gemini-3.6-flash "make a folding chair"
+GEMINI_API_KEY=your_key_here uv run mini-articraft \
+  --provider gemini --model gemini-3.6-flash "make a folding chair"
 ```
 
 Each run is in the `runs/` directory. Open a completed run in the browser viewer:
