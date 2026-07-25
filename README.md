@@ -51,6 +51,13 @@ GEMINI_API_KEY=your_key_here uv run mini-articraft \
   --provider gemini --model gemini-3.6-flash "make a folding chair"
 ```
 
+To use Anthropic, pass an Anthropic API key and select the provider:
+
+```shell
+ANTHROPIC_API_KEY=your_key_here uv run mini-articraft \
+  --provider anthropic --model claude-sonnet-5 "make a folding chair"
+```
+
 Each run is in the `runs/` directory. Open a completed run in the browser viewer:
 
 ```shell
