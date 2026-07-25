@@ -164,9 +164,7 @@ def test_anthropic_model_converts_tool_calls_and_tool_results() -> None:
     messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
 
     first = run(model.query(messages, tools=[]))
-    assert first["tool_calls"] == [
-        {"id": "call_compile", "name": "compile", "arguments": "{}"}
-    ]
+    assert first["tool_calls"] == [{"id": "call_compile", "name": "compile", "arguments": "{}"}]
 
     messages.extend(
         [

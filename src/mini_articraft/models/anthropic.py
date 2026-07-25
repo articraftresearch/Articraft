@@ -133,7 +133,9 @@ class AnthropicModel:
                 await asyncio.sleep(delay)
         raise AssertionError("retry loop did not return or raise")
 
-    async def _send(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> Any:
+    async def _send(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> Any:
         request: dict[str, Any] = {
             "model": self.config.anthropic_model,
             "max_tokens": self.config.anthropic_max_output_tokens,
@@ -400,10 +402,7 @@ def _response_token_usage(response: Any) -> dict[str, int]:
         "cached_tokens": cache_read_input_tokens,
         "cached_input_tokens": cache_read_input_tokens,
         "total_tokens": (
-            input_tokens
-            + output_tokens
-            + cache_creation_input_tokens
-            + cache_read_input_tokens
+            input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens
         ),
     }
 
