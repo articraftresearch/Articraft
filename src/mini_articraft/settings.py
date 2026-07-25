@@ -14,6 +14,10 @@ DEFAULT_OPENAI_MODEL = "gpt-5.5-2026-04-23"
 DEFAULT_OPENAI_MAX_ATTEMPTS = 4
 DEFAULT_OPENAI_REQUEST_TIMEOUT_SECONDS = 900.0
 DEFAULT_PROVIDER = "openai"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
+DEFAULT_ANTHROPIC_MAX_ATTEMPTS = 4
+DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_SECONDS = 900.0
+DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS = 128_000
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 DEFAULT_GEMINI_MAX_ATTEMPTS = 4
 DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS = 900.0
@@ -31,7 +35,7 @@ class Settings(BaseSettings):
         default=DEFAULT_OUTPUT_DIR,
         validation_alias="MINI_ARTICRAFT_OUTPUT_DIR",
     )
-    provider: Literal["openai", "gemini"] = Field(
+    provider: Literal["openai", "gemini", "anthropic"] = Field(
         default=DEFAULT_PROVIDER,
         validation_alias="MINI_ARTICRAFT_PROVIDER",
     )
@@ -53,6 +57,29 @@ class Settings(BaseSettings):
         default=DEFAULT_OPENAI_REQUEST_TIMEOUT_SECONDS,
         gt=0.0,
         validation_alias="MINI_ARTICRAFT_OPENAI_REQUEST_TIMEOUT_SECONDS",
+    )
+    anthropic_model: str = Field(
+        default=DEFAULT_ANTHROPIC_MODEL,
+        validation_alias="MINI_ARTICRAFT_ANTHROPIC_MODEL",
+    )
+    anthropic_api_key: str | None = Field(
+        default=None,
+        validation_alias="ANTHROPIC_API_KEY",
+    )
+    anthropic_max_attempts: int = Field(
+        default=DEFAULT_ANTHROPIC_MAX_ATTEMPTS,
+        ge=1,
+        validation_alias="MINI_ARTICRAFT_ANTHROPIC_MAX_ATTEMPTS",
+    )
+    anthropic_request_timeout_seconds: float = Field(
+        default=DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_SECONDS,
+        gt=0.0,
+        validation_alias="MINI_ARTICRAFT_ANTHROPIC_REQUEST_TIMEOUT_SECONDS",
+    )
+    anthropic_max_output_tokens: int = Field(
+        default=DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS,
+        ge=1,
+        validation_alias="MINI_ARTICRAFT_ANTHROPIC_MAX_OUTPUT_TOKENS",
     )
     gemini_model: str = Field(
         default=DEFAULT_GEMINI_MODEL,
@@ -81,6 +108,8 @@ class Settings(BaseSettings):
 
     @property
     def selected_model(self) -> str:
+        if self.provider == "anthropic":
+            return self.anthropic_model
         if self.provider == "gemini":
             return self.gemini_model
         return self.openai_model
