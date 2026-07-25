@@ -497,7 +497,6 @@ def test_anthropic_model_configures_sdk_retries_and_timeout(monkeypatch) -> None
             provider="anthropic",
             anthropic_api_key="anthropic-test",
             anthropic_max_attempts=4,
-            anthropic_request_timeout_seconds=123.0,
         )
     )
 
@@ -505,7 +504,7 @@ def test_anthropic_model_configures_sdk_retries_and_timeout(monkeypatch) -> None
     assert captured == {
         "api_key": "anthropic-test",
         "max_retries": 3,
-        "timeout": 123.0,
+        "timeout": 3600.0,
     }
 
 
