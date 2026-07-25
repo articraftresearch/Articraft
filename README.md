@@ -55,8 +55,13 @@ To use Anthropic, pass an Anthropic API key and select the provider:
 
 ```shell
 ANTHROPIC_API_KEY=your_key_here uv run mini-articraft \
-  --provider anthropic --model claude-sonnet-5 "make a folding chair"
+  --provider anthropic --model claude-sonnet-5 \
+  --image reference.png "reconstruct this folding chair"
 ```
+
+The Anthropic provider supports `claude-sonnet-5` and `claude-opus-5`.
+Anthropic thinking, redacted thinking, text, and tool blocks are kept in each run's
+`conversation.jsonl` file.
 
 Each run is in the `runs/` directory. Open a completed run in the browser viewer:
 

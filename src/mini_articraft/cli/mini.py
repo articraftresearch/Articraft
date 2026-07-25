@@ -13,6 +13,7 @@ from mini_articraft.agent import Agent, events
 from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
 from mini_articraft.environments import LocalEnvironment
 from mini_articraft.models import create_model
+from mini_articraft.models.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
 from mini_articraft.models.anthropic import anthropic_api_key_value
 from mini_articraft.models.anthropic import (
     context_window_tokens_for as anthropic_context_window_tokens_for,
@@ -202,8 +203,7 @@ def _settings(
         print_settings_error(
             detail=(
                 "unsupported Anthropic model: "
-                f"{settings.anthropic_model}. Supported models: claude-opus-4-8, "
-                "claude-sonnet-5"
+                f"{settings.anthropic_model}. Supported models: {', '.join(ANTHROPIC_MODELS)}"
             )
         )
         raise typer.Exit(1)

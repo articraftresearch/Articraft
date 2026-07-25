@@ -46,6 +46,13 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
                     "output_tokens": 20,
                     "total_tokens": 120,
                 },
+                "provider_content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "",
+                        "signature": "signed-thinking",
+                    }
+                ],
                 "tool_calls": [
                     tool_call(
                         "write",
@@ -99,6 +106,18 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
     assert record.result == "result/usdz/0000.usdz"
     assert record.cost == 1.0
     assert record.token_usage["total_tokens"] == 690
+    first_assistant = next(
+        event
+        for event in read_conversation(tmp_path / "box" / "conversation.jsonl")
+        if event.get("role") == "assistant"
+    )
+    assert first_assistant["provider_content"] == [
+        {
+            "type": "thinking",
+            "thinking": "",
+            "signature": "signed-thinking",
+        }
+    ]
     first_query = model.queries[0]
     assert "<sdk_docs>" not in first_query.messages[0]["content"]
     assert [message["role"] for message in first_query.messages[:3]] == ["system", "user", "user"]

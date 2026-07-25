@@ -20,7 +20,7 @@ classifiers = [
 ]
 keywords = ["build123d", "agent", "cad", "articulation", "usd"]
 dependencies = [
-    "anthropic",
+    "anthropic>=0.119.0",
     "build123d>=0.11.0",
     "google-genai>=2.14.0",
     "libigl>=2.6.2,<2.7",

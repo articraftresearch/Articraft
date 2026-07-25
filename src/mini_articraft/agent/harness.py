@@ -149,6 +149,9 @@ class Agent:
                     "tool_calls": tool_calls,
                     "token_usage": response_usage,
                 }
+                provider_content = response.get("provider_content")
+                if isinstance(provider_content, list):
+                    assistant["provider_content"] = provider_content
                 self.messages.append(assistant)
                 append_conversation(conversation_path, assistant)
                 self._emit(events.AssistantMessage(turn, text, tool_calls, response_usage))

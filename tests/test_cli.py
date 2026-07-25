@@ -222,7 +222,7 @@ def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
             "--provider",
             "anthropic",
             "--model",
-            "claude-opus-4-8",
+            "claude-opus-5",
             "--output-dir",
             str(output_dir),
         ],
@@ -231,9 +231,9 @@ def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
     assert result.exit_code == 0
     settings = FakeOpenAIModel.instances[0].settings
     assert settings.provider == "anthropic"
-    assert settings.anthropic_model == "claude-opus-4-8"
+    assert settings.anthropic_model == "claude-opus-5"
     assert settings.output_dir == output_dir
-    assert settings.selected_model == "claude-opus-4-8"
+    assert settings.selected_model == "claude-opus-5"
 
 
 def test_cli_warns_on_missing_required_settings(monkeypatch, tmp_path: Path) -> None:
