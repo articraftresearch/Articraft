@@ -13,6 +13,11 @@ from mini_articraft.agent import Agent, events
 from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
 from mini_articraft.environments import LocalEnvironment
 from mini_articraft.models import create_model
+from mini_articraft.models.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
+from mini_articraft.models.anthropic import anthropic_api_key_value
+from mini_articraft.models.anthropic import (
+    context_window_tokens_for as anthropic_context_window_tokens_for,
+)
 from mini_articraft.models.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
@@ -36,11 +41,11 @@ def generate(
         resolve_path=True,
         help="Local reference image for reconstruction.",
     ),
-    provider: Literal["openai", "gemini"] | None = typer.Option(
+    provider: Literal["openai", "gemini", "anthropic"] | None = typer.Option(
         None,
         "--provider",
         case_sensitive=False,
-        help="Model provider to use: openai or gemini.",
+        help="Model provider to use: openai, gemini, or anthropic.",
     ),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use."),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
@@ -160,7 +165,7 @@ def _default_output_dir() -> Path:
 
 
 def _settings(
-    provider: Literal["openai", "gemini"] | None,
+    provider: Literal["openai", "gemini", "anthropic"] | None,
     model: str | None,
     output_dir: Path | None,
     reasoning_effort: str | None,
@@ -184,8 +189,24 @@ def _settings(
     settings = settings.model_copy(update=updates)
 
     if model is not None:
-        model_key = "gemini_model" if settings.provider == "gemini" else "openai_model"
+        model_key = {
+            "anthropic": "anthropic_model",
+            "gemini": "gemini_model",
+            "openai": "openai_model",
+        }[settings.provider]
         settings = settings.model_copy(update={model_key: model})
+
+    if (
+        settings.provider == "anthropic"
+        and anthropic_context_window_tokens_for(settings.anthropic_model) is None
+    ):
+        print_settings_error(
+            detail=(
+                "unsupported Anthropic model: "
+                f"{settings.anthropic_model}. Supported models: {', '.join(ANTHROPIC_MODELS)}"
+            )
+        )
+        raise typer.Exit(1)
 
     if (
         settings.provider == "gemini"
@@ -208,6 +229,8 @@ def _settings(
 
 
 def _missing_provider_settings(settings: Settings) -> list[str]:
+    if settings.provider == "anthropic":
+        return [] if anthropic_api_key_value(settings) else ["ANTHROPIC_API_KEY"]
     if settings.provider == "gemini":
         return [] if (settings.gemini_api_key or "").strip() else ["GEMINI_API_KEY"]
     return [] if settings.openai_api_key else ["OPENAI_API_KEY"]
