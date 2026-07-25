@@ -202,6 +202,40 @@ def test_cli_selects_gemini_provider(monkeypatch, tmp_path: Path) -> None:
     assert settings.selected_model == "gemini-3.1-pro-preview"
 
 
+def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
+    reset_fakes()
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
+    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        mini,
+        "get_settings",
+        lambda: Settings(anthropic_api_key="anthropic-test", max_turns=123),
+    )
+
+    output_dir = tmp_path / "runs"
+    result = CliRunner().invoke(
+        mini.app,
+        [
+            "generate",
+            "make a hinge",
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-opus-4-8",
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    settings = FakeOpenAIModel.instances[0].settings
+    assert settings.provider == "anthropic"
+    assert settings.anthropic_model == "claude-opus-4-8"
+    assert settings.output_dir == output_dir
+    assert settings.selected_model == "claude-opus-4-8"
+
+
 def test_cli_warns_on_missing_required_settings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
@@ -233,6 +267,51 @@ def test_cli_warns_on_missing_gemini_key(monkeypatch, tmp_path: Path) -> None:
     assert "Missing required environment variable" in result.output
     assert "GEMINI_API_KEY" in result.output
     assert "Traceback" not in result.output
+
+
+def test_cli_warns_on_missing_anthropic_key(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a hinge", "--provider", "anthropic", "--no-tui"],
+    )
+
+    assert result.exit_code == 1
+    assert "Missing required environment variable" in result.output
+    assert "ANTHROPIC_API_KEY" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_cli_rejects_unsupported_anthropic_model_without_model_call(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    reset_fakes()
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test")
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+
+    result = CliRunner().invoke(
+        mini.app,
+        [
+            "generate",
+            "make a hinge",
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-haiku-4-5",
+            "--no-tui",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "unsupported Anthropic model" in result.output
+    assert FakeOpenAIModel.instances == []
 
 
 def test_cli_exits_nonzero_when_agent_fails(monkeypatch) -> None:
