@@ -8,62 +8,36 @@ from typing import Any
 from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_ANTHROPIC_MODEL, Settings, get_settings
 
-_MAX_BASE64_IMAGE_BYTES = 10 * 1024 * 1024
+_CONTEXT_WINDOW_TOKENS = 1_000_000
+_MAX_OUTPUT_TOKENS = 128_000
+_MAX_IMAGE_DATA_LENGTH = 10 * 1024 * 1024
+_CACHE_WRITE_5M_MULTIPLIER = 1.25
+_CACHE_WRITE_1H_MULTIPLIER = 2.0
+_CACHE_READ_MULTIPLIER = 0.1
 _SONNET_5_STANDARD_PRICING_START = date(2026, 9, 1)
-SUPPORTED_MODELS = (
-    "claude-opus-5",
-    "claude-sonnet-5",
-)
 
 
 @dataclass(frozen=True)
-class _ModelSpec:
-    context_window_tokens: int
-    max_output_tokens: int
+class _Prices:
     input_price: float
-    cache_write_5m_price: float
-    cache_write_1h_price: float
-    cache_read_price: float
     output_price: float
 
 
-_OPUS_5_SPEC = _ModelSpec(
-    context_window_tokens=1_000_000,
-    max_output_tokens=128_000,
-    input_price=5.00,
-    cache_write_5m_price=6.25,
-    cache_write_1h_price=10.00,
-    cache_read_price=0.50,
-    output_price=25.00,
-)
-_SONNET_5_INTRO_SPEC = _ModelSpec(
-    context_window_tokens=1_000_000,
-    max_output_tokens=128_000,
-    input_price=2.00,
-    cache_write_5m_price=2.50,
-    cache_write_1h_price=4.00,
-    cache_read_price=0.20,
-    output_price=10.00,
-)
-_SONNET_5_STANDARD_SPEC = _ModelSpec(
-    context_window_tokens=1_000_000,
-    max_output_tokens=128_000,
+_MODEL_PRICES = {
+    "claude-opus-5": _Prices(input_price=5.00, output_price=25.00),
+    "claude-sonnet-5": _Prices(input_price=2.00, output_price=10.00),
+}
+_SONNET_5_STANDARD_PRICES = _Prices(
     input_price=3.00,
-    cache_write_5m_price=3.75,
-    cache_write_1h_price=6.00,
-    cache_read_price=0.30,
     output_price=15.00,
 )
+SUPPORTED_MODELS = tuple(_MODEL_PRICES)
 
 
 class AnthropicModel:
     def __init__(self, settings: Settings | None = None, *, client: Any | None = None):
         self.config = settings or get_settings()
         _raise_for_unsupported_model(self.config.anthropic_model)
-        _raise_for_invalid_max_output_tokens(
-            self.config.anthropic_model,
-            self.config.anthropic_max_output_tokens,
-        )
         self._client = client
         self._history: list[dict[str, Any]] = []
         self._last_message_count = 0
@@ -87,9 +61,9 @@ class AnthropicModel:
         except Exception as exc:
             raise ModelError(f"Anthropic request failed: {_format_exception(exc)}") from exc
 
-        text = _response_text(response)
-        tool_calls = _response_tool_calls(response)
-        response_content = _response_blocks(response)
+        response_content = list(_value(response, "content", []) or [])
+        text = _response_text(response_content)
+        tool_calls = _response_tool_calls(response_content)
         if not text and not tool_calls and not _has_thinking(response_content):
             raise ModelError("Anthropic response did not contain text, thinking, or tool calls")
 
@@ -111,13 +85,8 @@ class AnthropicModel:
     async def close(self) -> None:
         client = self._client
         self._client = None
-        if client is None:
-            return
-        close = getattr(client, "aclose", None) or getattr(client, "close", None)
-        if close is not None:
-            result = close()
-            if hasattr(result, "__await__"):
-                await result
+        if client is not None:
+            await client.close()
 
     async def _send(
         self,
@@ -127,9 +96,9 @@ class AnthropicModel:
     ) -> Any:
         request: dict[str, Any] = {
             "model": self.config.anthropic_model,
-            "max_tokens": self.config.anthropic_max_output_tokens,
+            "max_tokens": _MAX_OUTPUT_TOKENS,
             "messages": request_messages,
-            "cache_control": {"type": "ephemeral"},
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
         system = _system(source_messages)
         if system:
@@ -144,26 +113,15 @@ class AnthropicModel:
         self,
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if not self._history:
-            return _messages(messages)
-
-        new_messages = _messages(
-            messages[self._last_message_count :],
-            include_assistant=False,
-        )
-        return [*self._history, *new_messages]
+        return [*self._history, *_messages(messages[self._last_message_count :])]
 
     def _client_or_create(self) -> Any:
         if self._client is None:
             api_key = anthropic_api_key_value(self.config)
             if not api_key:
                 raise ModelError("Anthropic credentials are required. Set ANTHROPIC_API_KEY.")
-            try:
-                from anthropic import AsyncAnthropic  # type: ignore
-            except Exception as exc:
-                raise ModelError(
-                    "Anthropic provider selected but the `anthropic` package is not installed."
-                ) from exc
+            from anthropic import AsyncAnthropic
+
             self._client = AsyncAnthropic(
                 api_key=api_key,
                 max_retries=self.config.anthropic_max_attempts - 1,
@@ -184,66 +142,17 @@ def _system(messages: list[dict[str, Any]]) -> str:
     )
 
 
-def _messages(
-    messages: list[dict[str, Any]],
-    *,
-    include_assistant: bool = True,
-) -> list[dict[str, Any]]:
-    converted: list[dict[str, Any]] = []
-    pending_tool_results: list[dict[str, Any]] = []
-    for raw in messages:
-        if raw.get("type") == "function_call_output":
-            pending_tool_results.append(_tool_result_block(raw))
-            continue
-
-        if pending_tool_results:
-            converted.append({"role": "user", "content": pending_tool_results})
-            pending_tool_results = []
-
-        message = _message(raw, include_assistant=include_assistant)
-        if message is not None:
-            converted.append(message)
-
-    if pending_tool_results:
-        converted.append({"role": "user", "content": pending_tool_results})
-    return converted
-
-
-def _message(
-    message: dict[str, Any],
-    *,
-    include_assistant: bool,
-) -> dict[str, Any] | None:
-    if message.get("role") == "system":
-        return None
-    if message.get("role") == "assistant":
-        return _assistant_message(message) if include_assistant else None
-    if message.get("role") == "user":
-        return {"role": "user", "content": _user_content(message)}
-    return None
-
-
-def _assistant_message(message: dict[str, Any]) -> dict[str, Any] | None:
-    content: list[dict[str, Any]] = []
-    text = _message_text(message)
-    if text:
-        content.append({"type": "text", "text": text})
-
-    for call in message.get("tool_calls") or []:
-        if not isinstance(call, dict):
-            continue
-        content.append(
-            {
-                "type": "tool_use",
-                "id": str(call.get("id") or ""),
-                "name": str(call.get("name") or ""),
-                "input": _arguments(call),
-            }
-        )
-
-    if not content:
-        return None
-    return {"role": "assistant", "content": content}
+def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    user_messages: list[dict[str, Any]] = []
+    tool_results: list[dict[str, Any]] = []
+    for message in messages:
+        if message.get("type") == "function_call_output":
+            tool_results.append(_tool_result_block(message))
+        elif message.get("role") == "user":
+            user_messages.append({"role": "user", "content": _user_content(message)})
+    if tool_results:
+        user_messages.append({"role": "user", "content": tool_results})
+    return user_messages
 
 
 def _tool_result_block(message: dict[str, Any]) -> dict[str, Any]:
@@ -261,12 +170,8 @@ def _tool_result_block(message: dict[str, Any]) -> dict[str, Any]:
 def _tool_result_content(output: Any) -> str | list[dict[str, Any]]:
     if isinstance(output, list):
         content = _content_items(output)
-        if content:
-            return content
-        return json.dumps(output)
-    if isinstance(output, str):
-        return output
-    return json.dumps(output)
+        return content or json.dumps(output)
+    return str(output or "")
 
 
 def _tool_result_is_error(output: Any) -> bool:
@@ -299,8 +204,6 @@ def _user_content(message: dict[str, Any]) -> str | list[dict[str, Any]]:
 def _content_items(items: list[Any]) -> list[dict[str, Any]]:
     converted: list[dict[str, Any]] = []
     for item in items:
-        if not isinstance(item, dict):
-            continue
         if item.get("type") == "input_text":
             converted.append({"type": "text", "text": str(item.get("text") or "")})
         elif item.get("type") == "input_image":
@@ -311,16 +214,8 @@ def _content_items(items: list[Any]) -> list[dict[str, Any]]:
 def _image_content(item: dict[str, Any]) -> dict[str, Any]:
     image_url = str(item.get("image_url") or "")
     prefix = "data:"
-    if image_url.startswith(("https://", "http://")):
-        return {
-            "type": "image",
-            "source": {
-                "type": "url",
-                "url": image_url,
-            },
-        }
     if not image_url.startswith(prefix) or ";base64," not in image_url:
-        raise ModelError("Anthropic image input must use a data URL or an HTTP URL")
+        raise ModelError("Anthropic image input must use a base64 data URL")
 
     media_type, data = image_url[len(prefix) :].split(";base64,", 1)
     if media_type not in {"image/gif", "image/jpeg", "image/png", "image/webp"}:
@@ -331,7 +226,7 @@ def _image_content(item: dict[str, Any]) -> dict[str, Any]:
         data.encode("ascii")
     except UnicodeEncodeError as exc:
         raise ModelError("Anthropic image input must contain ASCII base64 data") from exc
-    if len(data) > _MAX_BASE64_IMAGE_BYTES:
+    if len(data) > _MAX_IMAGE_DATA_LENGTH:
         raise ModelError("Anthropic image input exceeds the 10 MB base64 limit")
     return {
         "type": "image",
@@ -343,19 +238,6 @@ def _image_content(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _arguments(call: dict[str, Any]) -> dict[str, Any]:
-    raw = call.get("arguments") or "{}"
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return {"_raw": raw}
-        return parsed if isinstance(parsed, dict) else {"_raw": raw}
-    return {"_raw": raw}
-
-
 def _message_text(message: dict[str, Any]) -> str:
     content = message.get("content", "")
     if not isinstance(content, str):
@@ -364,69 +246,48 @@ def _message_text(message: dict[str, Any]) -> str:
 
 
 def _tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    converted: list[dict[str, Any]] = []
-    for tool in tools:
-        if not isinstance(tool, dict) or tool.get("type") != "function":
-            continue
-        converted_tool = {
+    return [
+        {
             "name": str(tool.get("name") or ""),
             "description": str(tool.get("description") or ""),
             "input_schema": tool.get("parameters"),
+            "strict": bool(tool.get("strict", False)),
         }
-        if isinstance(tool.get("strict"), bool):
-            converted_tool["strict"] = tool["strict"]
-        converted.append(converted_tool)
-    return converted
+        for tool in tools
+        if tool.get("type") == "function"
+    ]
 
 
-def _response_text(response: Any) -> str:
+def _response_text(content: list[Any]) -> str:
     return "".join(
         str(_value(block, "text"))
-        for block in _response_blocks(response)
+        for block in content
         if _block_type(block) == "text" and _value(block, "text", None)
     )
 
 
-def _response_tool_calls(response: Any) -> list[dict[str, Any]]:
+def _response_tool_calls(content: list[Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
-    for block in _response_blocks(response):
+    for block in content:
         if _block_type(block) != "tool_use":
             continue
         tool_input = _value(block, "input", {})
         call_id = str(_value(block, "id", ""))
-        if not call_id:
-            raise ModelError("Anthropic tool call did not include an id")
+        name = str(_value(block, "name", ""))
+        if not call_id or not name:
+            raise ModelError("Anthropic tool call did not include an id or name")
         calls.append(
             {
                 "id": call_id,
-                "name": str(_value(block, "name", "") or ""),
-                "arguments": json.dumps(tool_input)
-                if isinstance(tool_input, (dict, list))
-                else str(tool_input or "{}"),
+                "name": name,
+                "arguments": json.dumps(tool_input),
             }
         )
     return calls
 
 
-def _response_blocks(response: Any) -> list[Any]:
-    content = _value(response, "content", [])
-    if isinstance(content, list):
-        return content
-    try:
-        return list(content)
-    except TypeError:
-        return [content]
-
-
 def _record_block(block: Any) -> dict[str, Any]:
-    if isinstance(block, dict):
-        return block
-    model_dump = getattr(block, "model_dump", None)
-    if callable(model_dump):
-        value = model_dump(mode="json")
-        if isinstance(value, dict):
-            return value
-    raise ModelError(f"Anthropic returned an unsupported content block: {type(block).__name__}")
+    return block if isinstance(block, dict) else block.model_dump(mode="json")
 
 
 def _has_thinking(content: list[Any]) -> bool:
@@ -468,7 +329,6 @@ def _response_token_usage(response: Any) -> dict[str, int]:
         "cache_creation_5m_input_tokens": cache_creation_5m_input_tokens,
         "cache_creation_1h_input_tokens": cache_creation_1h_input_tokens,
         "cache_read_input_tokens": cache_read_input_tokens,
-        "cached_tokens": cache_read_input_tokens,
         "cached_input_tokens": cache_read_input_tokens,
         "total_tokens": (
             input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens
@@ -485,8 +345,8 @@ def _usage_int(usage: Any, name: str) -> int:
 
 
 def _response_cost(model: str, usage: dict[str, int], *, today: date | None = None) -> float:
-    spec = _model_spec(model, today=today)
-    if spec is None or not usage:
+    prices = _prices_for(model, today=today)
+    if prices is None or not usage:
         return 0.0
 
     cache_creation_5m_input_tokens = usage.get("cache_creation_5m_input_tokens", 0)
@@ -496,48 +356,31 @@ def _response_cost(model: str, usage: dict[str, int], *, today: date | None = No
 
     return round(
         (
-            usage.get("input_tokens", 0) * spec.input_price
-            + cache_creation_5m_input_tokens * spec.cache_write_5m_price
-            + cache_creation_1h_input_tokens * spec.cache_write_1h_price
-            + usage.get("cache_read_input_tokens", 0) * spec.cache_read_price
-            + usage.get("output_tokens", 0) * spec.output_price
+            usage.get("input_tokens", 0) * prices.input_price
+            + cache_creation_5m_input_tokens * prices.input_price * _CACHE_WRITE_5M_MULTIPLIER
+            + cache_creation_1h_input_tokens * prices.input_price * _CACHE_WRITE_1H_MULTIPLIER
+            + usage.get("cache_read_input_tokens", 0) * prices.input_price * _CACHE_READ_MULTIPLIER
+            + usage.get("output_tokens", 0) * prices.output_price
         )
         / 1_000_000,
         8,
     )
 
 
-def _model_spec(model: str, *, today: date | None = None) -> _ModelSpec | None:
-    if model == "claude-opus-5":
-        return _OPUS_5_SPEC
-    if model == "claude-sonnet-5":
-        current_date = today or date.today()
-        if current_date >= _SONNET_5_STANDARD_PRICING_START:
-            return _SONNET_5_STANDARD_SPEC
-        return _SONNET_5_INTRO_SPEC
-    return None
+def _prices_for(model: str, *, today: date | None = None) -> _Prices | None:
+    if model == "claude-sonnet-5" and (today or date.today()) >= _SONNET_5_STANDARD_PRICING_START:
+        return _SONNET_5_STANDARD_PRICES
+    return _MODEL_PRICES.get(model)
 
 
 def context_window_tokens_for(model: str) -> int | None:
-    spec = _model_spec(model)
-    return spec.context_window_tokens if spec is not None else None
-
-
-def max_output_tokens_for(model: str) -> int | None:
-    spec = _model_spec(model)
-    return spec.max_output_tokens if spec is not None else None
+    return _CONTEXT_WINDOW_TOKENS if model in SUPPORTED_MODELS else None
 
 
 def _raise_for_unsupported_model(model: str) -> None:
     if model not in SUPPORTED_MODELS:
         supported = ", ".join(SUPPORTED_MODELS)
         raise ModelError(f"Unsupported Anthropic model: {model}. Supported models: {supported}")
-
-
-def _raise_for_invalid_max_output_tokens(model: str, max_output_tokens: int) -> None:
-    supported_max = max_output_tokens_for(model)
-    if supported_max is not None and max_output_tokens > supported_max:
-        raise ModelError(f"Anthropic max output tokens for {model} cannot exceed {supported_max}")
 
 
 def _value(source: Any, name: str, default: Any = None) -> Any:
@@ -547,12 +390,8 @@ def _value(source: Any, name: str, default: Any = None) -> Any:
 
 
 def _format_exception(exc: BaseException) -> str:
-    status = getattr(exc, "status_code", None)
     message = str(exc).strip()
-    summary = type(exc).__name__
-    if isinstance(status, int):
-        summary += f" (HTTP {status})"
-    return f"{summary}: {message or repr(exc)}"
+    return f"{type(exc).__name__}: {message or repr(exc)}"
 
 
 __all__ = [
@@ -561,5 +400,4 @@ __all__ = [
     "AnthropicModel",
     "anthropic_api_key_value",
     "context_window_tokens_for",
-    "max_output_tokens_for",
 ]

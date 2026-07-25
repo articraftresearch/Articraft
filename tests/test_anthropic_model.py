@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
@@ -16,7 +15,6 @@ from mini_articraft.models.anthropic import (
     _response_token_usage,
     anthropic_api_key_value,
     context_window_tokens_for,
-    max_output_tokens_for,
 )
 from mini_articraft.settings import DEFAULT_ANTHROPIC_MODEL, Settings, get_settings
 
@@ -95,6 +93,28 @@ def anthropic_model(
     return AnthropicModel(Settings(**kwargs), client=client), client
 
 
+def add_tool_results(
+    messages: list[dict[str, Any]],
+    response: dict[str, Any],
+    *results: tuple[str, Any],
+) -> None:
+    messages.append(
+        {
+            "role": "assistant",
+            "content": response["text"],
+            "tool_calls": response["tool_calls"],
+        }
+    )
+    messages.extend(
+        {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": output,
+        }
+        for call_id, output in results
+    )
+
+
 def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost() -> None:
     model, client = anthropic_model(
         [
@@ -141,14 +161,13 @@ def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost() -> Non
         "cache_creation_5m_input_tokens": 100,
         "cache_creation_1h_input_tokens": 0,
         "cache_read_input_tokens": 50,
-        "cached_tokens": 50,
         "cached_input_tokens": 50,
         "total_tokens": 1_170,
     }
     request = client.messages.requests[0]
     assert request["model"] == "claude-sonnet-5"
     assert request["max_tokens"] == 128_000
-    assert request["cache_control"] == {"type": "ephemeral"}
+    assert request["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert request["system"] == "write clean code"
     assert request["messages"] == [{"role": "user", "content": "build a hinge"}]
     assert request["tools"] == [
@@ -163,75 +182,6 @@ def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost() -> Non
             },
             "strict": False,
         }
-    ]
-
-
-def test_anthropic_model_converts_tool_calls_and_tool_results() -> None:
-    model, client = anthropic_model(
-        [
-            tool_use_response("compile", {}, call_id="call_compile"),
-            text_response("done"),
-        ]
-    )
-    messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
-
-    first = run(model.query(messages, tools=[]))
-    assert first["tool_calls"] == [{"id": "call_compile", "name": "compile", "arguments": "{}"}]
-    assert first["provider_content"] == [
-        {
-            "type": "thinking",
-            "thinking": "",
-            "signature": "signed-thinking",
-        },
-        {
-            "type": "tool_use",
-            "id": "call_compile",
-            "name": "compile",
-            "input": {},
-        },
-    ]
-
-    messages.extend(
-        [
-            {"role": "assistant", "content": "", "tool_calls": first["tool_calls"]},
-            {
-                "type": "function_call_output",
-                "call_id": "call_compile",
-                "output": json.dumps({"result": {"status": "success"}}),
-            },
-        ]
-    )
-    second = run(model.query(messages, tools=[]))
-
-    assert second["text"] == "done"
-    assert client.messages.requests[1]["messages"] == [
-        {"role": "user", "content": "build"},
-        {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "thinking",
-                    "thinking": "",
-                    "signature": "signed-thinking",
-                },
-                {
-                    "type": "tool_use",
-                    "id": "call_compile",
-                    "name": "compile",
-                    "input": {},
-                },
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": "call_compile",
-                    "content": '{"result": {"status": "success"}}',
-                }
-            ],
-        },
     ]
 
 
@@ -277,74 +227,72 @@ def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
     messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
 
     first = run(model.query(messages, tools=[]))
-    messages.extend(
-        [
-            {
-                "role": "assistant",
-                "content": first["text"],
-                "tool_calls": first["tool_calls"],
-            },
-            {
-                "type": "function_call_output",
-                "call_id": "call_read",
-                "output": '{"result": "file contents"}',
-            },
-        ]
-    )
+    assert first["tool_calls"] == [
+        {"id": "call_read", "name": "read", "arguments": '{"path": "main.py"}'}
+    ]
+    assert first["provider_content"] == first_content
+    add_tool_results(messages, first, ("call_read", '{"result": "file contents"}'))
     second = run(model.query(messages, tools=[]))
-    messages.extend(
-        [
-            {
-                "role": "assistant",
-                "content": second["text"],
-                "tool_calls": second["tool_calls"],
-            },
-            {
-                "type": "function_call_output",
-                "call_id": "call_compile",
-                "output": '{"result": {"status": "success"}}',
-            },
-        ]
-    )
+    add_tool_results(messages, second, ("call_compile", '{"result": {"status": "success"}}'))
 
     run(model.query(messages, tools=[]))
 
     third_messages = client.messages.requests[2]["messages"]
-    assert third_messages[1] == {"role": "assistant", "content": first_content}
-    assert third_messages[3] == {"role": "assistant", "content": second_content}
+    assert third_messages == [
+        {"role": "user", "content": "build"},
+        {"role": "assistant", "content": first_content},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_read",
+                    "content": '{"result": "file contents"}',
+                }
+            ],
+        },
+        {"role": "assistant", "content": second_content},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_compile",
+                    "content": '{"result": {"status": "success"}}',
+                }
+            ],
+        },
+    ]
 
 
 def test_anthropic_model_groups_consecutive_tool_results() -> None:
-    model, client = anthropic_model([text_response("done")])
+    tool_calls = [
+        {
+            "type": "tool_use",
+            "id": "call_write",
+            "name": "write",
+            "input": {"path": "main.py"},
+        },
+        {
+            "type": "tool_use",
+            "id": "call_compile",
+            "name": "compile",
+            "input": {},
+        },
+    ]
+    model, client = anthropic_model([SimpleNamespace(content=tool_calls), text_response("done")])
+    messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
 
-    run(
-        model.query(
-            [
-                {"role": "user", "content": "build"},
-                {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {"id": "call_write", "name": "write", "arguments": '{"path": "main.py"}'},
-                        {"id": "call_compile", "name": "compile", "arguments": "{}"},
-                    ],
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_write",
-                    "output": '{"ok": true}',
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_compile",
-                    "output": '{"status": "success"}',
-                },
-            ],
-            tools=[],
-        )
+    first = run(model.query(messages, tools=[]))
+    add_tool_results(
+        messages,
+        first,
+        ("call_write", '{"ok": true}'),
+        ("call_compile", '{"status": "success"}'),
     )
+    run(model.query(messages, tools=[]))
 
-    assert client.messages.requests[0]["messages"][2] == {
+    assert client.messages.requests[1]["messages"][-1] == {
         "role": "user",
         "content": [
             {
@@ -401,69 +349,33 @@ def test_anthropic_model_sends_initial_reference_image() -> None:
     ]
 
 
-def test_anthropic_model_sends_url_image() -> None:
-    model, client = anthropic_model([text_response("done")])
-
-    run(
-        model.query(
-            [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_image",
-                            "image_url": "https://example.com/reference.webp",
-                        },
-                        {"type": "input_text", "text": "reconstruct this"},
-                    ],
-                },
-            ],
-            tools=[],
-        )
-    )
-
-    assert client.messages.requests[0]["messages"] == [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "url",
-                        "url": "https://example.com/reference.webp",
-                    },
-                },
-                {"type": "text", "text": "reconstruct this"},
-            ],
-        }
-    ]
-
-
 def test_anthropic_model_sends_typed_image_tool_output() -> None:
-    model, client = anthropic_model([text_response("done")])
-
-    run(
-        model.query(
+    model, client = anthropic_model(
+        [
+            tool_use_response("view_image", {"path": "image.png"}, call_id="call_image"),
+            text_response("done"),
+        ]
+    )
+    messages: list[dict[str, Any]] = [{"role": "user", "content": "inspect"}]
+    first = run(model.query(messages, tools=[]))
+    add_tool_results(
+        messages,
+        first,
+        (
+            "call_image",
             [
-                {"role": "user", "content": "inspect"},
+                {"type": "input_text", "text": '{"result": {"path": "image.png"}}'},
                 {
-                    "type": "function_call_output",
-                    "call_id": "call_image",
-                    "output": [
-                        {"type": "input_text", "text": '{"result": {"path": "image.png"}}'},
-                        {
-                            "type": "input_image",
-                            "image_url": "data:image/png;base64,aW1hZ2U=",
-                            "detail": "high",
-                        },
-                    ],
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,aW1hZ2U=",
+                    "detail": "high",
                 },
             ],
-            tools=[],
-        )
+        ),
     )
+    run(model.query(messages, tools=[]))
 
-    assert client.messages.requests[0]["messages"][1] == {
+    assert client.messages.requests[1]["messages"][-1] == {
         "role": "user",
         "content": [
             {
@@ -486,30 +398,18 @@ def test_anthropic_model_sends_typed_image_tool_output() -> None:
 
 
 def test_anthropic_model_marks_tool_errors() -> None:
-    model, client = anthropic_model([text_response("done")])
-
-    run(
-        model.query(
-            [
-                {"role": "user", "content": "build"},
-                {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {"id": "call_write", "name": "write", "arguments": "{}"},
-                    ],
-                },
-                {
-                    "type": "function_call_output",
-                    "call_id": "call_write",
-                    "output": '{"error": "write failed"}',
-                },
-            ],
-            tools=[],
-        )
+    model, client = anthropic_model(
+        [
+            tool_use_response("write", {"path": "main.py"}, call_id="call_write"),
+            text_response("done"),
+        ]
     )
+    messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
+    first = run(model.query(messages, tools=[]))
+    add_tool_results(messages, first, ("call_write", '{"error": "write failed"}'))
+    run(model.query(messages, tools=[]))
 
-    assert client.messages.requests[0]["messages"][2]["content"][0] == {
+    assert client.messages.requests[1]["messages"][-1]["content"][0] == {
         "type": "tool_result",
         "tool_use_id": "call_write",
         "content": '{"error": "write failed"}',
@@ -551,7 +451,6 @@ def test_anthropic_model_reads_cache_duration_breakdown() -> None:
         "cache_creation_5m_input_tokens": 100,
         "cache_creation_1h_input_tokens": 50,
         "cache_read_input_tokens": 25,
-        "cached_tokens": 25,
         "cached_input_tokens": 25,
         "total_tokens": 1_195,
     }
@@ -582,19 +481,6 @@ def test_anthropic_model_rejects_unsupported_models() -> None:
     assert context_window_tokens_for("claude-sonnet-5") == 1_000_000
     assert context_window_tokens_for("claude-opus-5") == 1_000_000
     assert context_window_tokens_for("claude-haiku-4-5") is None
-    assert max_output_tokens_for("claude-sonnet-5") == 128_000
-
-
-def test_anthropic_model_rejects_too_many_output_tokens() -> None:
-    with pytest.raises(ModelError, match="cannot exceed 128000"):
-        AnthropicModel(
-            Settings(
-                provider="anthropic",
-                anthropic_api_key="anthropic-test",
-                anthropic_model="claude-opus-5",
-                anthropic_max_output_tokens=128_001,
-            )
-        )
 
 
 def test_anthropic_model_configures_sdk_retries_and_timeout(monkeypatch) -> None:

@@ -60,8 +60,7 @@ ANTHROPIC_API_KEY=your_key_here uv run mini-articraft \
 ```
 
 The Anthropic provider supports `claude-sonnet-5` and `claude-opus-5`.
-Anthropic thinking, redacted thinking, text, and tool blocks are kept in each run's
-`conversation.jsonl` file.
+Each run keeps the complete Anthropic response blocks in `conversation.jsonl`.
 
 Each run is in the `runs/` directory. Open a completed run in the browser viewer:
 
