@@ -609,6 +609,31 @@ def _normal_data(mesh, crease_angle: float) -> tuple[np.ndarray, str]:
             )
     return corner_normals.reshape((-1, 3)).astype(np.float32), UsdGeom.Tokens.faceVarying
 
+def _mass_payload(part) -> dict[str, object] | None:
+    """The part's resolved mass for the manifest, or None when it has none."""
+
+    if part.mass_properties is None:
+        return None
+    try:
+        meshes = [
+            geometry_to_trimesh(shape.geometry, DEFAULT_MESH_TOLERANCE)
+            for shape in part._iter_shapes()
+        ]
+        resolved = resolve_mass(part.mass_properties, meshes, part_name=part.name)
+    except Exception:
+        return None
+    return {
+        "kilograms": round(resolved.mass, 6),
+        "material": (
+            part.mass_properties.material.value
+            if part.mass_properties.material is not None
+            else None
+        ),
+        "density": part.mass_properties.resolved_density,
+        "center_of_mass": [round(value, 6) for value in resolved.center_of_mass],
+        "diagonal_inertia": [round(value, 9) for value in resolved.diagonal_inertia],
+    }
+
 
 def _object_to_payload(obj: ArticulatedObject) -> dict[str, object]:
     return {
@@ -619,6 +644,7 @@ def _object_to_payload(obj: ArticulatedObject) -> dict[str, object]:
         "parts": [
             {
                 "name": part.name,
+                "mass": _mass_payload(part),
                 "shapes": [
                     {
                         "name": shape.name,

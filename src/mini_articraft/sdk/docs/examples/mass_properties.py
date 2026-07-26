@@ -16,68 +16,84 @@ you pass them explicitly.
 
 from __future__ import annotations
 
+import math
+
 from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
-    BoxGeometry,
     CylinderGeometry,
     MassProperties,
     MaterialDensity,
     MotionLimits,
     Origin,
+    RoundedBoxGeometry,
     TestContext,
     TestReport,
 )
-from mini_articraft.sdk.mesh import boolean_difference
+from mini_articraft.sdk.mesh import boolean_difference, weld
+
+RADIUS = 0.055
+WALL = 0.004
+HEIGHT = 0.10
+HINGE_Y = -RADIUS  # the pivot sits on the rear rim
 
 
 def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("weighted_bin")
+    """A round tin: a steel base, a hollow steel body, and a hardwood lid."""
 
-    # A steel base plate: mass comes from the material's density times the
-    # measured volume of the geometry below.
+    model = ArticulatedObject("weighted_tin")
+
+    # Steel base disc. Mass is the material's density times the measured volume.
     base = model.part("base", mass=MassProperties(material=MaterialDensity.STEEL))
-    base.add(BoxGeometry((0.24, 0.18, 0.012)), name="base_plate", color=(0.55, 0.56, 0.60))
+    base.add(
+        CylinderGeometry(RADIUS + 0.006, 0.006, radial_segments=64).translate(0.0, 0.0, 0.003),
+        name="base_disc",
+        color=(0.55, 0.56, 0.60),
+    )
 
-    # A hollow plastic bin. The cavity is cut out, so the measured volume is the
-    # wall, not a solid block -- the mass follows automatically.
+    # Hollow steel body: the cavity is cut away, so the measured volume is the
+    # wall rather than a solid cylinder, and the mass follows automatically.
+    body_part = model.part("body", mass=MassProperties(material=MaterialDensity.STEEL))
     shell = boolean_difference(
-        BoxGeometry((0.22, 0.16, 0.14)).translate(0.0, 0.0, 0.076),
-        BoxGeometry((0.20, 0.14, 0.13)).translate(0.0, 0.0, 0.082),
+        CylinderGeometry(RADIUS, HEIGHT, radial_segments=64).translate(0.0, 0.0, HEIGHT / 2),
+        CylinderGeometry(RADIUS - WALL, HEIGHT, radial_segments=64).translate(
+            0.0, 0.0, HEIGHT / 2 + WALL
+        ),
     )
-    body = model.part("body", mass=MassProperties(material=MaterialDensity.ABS_PLASTIC))
-    body.add(shell, name="bin_shell", color=(0.85, 0.86, 0.88))
-
-    # A lid whose real weight is known: an explicit mass wins over any volume,
-    # which is useful when the geometry stands in for something denser.
-    lid = model.part("lid", mass=MassProperties(mass=0.12))
-    lid.add(
-        CylinderGeometry(0.02, 0.006).rotate_y(1.5708),
-        name="hinge_barrel",
-        color=(0.20, 0.21, 0.24),
-    )
-    lid.add(
-        BoxGeometry((0.22, 0.16, 0.008)).translate(0.0, 0.08, 0.0),
-        name="lid_panel",
-        color=(0.20, 0.21, 0.24),
+    # The hinge lug is welded into the wall, so the part stays one molded piece.
+    lug = RoundedBoxGeometry((0.020, 0.010, 0.012), 0.004).translate(0.0, HINGE_Y, HEIGHT - 0.004)
+    body_part.add(
+        weld(shell, lug, radius=0.004, tolerance=0.0012),
+        name="body_shell",
+        color=(0.72, 0.73, 0.76),
     )
 
-    # The bin is bolted to the plate: a FIXED articulation keeps one root part.
+    # A hardwood lid, authored in the hinge frame: the disc reaches forward from
+    # the pivot so it covers the mouth, and the barrel sits on the pivot itself.
+    lid = model.part("lid", mass=MassProperties(material=MaterialDensity.HARDWOOD))
+    disc = CylinderGeometry(RADIUS, 0.008, radial_segments=64).translate(0.0, RADIUS, 0.004)
+    barrel = CylinderGeometry(0.006, 0.024, radial_segments=32).rotate_y(math.pi / 2)
+    lid.add(
+        weld(disc, barrel, radius=0.004, tolerance=0.0012),
+        name="lid_disc",
+        color=(0.62, 0.45, 0.24),
+    )
+
     model.articulation(
         "body_to_base",
         ArticulationType.FIXED,
         base,
-        body,
+        body_part,
         origin=Origin(xyz=(0.0, 0.0, 0.006)),
     )
     model.articulation(
         "lid_hinge",
         ArticulationType.REVOLUTE,
-        body,
+        body_part,
         lid,
-        origin=Origin(xyz=(0.0, -0.08, 0.146)),
+        origin=Origin(xyz=(0.0, HINGE_Y, HEIGHT)),
         axis=(1.0, 0.0, 0.0),
-        motion_limits=MotionLimits(effort=6.0, velocity=2.0, lower=0.0, upper=1.9),
+        motion_limits=MotionLimits(effort=4.0, velocity=2.0, lower=0.0, upper=1.9),
     )
     return model
 
@@ -87,7 +103,15 @@ object_model = build_object_model()
 
 def run_tests() -> TestReport:
     ctx = TestContext(object_model)
-    # With physics enabled this check is part of every compile; running it here
-    # keeps the example honest either way.
+    # With physics enabled this runs on every compile; asserting it here keeps the
+    # example honest either way.
     ctx.fail_if_parts_have_no_mass()
+    _, closed_top = ctx.shape_world_bounds("lid", "lid_disc")
+    with ctx.pose({"lid_hinge": 1.6}):
+        _, open_top = ctx.shape_world_bounds("lid", "lid_disc")
+        ctx.check(
+            "lid_opens_upward",
+            open_top[2] > closed_top[2] + 0.03,
+            "At an open pose the lid should stand well above its closed height.",
+        )
     return ctx.report()

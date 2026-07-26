@@ -3,6 +3,10 @@
 `MassProperties` declares what a part is made of; `MaterialDensity` names a
 material from the built-in density library.
 
+**When the physics lane is on, every part must declare mass properties or the
+compile fails.** Pass `mass=MassProperties(material=...)` to every `model.part()`
+call as you create it.
+
 Each part is one rigid body, so it carries the physical values a simulator needs: how
 heavy it is, where that weight sits, and how it resists rotation. You say what the part
 is **made of**; the SDK measures the rest from the geometry the part already contains.
