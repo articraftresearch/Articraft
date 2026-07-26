@@ -84,6 +84,45 @@ def compile_run(run_dir: Path, *, include_report: bool = True) -> dict[str, Any]
     return result.to_payload(include_report=include_report)
 
 
+def texture_run(run_dir: Path) -> bool:
+    """Re-export a compiled run's result with textured PBR materials.
+
+    This is the terminal "materials at the end of the loop" pass: it rebuilds the
+    final model, then re-exports a single textured USDZ (ambientCG maps embedded)
+    in place of the parametric attempt outputs. Returns ``True`` on success;
+    any failure (offline, no fitting materials) leaves the parametric result
+    untouched and returns ``False`` so it is never fatal to a run.
+    """
+
+    # Resolve before chdir: relative paths would otherwise break once the cwd
+    # moves into the workspace below.
+    run_dir = Path(run_dir).resolve()
+    workspace = run_dir / "workspace"
+    result_dir = run_dir / "result"
+    if not (workspace / "main.py").is_file():
+        return False
+
+    previous_cwd = Path.cwd()
+    sys.path.insert(0, str(workspace))
+    try:
+        os.chdir(workspace)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            globals_dict = runpy.run_path(str(workspace / "main.py"), run_name="__main__")
+            object_model = globals_dict.get("object_model")
+            if not isinstance(object_model, ArticulatedObject):
+                return False
+            for stale in (result_dir / "usdz").glob("*.usdz"):
+                stale.unlink()
+            export_object(object_model, result_dir, textured=True)
+        return True
+    except BaseException:
+        return False
+    finally:
+        os.chdir(previous_cwd)
+        with contextlib.suppress(ValueError):
+            sys.path.remove(str(workspace))
+
+
 def _compile_workspace(
     workspace: Path,
     export_dir: Path,

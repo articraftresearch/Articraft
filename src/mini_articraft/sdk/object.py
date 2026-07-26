@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TypeAlias
@@ -18,16 +17,23 @@ from mini_articraft.sdk.joints import (
     _as_name,
     _coerce_part_name,
 )
+from mini_articraft.sdk.materials import Color, Material, _as_color, _as_material
 
 Geometry: TypeAlias = Shape | MeshGeometry
-Color: TypeAlias = tuple[float, float, float, float]
+
+__all__ = ["ArticulatedObject", "Color", "Geometry", "Material", "Part", "PartRef"]
 
 
 @dataclass(frozen=True, slots=True)
 class _ShapeData:
     name: str
     geometry: Geometry
-    color: Color | None
+    material: Material | None
+
+    @property
+    def color(self) -> Color | None:
+        """Base color of the shape's material, for display-color fallbacks."""
+        return None if self.material is None else self.material.base_color
 
 
 @dataclass
@@ -44,22 +50,27 @@ class Part:
         *,
         name: str,
         color: Sequence[float] | None = None,
+        material: Material | None = None,
     ) -> Geometry:
-        """Add named geometry in this part's local frame."""
+        """Add named geometry in this part's local frame.
+
+        Pass ``material`` for a physically based surface (metal, plastic, glass),
+        or ``color`` for a plain colored surface. ``color`` is shorthand for a
+        matte dielectric ``Material`` and cannot be combined with ``material``.
+        """
 
         shape_name = _as_name(name, field_name=f"shape name on part {self.name!r}")
         if shape_name in self._shapes:
             raise ValidationError(f"duplicate shape name {shape_name!r} on part {self.name!r}")
         _validate_geometry(shape, context=f"part {self.name!r} shape {shape_name!r}")
-        normalized_color = (
-            None
-            if color is None
-            else _as_color(color, field_name=f"part {self.name!r} shape {shape_name!r} color")
-        )
         self._shapes[shape_name] = _ShapeData(
             name=shape_name,
             geometry=shape,
-            color=normalized_color,
+            material=_resolve_material(
+                color=color,
+                material=material,
+                context=f"part {self.name!r} shape {shape_name!r}",
+            ),
         )
         return shape
 
@@ -69,6 +80,26 @@ class Part:
         if entry is None:
             raise ValidationError(f"unknown shape {shape_name!r} on part {self.name!r}")
         return entry.geometry
+
+    def set_material(self, name: str, material: Material) -> None:
+        """Assign a material to an existing shape.
+
+        Lets materials be applied as a pass after geometry is authored, so a
+        model can build shapes (optionally with plain colors) and a later step
+        upgrades them to physically based surfaces.
+        """
+
+        shape_name = _as_name(name, field_name="shape name")
+        entry = self._shapes.get(shape_name)
+        if entry is None:
+            raise ValidationError(f"unknown shape {shape_name!r} on part {self.name!r}")
+        self._shapes[shape_name] = _ShapeData(
+            name=entry.name,
+            geometry=entry.geometry,
+            material=_as_material(
+                material, field_name=f"part {self.name!r} shape {shape_name!r} material"
+            ),
+        )
 
     def _iter_shapes(self) -> Iterator[_ShapeData]:
         return iter(self._shapes.values())
@@ -81,8 +112,8 @@ class Part:
             if name != entry.name:
                 raise ValidationError(f"part {self.name!r} contains an invalid shape name")
             _validate_geometry(entry.geometry, context=f"part {self.name!r} shape {name!r}")
-            if entry.color is not None:
-                _as_color(entry.color, field_name=f"part {self.name!r} shape {name!r} color")
+            if entry.material is not None:
+                _as_material(entry.material, field_name=f"part {self.name!r} shape {name!r} material")
 
 
 PartRef: TypeAlias = str | Part
@@ -239,19 +270,16 @@ def _validate_geometry(shape: object, *, context: str) -> None:
     raise ValidationError(f"{context} must be a build123d Shape or MeshGeometry")
 
 
-def _as_color(value: Sequence[float], *, field_name: str) -> Color:
-    if isinstance(value, (str, bytes)):
-        raise ValidationError(f"{field_name} must have 3 or 4 numeric values")
-    try:
-        raw = tuple(float(component) for component in value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValidationError(f"{field_name} must have 3 or 4 numeric values") from exc
-    if len(raw) == 3:
-        raw = (*raw, 1.0)
-    if len(raw) != 4:
-        raise ValidationError(f"{field_name} must have 3 or 4 numeric values")
-    if any(not math.isfinite(component) for component in raw):
-        raise ValidationError(f"{field_name} values must be finite")
-    if any(component < 0.0 or component > 1.0 for component in raw):
-        raise ValidationError(f"{field_name} values must be between 0.0 and 1.0")
-    return raw
+def _resolve_material(
+    *,
+    color: Sequence[float] | None,
+    material: Material | None,
+    context: str,
+) -> Material | None:
+    if material is not None:
+        if color is not None:
+            raise ValidationError(f"{context} cannot set both color and material")
+        return _as_material(material, field_name=f"{context} material")
+    if color is not None:
+        return Material(base_color=_as_color(color, field_name=f"{context} color"))
+    return None

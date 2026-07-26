@@ -72,6 +72,7 @@ def _read_version(path: Path) -> dict[str, object]:
         {
             "name": _attribute(part, "name", part.GetName()),
             "usd_name": part.GetName(),
+            "shapes": _read_shapes(part),
         }
         for part in object_prim.GetChild("parts").GetChildren()
     ]
@@ -108,6 +109,32 @@ def _read_version(path: Path) -> dict[str, object]:
             "parts": parts,
             "articulations": articulations,
         },
+    }
+
+
+def _read_shapes(part: Usd.Prim) -> list[dict[str, object]]:
+    shapes_scope = part.GetChild("shapes")
+    if not shapes_scope:
+        return []
+    return [
+        {"usd_name": shape.GetName(), "material": _read_material(shape)}
+        for shape in shapes_scope.GetChildren()
+    ]
+
+
+def _read_material(shape: Usd.Prim) -> dict[str, object] | None:
+    metallic = _attribute(shape, "material:metallic")
+    if metallic is None:
+        return None
+    return {
+        "base_color": _attribute(shape, "material:baseColor", [0.8, 0.8, 0.8]),
+        "metallic": metallic,
+        "roughness": _attribute(shape, "material:roughness", 0.6),
+        "opacity": _attribute(shape, "material:opacity", 1.0),
+        "emissive": _attribute(shape, "material:emissive"),
+        # When set, USDLoader has already applied ambientCG texture maps; the
+        # viewer keeps those and only layers on the authored tint + metalness.
+        "textured": _attribute(shape, "material:textured") is not None,
     }
 
 

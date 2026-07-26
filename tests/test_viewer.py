@@ -31,10 +31,12 @@ def test_load_viewer_run_reads_each_usdz_version(tmp_path) -> None:
         {
             "name": "base plate",
             "usd_name": "base_plate",
+            "shapes": [{"usd_name": "base_shape", "material": None}],
         },
         {
             "name": "carriage",
             "usd_name": "carriage",
+            "shapes": [{"usd_name": "payload", "material": None}],
         },
     ]
     joint = cast(list[dict[str, Any]], latest["articulations"])[0]
