@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from mini_articraft.agent import Agent, events
 from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
 from mini_articraft.environments import LocalEnvironment
+from mini_articraft.environments.worker import texture_run
 from mini_articraft.models import create_model
 from mini_articraft.models.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
 from mini_articraft.models.anthropic import anthropic_api_key_value
@@ -25,7 +26,7 @@ from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
 from mini_articraft.viewer import serve_viewer
 
 app = typer.Typer(help="Generate articulated objects with mini-articraft.", add_completion=False)
-COMMANDS = {"generate", "replay", "view"}
+COMMANDS = {"generate", "replay", "view", "texture"}
 
 
 @app.command()
@@ -65,15 +66,26 @@ def generate(
         "--tui/--no-tui",
         help="Show the live run UI (default: on when attached to a terminal).",
     ),
+    textures: bool = typer.Option(
+        False,
+        "--textures",
+        help="Apply texture maps to the generated result.",
+    ),
 ) -> None:
     """Generate an object from a prompt."""
     settings = _settings(provider, model, output_dir, reasoning_effort, compile_timeout)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     try:
-        if use_tui:
-            _generate_with_tui(settings, prompt, image)
-        else:
-            _print_result(asyncio.run(_generate(settings, prompt, image_path=image)))
+        result = _run_generation(
+            settings,
+            prompt,
+            image,
+            use_tui=use_tui,
+        )
+        if textures:
+            _apply_textures(result)
+        if not use_tui:
+            _print_result(result)
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
@@ -112,6 +124,37 @@ def view(
         raise typer.Exit(1) from None
 
 
+@app.command()
+def texture(
+    run: str = typer.Argument(
+        ..., help="Run id under the output directory, or a path to a run directory."
+    ),
+    output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
+) -> None:
+    """Apply texture maps to an already-generated run.
+
+    Re-exports the run's result with texture maps, so generation can stay local
+    and a completed run can be enhanced afterward.
+    """
+    run_dir = _resolve_run_dir(run, output_dir)
+    if not (run_dir / "workspace" / "main.py").is_file():
+        typer.echo(f"no generated run at {run_dir}", err=True)
+        raise typer.Exit(1)
+    outcome = texture_run(run_dir)
+    if outcome.applied:
+        typer.echo(
+            f"applied texture maps to {outcome.textured_shapes}/"
+            f"{outcome.requested_shapes} surfaces in {run_dir}"
+        )
+        for error in outcome.errors:
+            typer.echo(f"note: {error}", err=True)
+        typer.echo(f"view it:  uv run mini-articraft view {run}")
+    else:
+        detail = outcome.error or "; ".join(outcome.errors) or "no textures were requested"
+        typer.echo(f"could not apply texture maps to {run_dir}: {detail}", err=True)
+        raise typer.Exit(1)
+
+
 async def _generate(
     settings: Settings,
     prompt: str,
@@ -135,7 +178,19 @@ async def _generate(
         await model_client.close()
 
 
-def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> None:
+def _run_generation(
+    settings: Settings,
+    prompt: str,
+    image_path: Path | None,
+    *,
+    use_tui: bool,
+) -> dict[str, Any]:
+    if use_tui:
+        return _generate_with_tui(settings, prompt, image_path)
+    return asyncio.run(_generate(settings, prompt, image_path=image_path))
+
+
+def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> dict[str, Any]:
     try:
         result = run_live(
             lambda on_event: _generate(
@@ -147,9 +202,34 @@ def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None)
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise typer.Exit(130) from None
-
     if str(result.get("status")) != "success":
         raise typer.Exit(1)
+    return result
+
+
+def _apply_textures(result: dict[str, Any]) -> None:
+    """Re-export a completed run with texture maps when available.
+
+    A failure keeps the parametric result and does not change generation status.
+    """
+
+    if str(result.get("status")) != "success":
+        return
+    run = result.get("run")
+    if not run:
+        return
+    outcome = texture_run(Path(str(run)))
+    if outcome.applied:
+        if outcome.usdz is not None:
+            result["result"] = outcome.usdz.relative_to(Path(str(run)).resolve()).as_posix()
+        typer.echo(
+            f"applied texture maps to {outcome.textured_shapes}/{outcome.requested_shapes} surfaces"
+        )
+        for error in outcome.errors:
+            typer.echo(f"note: {error}", err=True)
+    else:
+        detail = outcome.error or "; ".join(outcome.errors) or "no textures were requested"
+        typer.echo(f"note: kept parametric result ({detail})", err=True)
 
 
 def _resolve_run_dir(run: str, output_dir: Path | None) -> Path:
