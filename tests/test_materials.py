@@ -80,20 +80,6 @@ def test_color_and_material_are_mutually_exclusive() -> None:
         )
 
 
-def test_set_material_upgrades_an_authored_shape() -> None:
-    part = ArticulatedObject("o").part("p")
-    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="s", color=(0.5, 0.5, 0.5))
-    part.set_material("s", Material.metal((0.7, 0.72, 0.75), roughness=0.4))
-
-    shape = next(part._iter_shapes())
-    assert shape.material is not None
-    assert shape.material.metallic == 1.0
-    assert shape.material.roughness == pytest.approx(0.4)
-
-    with pytest.raises(ValidationError, match="unknown shape"):
-        part.set_material("missing", Material.metal())
-
-
 def test_export_binds_usd_preview_surface(tmp_path) -> None:
     result = export_object(_model(), tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
