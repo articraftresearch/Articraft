@@ -268,6 +268,17 @@ def _run_required_tests(globals_dict: dict[str, Any]) -> TestReport:
     return report
 
 
+def _physics_enabled() -> bool:
+    """Whether the physics lane is on for this compile (set by the harness)."""
+
+    return os.environ.get("MINI_ARTICRAFT_PHYSICS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _run_baseline_tests(
     obj: ArticulatedObject,
     authored_report: TestReport,
@@ -305,6 +316,9 @@ def _run_baseline_tests(
 
     with tracker.phase("checking mesh health"):
         ctx.fail_if_mesh_unhealthy()
+    if _physics_enabled():
+        with tracker.phase("checking part mass properties"):
+            ctx.fail_if_parts_have_no_mass()
     with tracker.phase("checking for isolated parts"):
         ctx.fail_if_isolated_parts()
     with tracker.phase("checking for disconnected geometry"):

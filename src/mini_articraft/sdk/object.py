@@ -17,6 +17,7 @@ from mini_articraft.sdk.joints import (
     _as_name,
     _coerce_part_name,
 )
+from mini_articraft.sdk.mass import MassProperties
 from mini_articraft.sdk.materials import Color, Material, _as_color, _as_material
 
 Geometry: TypeAlias = Shape | MeshGeometry
@@ -39,10 +40,15 @@ class _ShapeData:
 @dataclass
 class Part:
     name: str
+    mass_properties: MassProperties | None = None
     _shapes: dict[str, _ShapeData] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.name = _as_name(self.name, field_name="part name")
+        if self.mass_properties is not None and not isinstance(
+            self.mass_properties, MassProperties
+        ):
+            raise ValidationError(f"part {self.name!r} mass must be MassProperties")
 
     def add(
         self,
@@ -86,6 +92,10 @@ class Part:
 
     def validate(self) -> None:
         self.name = _as_name(self.name, field_name="part name")
+        if self.mass_properties is not None and not isinstance(
+            self.mass_properties, MassProperties
+        ):
+            raise ValidationError(f"part {self.name!r} mass must be MassProperties")
         if not self._shapes:
             raise ValidationError(f"part {self.name!r} must contain at least one shape")
         for name, entry in self._shapes.items():
@@ -114,8 +124,8 @@ class ArticulatedObject:
     def meters_per_unit(self) -> float:
         return 1.0
 
-    def part(self, name: str) -> Part:
-        part = Part(name=name)
+    def part(self, name: str, *, mass: MassProperties | None = None) -> Part:
+        part = Part(name=name, mass_properties=mass)
         if any(existing.name == part.name for existing in self.parts):
             raise ValidationError(f"duplicate part name: {part.name!r}")
         self.parts.append(part)

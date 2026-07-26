@@ -51,6 +51,7 @@ class FailureKind(StrEnum):
     OVERLAP = "overlap"
     CONTACT = "contact"
     ARTICULATION_SEPARATION = "articulation_separation"
+    MISSING_MASS = "missing_mass"
     AUTHORED = "authored"
 
 
@@ -1018,6 +1019,25 @@ class TestContext:
             "" if not findings else "Unhealthy mesh geometry detected:\n" + "\n".join(findings),
             kind=FailureKind.MESH_HEALTH,
         )
+
+    def fail_if_parts_have_no_mass(self) -> bool:
+        """Every part must declare what it is made of when physics is enabled."""
+
+        from mini_articraft.sdk.mass import MaterialDensity
+
+        missing = [part.name for part in self.model.parts if part.mass_properties is None]
+        if missing:
+            materials = ", ".join(f"{item.value} ({item.density:g})" for item in MaterialDensity)
+            return self._record(
+                "fail_if_parts_have_no_mass",
+                False,
+                f"Parts without mass properties: {missing!r}. Physics is enabled, so every "
+                "part needs a mass: pass mass=MassProperties(material=MaterialDensity.STEEL) "
+                "(or density=..., or mass=... in kg) to model.part(). Materials and their "
+                f"densities in kg/m^3: {materials}.",
+                kind=FailureKind.MISSING_MASS,
+            )
+        return self._record("fail_if_parts_have_no_mass", True)
 
     def fail_if_isolated_parts(
         self,

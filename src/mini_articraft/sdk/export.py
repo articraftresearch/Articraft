@@ -28,6 +28,7 @@ from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
 
 from mini_articraft.sdk import ambientcg
 from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
+from mini_articraft.sdk._mass_solver import ResolvedMass, resolve_mass
 from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
 from mini_articraft.sdk.materials import Material, SurfaceKind
@@ -206,6 +207,7 @@ def _write_parts(
         part_prim = UsdGeom.Xform.Define(stage, part_path).GetPrim()
         _attrs(part_prim, {"name": part.name})
         UsdPhysics.RigidBodyAPI.Apply(part_prim)
+        _write_mass(part_prim, part, mesh_tolerance)
         UsdGeom.Xformable(part_prim).AddTransformOp().Set(_gf_matrix(transforms[part.name]))
 
         shapes_path = f"{part_path}/shapes"
@@ -460,6 +462,23 @@ def _material_attrs(material: Material) -> dict[str, object]:
     if material.emissive is not None:
         values["material:emissive"] = Gf.Vec3d(*material.emissive)
     return values
+
+
+def _write_mass(part_prim: Usd.Prim, part, mesh_tolerance: float) -> None:
+    """Author UsdPhysics.MassAPI from the part's authored properties and geometry."""
+
+    if part.mass_properties is None:
+        return
+    meshes = [geometry_to_trimesh(shape.geometry, mesh_tolerance) for shape in part._iter_shapes()]
+    resolved = resolve_mass(part.mass_properties, meshes, part_name=part.name)
+    mass_api = UsdPhysics.MassAPI.Apply(part_prim)  # pyright: ignore[reportAttributeAccessIssue]
+    mass_api.CreateMassAttr(float(resolved.mass))
+    mass_api.CreateCenterOfMassAttr(Gf.Vec3f(*resolved.center_of_mass))
+    mass_api.CreateDiagonalInertiaAttr(Gf.Vec3f(*resolved.diagonal_inertia))
+    mass_api.CreatePrincipalAxesAttr(Gf.Quatf(*resolved.principal_axes))
+    density = part.mass_properties.resolved_density
+    if density is not None:
+        mass_api.CreateDensityAttr(float(density))
 
 
 def _write_articulations(

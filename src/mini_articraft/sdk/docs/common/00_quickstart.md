@@ -41,6 +41,7 @@ Read only the reference that applies to the next piece of geometry:
 - Shared units and types: `docs/sdk/common/20_core_types.md`.
 - Named shapes and parts: `docs/sdk/common/30_articulated_object.md`.
 - Articulations: `docs/sdk/common/35_joints.md`.
+- Mass properties: `docs/sdk/common/37_mass.md`.
 - Checks and geometry inspection: `docs/sdk/common/40_testing.md`.
 - Visual views and report artifacts: `docs/sdk/common/45_visual_evidence.md`.
 - USDZ output: `docs/sdk/common/50_usdz_export.md`.
@@ -74,6 +75,8 @@ Read only the executable example closest to the current task:
 - Mixed build123d and mesh assembly: `docs/sdk/examples/mixed_articulated_assembly.py`.
 - Molding a handle/protrusion into a body (no mounting pads):
   `docs/sdk/examples/molded_mug.py`.
+- Mass properties from materials and geometry:
+  `docs/sdk/examples/mass_properties.py`.
 - Variable profile sweep and smooth section loft:
   `docs/sdk/examples/variable_sweep_and_loft.py`.
 
