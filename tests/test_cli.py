@@ -135,6 +135,30 @@ def test_cli_applies_textures_only_after_generation(monkeypatch) -> None:
     assert applied == [FakeAgent.result]
 
 
+def test_texture_flag_is_postprocessing_after_tui_generation(monkeypatch) -> None:
+    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    calls: list[tuple[str, object]] = []
+    generated = {"status": "success", "run": "/tmp/run"}
+
+    def run_generation(_settings, _prompt, _image, *, use_tui):
+        calls.append(("generate", use_tui))
+        return generated
+
+    def apply_textures(result):
+        calls.append(("textures", result))
+
+    monkeypatch.setattr(mini, "_run_generation", run_generation)
+    monkeypatch.setattr(mini, "_apply_textures", apply_textures)
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a steel ball", "--textures", "--tui"],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [("generate", True), ("textures", generated)]
+
+
 def test_apply_textures_updates_the_reported_result_path(monkeypatch, tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     final_usdz = run_dir / "result" / "usdz" / "0003.usdz"
@@ -157,6 +181,15 @@ def test_apply_textures_updates_the_reported_result_path(monkeypatch, tmp_path: 
     mini._apply_textures(result)
 
     assert result["result"] == "result/usdz/0003.usdz"
+
+
+def test_apply_textures_ignores_failed_generation(monkeypatch) -> None:
+    def unexpected_texture_run(_run):
+        raise AssertionError("failed generation must not start texture postprocessing")
+
+    monkeypatch.setattr(mini, "texture_run", unexpected_texture_run)
+
+    mini._apply_textures({"status": "error", "run": "/tmp/run"})
 
 
 def test_cli_passes_reference_image_to_agent(monkeypatch, tmp_path: Path) -> None:

@@ -76,18 +76,15 @@ def generate(
     settings = _settings(provider, model, output_dir, reasoning_effort, compile_timeout)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     try:
-        result = (
-            _generate_with_tui(settings, prompt, image)
-            if use_tui
-            else asyncio.run(_generate(settings, prompt, image_path=image))
+        result = _run_generation(
+            settings,
+            prompt,
+            image,
+            use_tui=use_tui,
         )
-        success = str(result.get("status")) == "success"
-        if success and textures:
+        if textures:
             _apply_textures(result)
-        if use_tui:
-            if not success:
-                raise typer.Exit(1)
-        else:
+        if not use_tui:
             _print_result(result)
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
@@ -181,9 +178,21 @@ async def _generate(
         await model_client.close()
 
 
+def _run_generation(
+    settings: Settings,
+    prompt: str,
+    image_path: Path | None,
+    *,
+    use_tui: bool,
+) -> dict[str, Any]:
+    if use_tui:
+        return _generate_with_tui(settings, prompt, image_path)
+    return asyncio.run(_generate(settings, prompt, image_path=image_path))
+
+
 def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> dict[str, Any]:
     try:
-        return run_live(
+        result = run_live(
             lambda on_event: _generate(
                 settings,
                 prompt,
@@ -193,6 +202,9 @@ def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None)
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise typer.Exit(130) from None
+    if str(result.get("status")) != "success":
+        raise typer.Exit(1)
+    return result
 
 
 def _apply_textures(result: dict[str, Any]) -> None:
@@ -201,6 +213,8 @@ def _apply_textures(result: dict[str, Any]) -> None:
     A failure keeps the parametric result and does not change generation status.
     """
 
+    if str(result.get("status")) != "success":
+        return
     run = result.get("run")
     if not run:
         return
