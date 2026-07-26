@@ -37,6 +37,7 @@ dependencies = [
     # 26.8 fails to publish the temporary USDZ on macOS arm64.
     "usd-core>=26.5,<26.8",
     "websockets>=15.0.0",
+    "xatlas>=0.0.11",
 ]
 
 [project.urls]
