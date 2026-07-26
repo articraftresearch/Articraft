@@ -18,6 +18,7 @@ from mini_articraft.sdk import (
     Material,
     MotionLimits,
     Origin,
+    SurfaceKind,
     TestContext,
     TestReport,
 )
@@ -30,7 +31,15 @@ def build_object_model() -> ArticulatedObject:
     # A physically based material. A metal's base_color is its reflection tint, so
     # steel is light and fairly rough -- a dark, mirror-smooth metal reads as a
     # black blob because it only reflects the environment.
-    base.add(Box(0.10, 0.08, 0.04), name="body", material=Material.metal((0.60, 0.62, 0.66), roughness=0.5))
+    base.add(
+        Box(0.10, 0.08, 0.04),
+        name="body",
+        material=Material.metal(
+            (0.60, 0.62, 0.66),
+            roughness=0.5,
+            surface=SurfaceKind.ALUMINUM,
+        ),
+    )
 
     lid = model.part("lid")
     lid.add(

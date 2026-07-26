@@ -101,7 +101,9 @@ def test_key_apis_are_documented_by_their_owner_pages() -> None:
     expected = {
         "common/30_articulated_object.md": (
             "`ArticulatedObject`",
+            "`Material`",
             "`Part`",
+            "`SurfaceKind`",
             "`part.add(...)`",
         ),
         "common/35_joints.md": (

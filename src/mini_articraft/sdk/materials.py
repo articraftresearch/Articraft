@@ -6,8 +6,8 @@ is authored once, stored on a shape, exported into the USDZ package as a bound
 ``UsdPreviewSurface`` shader, and surfaced to the viewer so metal, plastic,
 rubber, and glass read differently instead of looking like flat display colors.
 
-Textured materials (diffuse/roughness/normal maps) are a planned extension: the
-same abstraction and the same ``UsdShade`` binding path are where they slot in.
+The optional :class:`SurfaceKind` records the physical surface family so exporters
+can enrich it without inferring material behavior from shape names.
 """
 
 from __future__ import annotations
@@ -15,12 +15,23 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TypeAlias
 
 from mini_articraft.sdk.errors import ValidationError
 
 Color: TypeAlias = tuple[float, float, float, float]
 Rgb: TypeAlias = tuple[float, float, float]
+
+
+class SurfaceKind(StrEnum):
+    """Physical surface families understood by material exporters."""
+
+    ALUMINUM = "aluminum"
+    STEEL = "steel"
+    DARK_METAL = "dark_metal"
+    PLASTIC = "plastic"
+    RUBBER = "rubber"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,18 +45,22 @@ class Material:
     - ``roughness`` in ``[0, 1]``: ``0`` is a mirror-smooth surface, ``1`` is
       fully diffuse.
     - ``emissive`` is an optional ``(r, g, b)`` glow color, unlit by the scene.
+    - ``surface`` optionally records a physical surface family such as steel or plastic.
     """
 
     base_color: Color = (0.8, 0.8, 0.8, 1.0)
     metallic: float = 0.0
     roughness: float = 0.6
     emissive: Rgb | None = None
+    surface: SurfaceKind | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "base_color", _as_color(self.base_color, field_name="material base_color")
         )
-        object.__setattr__(self, "metallic", _as_unit(self.metallic, field_name="material metallic"))
+        object.__setattr__(
+            self, "metallic", _as_unit(self.metallic, field_name="material metallic")
+        )
         object.__setattr__(
             self, "roughness", _as_unit(self.roughness, field_name="material roughness")
         )
@@ -53,6 +68,8 @@ class Material:
             object.__setattr__(
                 self, "emissive", _as_rgb(self.emissive, field_name="material emissive")
             )
+        if self.surface is not None and not isinstance(self.surface, SurfaceKind):
+            raise ValidationError("material surface must be a SurfaceKind")
 
     @property
     def opacity(self) -> float:
@@ -62,24 +79,63 @@ class Material:
     # by what it is instead of tuning metallic/roughness by hand.
 
     @classmethod
-    def metal(cls, color: Sequence[float] = (0.82, 0.82, 0.85, 1.0), *, roughness: float = 0.35) -> Material:
-        return cls(base_color=_as_color(color, field_name="metal color"), metallic=1.0, roughness=roughness)
+    def metal(
+        cls,
+        color: Sequence[float] = (0.82, 0.82, 0.85, 1.0),
+        *,
+        roughness: float = 0.35,
+        surface: SurfaceKind | None = SurfaceKind.STEEL,
+    ) -> Material:
+        return cls(
+            base_color=_as_color(color, field_name="metal color"),
+            metallic=1.0,
+            roughness=roughness,
+            surface=surface,
+        )
 
     @classmethod
-    def plastic(cls, color: Sequence[float], *, roughness: float = 0.45) -> Material:
-        return cls(base_color=_as_color(color, field_name="plastic color"), metallic=0.0, roughness=roughness)
+    def plastic(
+        cls,
+        color: Sequence[float],
+        *,
+        roughness: float = 0.45,
+        surface: SurfaceKind | None = SurfaceKind.PLASTIC,
+    ) -> Material:
+        return cls(
+            base_color=_as_color(color, field_name="plastic color"),
+            metallic=0.0,
+            roughness=roughness,
+            surface=surface,
+        )
 
     @classmethod
-    def rubber(cls, color: Sequence[float], *, roughness: float = 0.9) -> Material:
-        return cls(base_color=_as_color(color, field_name="rubber color"), metallic=0.0, roughness=roughness)
+    def rubber(
+        cls,
+        color: Sequence[float],
+        *,
+        roughness: float = 0.9,
+        surface: SurfaceKind | None = SurfaceKind.RUBBER,
+    ) -> Material:
+        return cls(
+            base_color=_as_color(color, field_name="rubber color"),
+            metallic=0.0,
+            roughness=roughness,
+            surface=surface,
+        )
 
     @classmethod
     def matte(cls, color: Sequence[float], *, roughness: float = 0.8) -> Material:
-        return cls(base_color=_as_color(color, field_name="matte color"), metallic=0.0, roughness=roughness)
+        return cls(
+            base_color=_as_color(color, field_name="matte color"), metallic=0.0, roughness=roughness
+        )
 
     @classmethod
-    def glass(cls, color: Sequence[float] = (0.9, 0.93, 0.96, 0.25), *, roughness: float = 0.05) -> Material:
-        return cls(base_color=_as_color(color, field_name="glass color"), metallic=0.0, roughness=roughness)
+    def glass(
+        cls, color: Sequence[float] = (0.9, 0.93, 0.96, 0.25), *, roughness: float = 0.05
+    ) -> Material:
+        return cls(
+            base_color=_as_color(color, field_name="glass color"), metallic=0.0, roughness=roughness
+        )
 
 
 def _as_material(value: object, *, field_name: str) -> Material:
@@ -107,8 +163,19 @@ def _as_color(value: Sequence[float], *, field_name: str) -> Color:
 
 
 def _as_rgb(value: Sequence[float], *, field_name: str) -> Rgb:
-    r, g, b, _ = _as_color(value, field_name=field_name)
-    return (r, g, b)
+    if isinstance(value, (str, bytes)):
+        raise ValidationError(f"{field_name} must have 3 numeric values")
+    try:
+        raw = tuple(float(component) for component in value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValidationError(f"{field_name} must have 3 numeric values") from exc
+    if len(raw) != 3:
+        raise ValidationError(f"{field_name} must have 3 numeric values")
+    if any(not math.isfinite(component) for component in raw):
+        raise ValidationError(f"{field_name} values must be finite")
+    if any(component < 0.0 or component > 1.0 for component in raw):
+        raise ValidationError(f"{field_name} values must be between 0.0 and 1.0")
+    return raw
 
 
 def _as_unit(value: float, *, field_name: str) -> float:

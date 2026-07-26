@@ -14,10 +14,14 @@ Download scheme (no API key)::
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from mini_articraft.sdk.materials import SurfaceKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,8 +48,24 @@ class TextureSet:
         return found
 
 
+@dataclass(frozen=True, slots=True)
+class MaterialSpec:
+    """ambientCG source for one built-in surface."""
+
+    asset: str
+
+
+_MATERIALS = {
+    SurfaceKind.ALUMINUM: MaterialSpec("Metal050A"),
+    SurfaceKind.STEEL: MaterialSpec("Metal009"),
+    SurfaceKind.DARK_METAL: MaterialSpec("Metal046A"),
+    SurfaceKind.PLASTIC: MaterialSpec("Plastic010"),
+    SurfaceKind.RUBBER: MaterialSpec("Rubber004"),
+}
+
 _URL = "https://ambientcg.com/get?file={asset}_{res}-JPG.zip"
 _CACHE_ROOT = Path.home() / ".cache" / "mini_articraft" / "ambientcg"
+_DOWNLOAD_TIMEOUT_SECONDS = 30
 
 # ambientCG filename suffix -> TextureSet channel.
 _CHANNELS = {
@@ -88,6 +108,21 @@ def fetch_texture_set(
     )
 
 
+def fetch_material(
+    kind: SurfaceKind,
+    *,
+    resolution: str = "1K",
+    cache_root: Path | None = None,
+) -> tuple[TextureSet, MaterialSpec]:
+    """Fetch the texture set and rendering metadata for ``kind``."""
+
+    spec = _MATERIALS[kind]
+    return (
+        fetch_texture_set(spec.asset, resolution=resolution, cache_root=cache_root),
+        spec,
+    )
+
+
 def _locate(cache: Path) -> dict[str, Path]:
     found: dict[str, Path] = {}
     for path in cache.iterdir():
@@ -99,16 +134,25 @@ def _locate(cache: Path) -> dict[str, Path]:
 
 def _download_and_extract(url: str, cache: Path) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    zip_path = cache / "_download.zip"
+    with tempfile.NamedTemporaryFile(
+        prefix="_download-", suffix=".zip", dir=cache, delete=False
+    ) as file:
+        zip_path = Path(file.name)
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            zip_path.write_bytes(response.read())
+        with (
+            urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response,
+            zip_path.open("wb") as output,
+        ):
+            shutil.copyfileobj(response, output)
     except Exception as exc:
+        zip_path.unlink(missing_ok=True)
         raise RuntimeError(f"could not download ambientCG asset: {url}") from exc
     try:
         with zipfile.ZipFile(zip_path) as archive:
             for member in archive.namelist():
                 if any(suffix in member for suffix in _CHANNELS):
-                    archive.extract(member, cache)
+                    destination = cache / Path(member).name
+                    with archive.open(member) as source, destination.open("wb") as output:
+                        shutil.copyfileobj(source, output)
     finally:
         zip_path.unlink(missing_ok=True)

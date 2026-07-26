@@ -104,9 +104,17 @@ viewer and in USDZ preview. `color` and `material` cannot both be set;
 `color=(r, g, b)` is shorthand for a matte dielectric material.
 
 ```python
-from mini_articraft.sdk import Material
+from mini_articraft.sdk import Material, SurfaceKind
 
-body.add(shell, name="shell", material=Material.metal((0.72, 0.74, 0.78), roughness=0.30))
+body.add(
+    shell,
+    name="shell",
+    material=Material.metal(
+        (0.72, 0.74, 0.78),
+        roughness=0.30,
+        surface=SurfaceKind.ALUMINUM,
+    ),
+)
 body.add(trim, name="lens", material=Material.glass())
 ```
 
@@ -116,11 +124,15 @@ Material(
     metallic: float = 0.0,                 # 0 dielectric, 1 raw metal
     roughness: float = 0.6,                # 0 mirror, 1 fully diffuse
     emissive: (r, g, b) | None = None,     # optional unlit glow
+    surface: SurfaceKind | None = None,     # optional physical surface family
 )
 ```
 
 Presets: `Material.metal(color, roughness=...)`, `Material.plastic(color)`,
 `Material.rubber(color)`, `Material.matte(color)`, `Material.glass(color)`.
+Metal, plastic, and rubber presets record matching physical surface families by
+default. Pass a different `SurfaceKind`, or `surface=None`, when the default is
+not appropriate. Exporters never infer a material from a shape name.
 
 ### Build123d placement
 

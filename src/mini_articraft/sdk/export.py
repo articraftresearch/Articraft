@@ -7,24 +7,40 @@ import math
 import shutil
 import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from pxr import Gf, Sdf, Tf, Usd, UsdGeom, UsdPhysics, UsdShade, UsdUtils, UsdValidation
+import numpy as np
+import xatlas
+from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
+    Gf,
+    Sdf,
+    Tf,
+    Usd,
+    UsdGeom,
+    UsdPhysics,
+    UsdShade,  # pyright: ignore[reportAttributeAccessIssue]
+    UsdUtils,
+    UsdValidation,
+)
 
-from mini_articraft.sdk import ambientcg, texturing
+from mini_articraft.sdk import ambientcg
 from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
 from mini_articraft.sdk._mesh_core import geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
-from mini_articraft.sdk.materials import Material
+from mini_articraft.sdk.materials import Material, SurfaceKind
 from mini_articraft.sdk.object import ArticulatedObject, Geometry
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
-__all__ = ["ExportResult", "export_object"]
+__all__ = ["ExportResult", "TextureExportReport", "export_object"]
 
-# Meters per texture tile when applying Poly Haven / ambientCG PBR materials.
-DEFAULT_TEXTURE_TILE = 0.5
+
+@dataclass(frozen=True)
+class TextureExportReport:
+    requested_shapes: int = 0
+    textured_shapes: int = 0
+    errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -32,6 +48,22 @@ class ExportResult:
     root: Path
     manifest: Path
     usdz: Path
+    textures: TextureExportReport
+
+
+@dataclass
+class _TextureResolver:
+    resolved: dict[SurfaceKind, ambientcg.TextureSet | None] = field(default_factory=dict)
+    errors: dict[SurfaceKind, str] = field(default_factory=dict)
+
+    def resolve(self, kind: SurfaceKind) -> ambientcg.TextureSet | None:
+        if kind not in self.resolved:
+            try:
+                self.resolved[kind] = ambientcg.fetch_material(kind)[0]
+            except Exception as exc:
+                self.resolved[kind] = None
+                self.errors[kind] = f"{kind.value}: {type(exc).__name__}: {exc}"
+        return self.resolved[kind]
 
 
 def export_object(
@@ -40,14 +72,13 @@ def export_object(
     *,
     mesh_tolerance: float = DEFAULT_MESH_TOLERANCE,
     textured: bool = False,
-    texture_tile: float = DEFAULT_TEXTURE_TILE,
 ) -> ExportResult:
     """Publish ``obj`` as a validated USDZ package.
 
-    With ``textured=True`` every shape is upgraded to a tiling ambientCG PBR
-    material (chosen by name, projected to suit the form) with the maps embedded
-    in the package; shapes with no fitting material -- or when the maps cannot be
-    fetched -- fall back to the plain parametric surface.
+    With ``textured=True``, materials with an explicit ``SurfaceKind`` are
+    upgraded to a tiling ambientCG PBR material with the maps embedded in the
+    package. Materials without one -- or whose maps cannot be fetched -- stay
+    parametric.
     """
 
     root = Path(output_dir)
@@ -59,7 +90,12 @@ def export_object(
     payload = _object_to_payload(obj) | {"files": {"usdz": usdz.relative_to(root).as_posix()}}
     manifest_temp = manifest.with_name(f".{manifest.name}.tmp")
     try:
-        _write_usdz(obj, usdz, mesh_tolerance, textured=textured, texture_tile=texture_tile)
+        texture_report = _write_usdz(
+            obj,
+            usdz,
+            mesh_tolerance,
+            textured=textured,
+        )
         manifest_temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         manifest_temp.replace(manifest)
     except BaseException:
@@ -67,7 +103,7 @@ def export_object(
         raise
     finally:
         manifest_temp.unlink(missing_ok=True)
-    return ExportResult(root=root, manifest=manifest, usdz=usdz)
+    return ExportResult(root=root, manifest=manifest, usdz=usdz, textures=texture_report)
 
 
 def _next_usdz_path(usdz_dir: Path) -> Path:
@@ -81,8 +117,7 @@ def _write_usdz(
     mesh_tolerance: float,
     *,
     textured: bool = False,
-    texture_tile: float = DEFAULT_TEXTURE_TILE,
-) -> None:
+) -> TextureExportReport:
     if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
         raise ValueError("mesh_tolerance must be a positive finite number")
 
@@ -102,9 +137,13 @@ def _write_usdz(
 
         # Textured shapes copy their maps next to the layer (in temp_dir) so
         # CreateNewUsdzPackage bundles them into the .usdz.
-        part_paths = _write_parts(
-            stage, f"{object_path}/parts", obj, mesh_tolerance,
-            textured=textured, texture_tile=texture_tile, asset_dir=Path(temp_dir),
+        part_paths, texture_report = _write_parts(
+            stage,
+            f"{object_path}/parts",
+            obj,
+            mesh_tolerance,
+            textured=textured,
+            asset_dir=Path(temp_dir),
         )
         _write_articulations(stage, f"{object_path}/joints", obj, part_paths)
 
@@ -121,6 +160,7 @@ def _write_usdz(
             temp_path.replace(path)
         finally:
             temp_path.unlink(missing_ok=True)
+    return texture_report
 
 
 def _write_parts(
@@ -130,13 +170,15 @@ def _write_parts(
     mesh_tolerance: float,
     *,
     textured: bool = False,
-    texture_tile: float = DEFAULT_TEXTURE_TILE,
     asset_dir: Path | None = None,
-) -> dict[str, str]:
+) -> tuple[dict[str, str], TextureExportReport]:
     UsdGeom.Scope.Define(stage, scope_path)
     transforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance).world_transforms({})
     safe_part_names = _safe_name_map(part.name for part in obj.parts)
     paths: dict[str, str] = {}
+    resolver = _TextureResolver() if textured else None
+    requested_shapes = 0
+    textured_shapes = 0
 
     for part in obj.parts:
         part_path = f"{scope_path}/{safe_part_names[part.name]}"
@@ -158,14 +200,23 @@ def _write_parts(
             mesh_path = f"{shapes_path}/{safe_shape}"
             material_path = f"{materials_path}/{safe_shape}"
 
-            texture_set, is_metal = (
-                _resolve_textures(shape.name) if textured else (None, False)
-            )
-            if texture_set is not None and asset_dir is not None:
+            material = shape.material
+            surface = material.surface if material is not None else None
+            selection = resolver.resolve(surface) if resolver and surface else None
+            if resolver is not None and surface is not None:
+                requested_shapes += 1
+            if selection is not None and material is not None and asset_dir is not None:
                 _write_textured_shape(
-                    stage, mesh_path, material_path, shape, texture_set, is_metal,
-                    texture_tile, asset_dir, mesh_tolerance,
+                    stage,
+                    mesh_path,
+                    material_path,
+                    shape,
+                    selection,
+                    material,
+                    asset_dir,
+                    mesh_tolerance,
                 )
+                textured_shapes += 1
                 continue
 
             points, faces = _mesh(shape.geometry, mesh_tolerance)
@@ -183,24 +234,12 @@ def _write_parts(
                 mesh.CreateDisplayOpacityAttr([shape.material.opacity])
                 _bind_material(stage, mesh, material_path, shape.material)
                 _attrs(mesh.GetPrim(), _material_attrs(shape.material))
-    return paths
-
-
-def _resolve_textures(shape_name: str) -> tuple[object | None, bool]:
-    """Fetch the ambientCG maps for a shape, or (None, False) to stay parametric.
-
-    Any fetch failure (offline, missing asset) falls back to parametric so export
-    never depends on the network.
-    """
-
-    category = texturing.classify(shape_name)
-    if category is None:
-        return None, False
-    try:
-        texture_set = ambientcg.fetch_texture_set(texturing.CATEGORY_ASSETS[category])
-    except Exception:
-        return None, False
-    return texture_set, category in texturing.METAL_CATEGORIES
+    errors = tuple(resolver.errors.values()) if resolver is not None else ()
+    return paths, TextureExportReport(
+        requested_shapes=requested_shapes,
+        textured_shapes=textured_shapes,
+        errors=errors,
+    )
 
 
 def _write_textured_shape(
@@ -209,42 +248,63 @@ def _write_textured_shape(
     material_path: str,
     shape,
     texture_set,
-    is_metal: bool,
-    tile: float,
+    material: Material,
     asset_dir: Path,
     mesh_tolerance: float,
 ) -> None:
     trimesh_obj = geometry_to_trimesh(shape.geometry, mesh_tolerance)
-    points, uvs, normals, _mode = texturing.textured_mesh(trimesh_obj, tile)
-    ntri = len(points) // 3
+    points, faces, uvs, normals = _unwrap_mesh(trimesh_obj)
     gf_points = [Gf.Vec3f(*point) for point in points.tolist()]
 
     mesh = UsdGeom.Mesh.Define(stage, mesh_path)
     mesh.CreatePointsAttr(gf_points)
-    mesh.CreateFaceVertexCountsAttr([3] * ntri)
-    mesh.CreateFaceVertexIndicesAttr(list(range(3 * ntri)))
+    mesh.CreateFaceVertexCountsAttr([3] * len(faces))
+    mesh.CreateFaceVertexIndicesAttr(faces.reshape(-1).tolist())
     mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
     mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(gf_points))
     mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
     mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
-    primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(
+    primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(  # pyright: ignore[reportAttributeAccessIssue]
         "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex
     )
-    primvar.Set([Gf.Vec2f(*uv) for uv in uvs.tolist()])
+    primvar.Set(  # pyright: ignore[reportAttributeAccessIssue]
+        [
+            Gf.Vec2f(*uv)  # pyright: ignore[reportAttributeAccessIssue]
+            for uv in uvs.tolist()
+        ]
+    )
 
-    tint = shape.color[:3] if shape.color else (0.8, 0.8, 0.8)
+    tint = material.base_color[:3]
     mesh.CreateDisplayColorAttr([Gf.Vec3f(*tint)])
-    _bind_textured_material(stage, mesh, material_path, texture_set, is_metal, asset_dir)
+    mesh.CreateDisplayOpacityAttr([material.opacity])
+    _bind_textured_material(stage, mesh, material_path, texture_set, material, asset_dir)
     _attrs(mesh.GetPrim(), {"name": shape.name})
     # The viewer keeps USDLoader's texture maps and layers the authored tint +
     # metalness on top (see viewer.html); these attrs carry that intent.
-    _attrs(mesh.GetPrim(), {
-        "material:metallic": 1.0 if is_metal else 0.0,
-        "material:roughness": 1.0,
-        "material:baseColor": Gf.Vec3d(*tint),
-        "material:opacity": 1.0,
-        "material:textured": 1.0,
-    })
+    _attrs(
+        mesh.GetPrim(),
+        {
+            "material:metallic": material.metallic,
+            "material:roughness": material.roughness,
+            "material:baseColor": Gf.Vec3d(*tint),
+            "material:opacity": material.opacity,
+            "material:textured": 1.0,
+        },
+    )
+
+
+def _unwrap_mesh(trimesh_obj) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Generate a UV atlas while preserving source normals across seam vertices."""
+
+    vertices = np.asarray(trimesh_obj.vertices)
+    source_normals = np.asarray(trimesh_obj.vertex_normals)
+    vertex_map, faces, uvs = xatlas.parametrize(vertices, np.asarray(trimesh_obj.faces))
+    return (
+        vertices[vertex_map].astype(np.float32),
+        np.asarray(faces, dtype=np.int32),
+        np.asarray(uvs, dtype=np.float32),
+        source_normals[vertex_map].astype(np.float32),
+    )
 
 
 def _bind_textured_material(
@@ -252,7 +312,7 @@ def _bind_textured_material(
     mesh: UsdGeom.Mesh,
     material_path: str,
     texture_set,
-    is_metal: bool,
+    authored: Material,
     asset_dir: Path,
 ) -> None:
     local: dict[str, str] = {}
@@ -283,28 +343,43 @@ def _bind_textured_material(
         return node
 
     diffuse = texture("diffuseTex", local["base_color"], "sRGB")
+    diffuse.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
+        Gf.Vec4f(*authored.base_color)  # pyright: ignore[reportAttributeAccessIssue]
+    )
     surface.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
         diffuse.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
     )
+    if authored.opacity < 1.0:
+        surface.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(authored.opacity)
     if "roughness" in local:
         rough = texture("roughTex", local["roughness"], "raw")
+        rough.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
+            Gf.Vec4f(*([authored.roughness] * 4))  # pyright: ignore[reportAttributeAccessIssue]
+        )
         surface.CreateInput("roughness", Sdf.ValueTypeNames.Float).ConnectToSource(
             rough.CreateOutput("r", Sdf.ValueTypeNames.Float)
         )
     if "normal" in local:
         normal = texture("normalTex", local["normal"], "raw")
-        normal.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(2, 2, 2, 1))
-        normal.CreateInput("bias", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(-1, -1, -1, 0))
+        normal.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
+            Gf.Vec4f(2, 2, 2, 1)  # pyright: ignore[reportAttributeAccessIssue]
+        )
+        normal.CreateInput("bias", Sdf.ValueTypeNames.Float4).Set(
+            Gf.Vec4f(-1, -1, -1, 0)  # pyright: ignore[reportAttributeAccessIssue]
+        )
         surface.CreateInput("normal", Sdf.ValueTypeNames.Normal3f).ConnectToSource(
             normal.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
         )
-    if is_metal and "metalness" in local:
+    if authored.metallic > 0.0 and "metalness" in local:
         metal = texture("metalTex", local["metalness"], "raw")
+        metal.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
+            Gf.Vec4f(*([authored.metallic] * 4))  # pyright: ignore[reportAttributeAccessIssue]
+        )
         surface.CreateInput("metallic", Sdf.ValueTypeNames.Float).ConnectToSource(
             metal.CreateOutput("r", Sdf.ValueTypeNames.Float)
         )
     else:
-        surface.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(1.0 if is_metal else 0.0)
+        surface.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(authored.metallic)
 
     material.CreateSurfaceOutput().ConnectToSource(surface.ConnectableAPI(), "surface")
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
@@ -491,6 +566,7 @@ def _material_payload(material: Material | None) -> dict[str, object] | None:
         "metallic": material.metallic,
         "roughness": material.roughness,
         "emissive": list(material.emissive) if material.emissive is not None else None,
+        "surface": material.surface.value if material.surface is not None else None,
     }
 
 

@@ -26,7 +26,7 @@ from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
 from mini_articraft.viewer import serve_viewer
 
 app = typer.Typer(help="Generate articulated objects with mini-articraft.", add_completion=False)
-COMMANDS = {"generate", "replay", "view", "pbr"}
+COMMANDS = {"generate", "replay", "view", "texture"}
 
 
 @app.command()
@@ -66,27 +66,28 @@ def generate(
         "--tui/--no-tui",
         help="Show the live run UI (default: on when attached to a terminal).",
     ),
-    pbr: bool = typer.Option(
+    textures: bool = typer.Option(
         False,
-        "--pbr/--no-pbr",
-        help="Apply textured PBR materials to the final result (default: off).",
+        "--textures",
+        help="Apply texture maps to the generated result.",
     ),
 ) -> None:
     """Generate an object from a prompt."""
     settings = _settings(provider, model, output_dir, reasoning_effort, compile_timeout)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     try:
+        result = (
+            _generate_with_tui(settings, prompt, image)
+            if use_tui
+            else asyncio.run(_generate(settings, prompt, image_path=image))
+        )
+        success = str(result.get("status")) == "success"
+        if success and textures:
+            _apply_textures(result)
         if use_tui:
-            result = _generate_with_tui(settings, prompt, image)
-            success = str(result.get("status")) == "success"
-            if success and pbr:
-                _apply_pbr(result)
             if not success:
                 raise typer.Exit(1)
         else:
-            result = asyncio.run(_generate(settings, prompt, image_path=image))
-            if str(result.get("status")) == "success" and pbr:
-                _apply_pbr(result)
             _print_result(result)
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
@@ -127,26 +128,33 @@ def view(
 
 
 @app.command()
-def pbr(
+def texture(
     run: str = typer.Argument(
         ..., help="Run id under the output directory, or a path to a run directory."
     ),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
 ) -> None:
-    """Apply textured PBR materials to an already-generated run.
+    """Apply texture maps to an already-generated run.
 
-    Re-exports the run's result with ambientCG surfaces (the same terminal pass
-    that `generate --pbr` runs), so a plain run can be upgraded afterward.
+    Re-exports the run's result with texture maps, so generation can stay local
+    and a completed run can be enhanced afterward.
     """
     run_dir = _resolve_run_dir(run, output_dir)
     if not (run_dir / "workspace" / "main.py").is_file():
         typer.echo(f"no generated run at {run_dir}", err=True)
         raise typer.Exit(1)
-    if texture_run(run_dir):
-        typer.echo(f"applied textured PBR materials to {run_dir}")
+    outcome = texture_run(run_dir)
+    if outcome.applied:
+        typer.echo(
+            f"applied texture maps to {outcome.textured_shapes}/"
+            f"{outcome.requested_shapes} surfaces in {run_dir}"
+        )
+        for error in outcome.errors:
+            typer.echo(f"note: {error}", err=True)
         typer.echo(f"view it:  uv run mini-articraft view {run}")
     else:
-        typer.echo(f"could not apply PBR materials to {run_dir}", err=True)
+        detail = outcome.error or "; ".join(outcome.errors) or "no textures were requested"
+        typer.echo(f"could not apply texture maps to {run_dir}: {detail}", err=True)
         raise typer.Exit(1)
 
 
@@ -173,9 +181,7 @@ async def _generate(
         await model_client.close()
 
 
-def _generate_with_tui(
-    settings: Settings, prompt: str, image_path: Path | None
-) -> dict[str, Any]:
+def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> dict[str, Any]:
     try:
         return run_live(
             lambda on_event: _generate(
@@ -189,20 +195,27 @@ def _generate_with_tui(
         raise typer.Exit(130) from None
 
 
-def _apply_pbr(result: dict[str, Any]) -> None:
-    """Terminal pass: re-export the finished run with textured PBR materials.
+def _apply_textures(result: dict[str, Any]) -> None:
+    """Re-export a completed run with texture maps when available.
 
-    Never fatal -- a failure (offline, no fitting materials) keeps the parametric
-    result and just notes it.
+    A failure keeps the parametric result and does not change generation status.
     """
 
     run = result.get("run")
     if not run:
         return
-    if texture_run(Path(str(run))):
-        typer.echo("applied textured PBR materials to the result")
+    outcome = texture_run(Path(str(run)))
+    if outcome.applied:
+        if outcome.usdz is not None:
+            result["result"] = outcome.usdz.relative_to(Path(str(run)).resolve()).as_posix()
+        typer.echo(
+            f"applied texture maps to {outcome.textured_shapes}/{outcome.requested_shapes} surfaces"
+        )
+        for error in outcome.errors:
+            typer.echo(f"note: {error}", err=True)
     else:
-        typer.echo("note: kept parametric result (PBR materials unavailable)", err=True)
+        detail = outcome.error or "; ".join(outcome.errors) or "no textures were requested"
+        typer.echo(f"note: kept parametric result ({detail})", err=True)
 
 
 def _resolve_run_dir(run: str, output_dir: Path | None) -> Path:

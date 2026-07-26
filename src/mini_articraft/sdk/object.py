@@ -113,7 +113,9 @@ class Part:
                 raise ValidationError(f"part {self.name!r} contains an invalid shape name")
             _validate_geometry(entry.geometry, context=f"part {self.name!r} shape {name!r}")
             if entry.material is not None:
-                _as_material(entry.material, field_name=f"part {self.name!r} shape {name!r} material")
+                _as_material(
+                    entry.material, field_name=f"part {self.name!r} shape {name!r} material"
+                )
 
 
 PartRef: TypeAlias = str | Part

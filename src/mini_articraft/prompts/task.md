@@ -11,8 +11,8 @@ Start with the preloaded SDK quickstart. Before choosing a representation, use
 `read` to survey the relevant SDK references and compare plausible build123d and
 mesh approaches. Do not stop at the first workable API. Research enough to form
 an internal geometry strategy for the major visible forms. Then implement the
-object with `Part.add(shape, name=..., color=...)`, add prompt-specific checks,
-and run `compile`.
+object with `Part.add(shape, name=..., material=...)` for known physical surfaces
+or `color=...` for plain matte ones, add prompt-specific checks, and run `compile`.
 
 Treat every compile signal as design evidence. Preserve prompt-critical visible
 geometry while you repair named defects. After a successful compile, review the
