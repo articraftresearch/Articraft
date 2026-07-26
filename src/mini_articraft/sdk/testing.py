@@ -1023,16 +1023,42 @@ class TestContext:
     def fail_if_parts_have_no_mass(self) -> bool:
         """Every part must declare what it is made of when physics is enabled."""
 
+        from mini_articraft.sdk._mass_solver import resolve_mass
+        from mini_articraft.sdk._mesh_core import geometry_to_trimesh
         from mini_articraft.sdk.mass import MaterialDensity
 
         missing = [part.name for part in self.model.parts if part.mass_properties is None]
+        unresolved: list[str] = []
+        for part in self.model.parts:
+            if part.mass_properties is None:
+                continue
+            try:
+                resolve_mass(
+                    part.mass_properties,
+                    [
+                        geometry_to_trimesh(shape.geometry, self.mesh_tolerance)
+                        for shape in part._iter_shapes()
+                    ],
+                    part_name=part.name,
+                )
+            except Exception as exc:
+                unresolved.append(f"{part.name} ({exc})")
+        if unresolved:
+            return self._record(
+                "fail_if_parts_have_no_mass",
+                False,
+                "Parts whose mass could not be measured: "
+                + "; ".join(unresolved)
+                + ". Close the geometry into a solid, or set an explicit mass in kilograms.",
+                kind=FailureKind.MISSING_MASS,
+            )
         if missing:
             materials = ", ".join(f"{item.value} ({item.density:g})" for item in MaterialDensity)
             return self._record(
                 "fail_if_parts_have_no_mass",
                 False,
                 f"Parts without mass properties: {missing!r}. Physics is enabled, so every "
-                "part needs a mass: pass mass=MassProperties(material=MaterialDensity.STEEL) "
+                "part needs a mass: pass mass_properties=MassProperties(material=MaterialDensity.STEEL) "
                 "(or density=..., or mass=... in kg) to model.part(). Materials and their "
                 f"densities in kg/m^3: {materials}.",
                 kind=FailureKind.MISSING_MASS,

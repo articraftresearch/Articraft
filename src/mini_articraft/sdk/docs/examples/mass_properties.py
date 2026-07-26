@@ -44,7 +44,7 @@ def build_object_model() -> ArticulatedObject:
     model = ArticulatedObject("weighted_tin")
 
     # Steel base disc. Mass is the material's density times the measured volume.
-    base = model.part("base", mass=MassProperties(material=MaterialDensity.STEEL))
+    base = model.part("base", mass_properties=MassProperties(material=MaterialDensity.STEEL))
     base.add(
         CylinderGeometry(RADIUS + 0.006, 0.006, radial_segments=64).translate(0.0, 0.0, 0.003),
         name="base_disc",
@@ -53,7 +53,7 @@ def build_object_model() -> ArticulatedObject:
 
     # Hollow steel body: the cavity is cut away, so the measured volume is the
     # wall rather than a solid cylinder, and the mass follows automatically.
-    body_part = model.part("body", mass=MassProperties(material=MaterialDensity.STEEL))
+    body_part = model.part("body", mass_properties=MassProperties(material=MaterialDensity.STEEL))
     shell = boolean_difference(
         CylinderGeometry(RADIUS, HEIGHT, radial_segments=64).translate(0.0, 0.0, HEIGHT / 2),
         CylinderGeometry(RADIUS - WALL, HEIGHT, radial_segments=64).translate(
@@ -70,7 +70,7 @@ def build_object_model() -> ArticulatedObject:
 
     # A hardwood lid, authored in the hinge frame: the disc reaches forward from
     # the pivot so it covers the mouth, and the barrel sits on the pivot itself.
-    lid = model.part("lid", mass=MassProperties(material=MaterialDensity.HARDWOOD))
+    lid = model.part("lid", mass_properties=MassProperties(material=MaterialDensity.HARDWOOD))
     disc = CylinderGeometry(RADIUS, 0.008, radial_segments=64).translate(0.0, RADIUS, 0.004)
     barrel = CylinderGeometry(0.006, 0.024, radial_segments=32).rotate_y(math.pi / 2)
     lid.add(

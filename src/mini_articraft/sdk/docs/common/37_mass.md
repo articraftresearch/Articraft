@@ -4,7 +4,7 @@
 material from the built-in density library.
 
 **When the physics lane is on, every part must declare mass properties or the
-compile fails.** Pass `mass=MassProperties(material=...)` to every `model.part()`
+compile fails.** Pass `mass_properties=MassProperties(material=...)` to every `model.part()`
 call as you create it.
 
 Each part is one rigid body, so it carries the physical values a simulator needs: how
@@ -19,7 +19,7 @@ Units are SI: mass in kilograms, density in kg/m^3, lengths in meters, inertia i
 from mini_articraft.sdk import ArticulatedObject, MassProperties, MaterialDensity
 
 model = ArticulatedObject("kettle")
-base = model.part("base", mass=MassProperties(material=MaterialDensity.STEEL))
+base = model.part("base", mass_properties=MassProperties(material=MaterialDensity.STEEL))
 ```
 
 Built-in materials and their densities in kg/m^3:
@@ -50,13 +50,13 @@ geometry unless you set them explicitly, in which case your values are used verb
 
 ```python
 # measured from geometry, plastic density
-model.part("lid", mass=MassProperties(material=MaterialDensity.ABS_PLASTIC))
+model.part("lid", mass_properties=MassProperties(material=MaterialDensity.ABS_PLASTIC))
 
 # a density the library does not cover
-model.part("stone", mass=MassProperties(density=2600.0))
+model.part("stone", mass_properties=MassProperties(density=2600.0))
 
 # a known weight, with the mass concentrated where you say
-model.part("motor", mass=MassProperties(mass=0.85, center_of_mass=(0.0, 0.0, 0.04)))
+model.part("motor", mass_properties=MassProperties(mass=0.85, center_of_mass=(0.0, 0.0, 0.04)))
 ```
 
 ## What gets measured
@@ -67,8 +67,13 @@ end, for example) do not contribute their shared volume twice. Hollow geometry b
 correctly on its own: a shell built with `boolean_difference` measures the volume of the
 wall, not of a solid block.
 
-The geometry must be a closed solid for this to work. If a part has no usable volume and
-no explicit `mass=`, the compile fails with a message naming the part.
+Every shape in the part must be a closed solid. A shape that is not closed cannot be
+measured, so the compile fails naming the part rather than quietly leaving that shape's
+weight out of the total. Inverted winding is repaired automatically.
+
+If you override `center_of_mass` but let the inertia be measured, the measured tensor is
+shifted to your center with the parallel-axis theorem, so the exported pair stays
+physically consistent. Overriding `diagonal_inertia` takes your tensor as given.
 
 ## Physics mode
 

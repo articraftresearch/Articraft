@@ -40,8 +40,8 @@ class _ShapeData:
 @dataclass
 class Part:
     name: str
-    mass_properties: MassProperties | None = None
     _shapes: dict[str, _ShapeData] = field(default_factory=dict, init=False, repr=False)
+    mass_properties: MassProperties | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.name = _as_name(self.name, field_name="part name")
@@ -124,8 +124,8 @@ class ArticulatedObject:
     def meters_per_unit(self) -> float:
         return 1.0
 
-    def part(self, name: str, *, mass: MassProperties | None = None) -> Part:
-        part = Part(name=name, mass_properties=mass)
+    def part(self, name: str, *, mass_properties: MassProperties | None = None) -> Part:
+        part = Part(name=name, mass_properties=mass_properties)
         if any(existing.name == part.name for existing in self.parts):
             raise ValidationError(f"duplicate part name: {part.name!r}")
         self.parts.append(part)

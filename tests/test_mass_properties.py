@@ -106,7 +106,7 @@ def test_overlapping_shapes_do_not_double_count_mass() -> None:
 
 def test_export_writes_mass_api_attributes(tmp_path) -> None:
     model = ArticulatedObject("massed")
-    part = model.part("body", mass=MassProperties(material=MaterialDensity.HARDWOOD))
+    part = model.part("body", mass_properties=MassProperties(material=MaterialDensity.HARDWOOD))
     part.add(BoxGeometry((0.2, 0.2, 0.05)), name="slab")
 
     result = export_object(model, tmp_path)
@@ -117,7 +117,9 @@ def test_export_writes_mass_api_attributes(tmp_path) -> None:
 
     api = mass_api(prims[0])
     assert api.GetMassAttr().Get() == pytest.approx(0.2 * 0.2 * 0.05 * 700.0)
-    assert api.GetDensityAttr().Get() == pytest.approx(700.0)
+    # Density is intentionally not authored: mass already resolves it, and the two
+    # can disagree when a part's shapes are combined by concatenation.
+    assert not api.GetDensityAttr().Get()
     assert api.GetCenterOfMassAttr().Get() is not None
     inertia = api.GetDiagonalInertiaAttr().Get()
     assert all(value > 0.0 for value in inertia)
@@ -139,7 +141,7 @@ def test_export_omits_mass_api_when_the_part_has_no_properties(tmp_path) -> None
 
 def test_missing_mass_check_reports_every_part_without_properties() -> None:
     model = ArticulatedObject("mixed")
-    heavy = model.part("heavy", mass=MassProperties(material=MaterialDensity.STEEL))
+    heavy = model.part("heavy", mass_properties=MassProperties(material=MaterialDensity.STEEL))
     heavy.add(BoxGeometry((0.1, 0.1, 0.1)), name="block")
     light = model.part("light")
     light.add(CylinderGeometry(0.05, 0.02).translate(0.0, 0.0, 0.06), name="disc")
@@ -154,9 +156,44 @@ def test_missing_mass_check_reports_every_part_without_properties() -> None:
 
 def test_missing_mass_check_passes_when_every_part_has_properties() -> None:
     model = ArticulatedObject("complete")
-    part = model.part("body", mass=MassProperties(density=900.0))
+    part = model.part("body", mass_properties=MassProperties(density=900.0))
     part.add(BoxGeometry((0.1, 0.1, 0.1)), name="block")
 
     ctx = TestContext(model)
     assert ctx.fail_if_parts_have_no_mass() is True
     assert ctx.report().passed
+
+
+def test_authored_center_of_mass_shifts_the_measured_inertia() -> None:
+    box = _box((0.1, 0.1, 0.1))
+    measured = resolve_mass(MassProperties(density=1000.0), [box], part_name="p")
+    shifted = resolve_mass(
+        MassProperties(density=1000.0, center_of_mass=(0.0, 0.0, 0.5)), [box], part_name="p"
+    )
+    # Parallel axis adds m*d^2 about the two axes perpendicular to the offset.
+    expected = measured.mass * 0.5**2
+    moved = sorted(shifted.diagonal_inertia)[1:]
+    assert all(
+        value == pytest.approx(sorted(measured.diagonal_inertia)[0] + expected) for value in moved
+    )
+
+
+def test_inverted_winding_still_measures_a_positive_mass() -> None:
+    inverted = _box((0.1, 0.1, 0.1))
+    inverted.invert()
+    resolved = resolve_mass(MassProperties(density=1000.0), [inverted], part_name="p")
+    assert resolved.mass == pytest.approx(1.0)
+
+
+def test_open_shapes_fail_instead_of_being_dropped() -> None:
+    solid = _box((0.1, 0.1, 0.1))
+    open_shell = _box((0.1, 0.1, 0.1))
+    open_shell.faces = open_shell.faces[:-2]
+    with pytest.raises(ValidationError, match="not closed solids"):
+        resolve_mass(MassProperties(density=1000.0), [solid, open_shell], part_name="mixed")
+
+
+def test_settings_flag_reaches_the_compile_worker() -> None:
+    from mini_articraft._child_process import child_environment
+
+    assert child_environment().get("MINI_ARTICRAFT_PHYSICS") in {"0", "1"}

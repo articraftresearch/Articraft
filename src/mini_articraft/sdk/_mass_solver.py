@@ -10,6 +10,10 @@ import trimesh
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.mass import MassProperties
 
+# A part with no measurable solid still needs some inertia to simulate. This stands
+# in for a 1 cm radius of gyration; author diagonal_inertia when the part is larger.
+_POINT_RADIUS_OF_GYRATION = 0.01
+
 
 @dataclass(frozen=True, slots=True)
 class ResolvedMass:
@@ -29,7 +33,7 @@ def resolve_mass(
 ) -> ResolvedMass:
     """Combine authored mass properties with the part's measured geometry."""
 
-    combined = _combine(meshes)
+    combined = _combine(meshes, part_name=part_name)
     volume = float(combined.volume) if combined is not None else 0.0
 
     density = properties.resolved_density
@@ -47,7 +51,8 @@ def resolve_mass(
         # No measurable solid: an explicit mass still exports, with a point-like
         # inertia the author can override.
         center = properties.center_of_mass or (0.0, 0.0, 0.0)
-        inertia = properties.diagonal_inertia or (mass * 1e-4, mass * 1e-4, mass * 1e-4)
+        point_inertia = mass * _POINT_RADIUS_OF_GYRATION**2
+        inertia = properties.diagonal_inertia or (point_inertia,) * 3
         axes = properties.principal_axes or (1.0, 0.0, 0.0, 0.0)
         return ResolvedMass(mass, _triple(center), _triple(inertia), axes)
 
@@ -59,12 +64,36 @@ def resolve_mass(
     if float(np.linalg.det(eigenvectors)) < 0.0:
         eigenvectors[:, 0] *= -1.0  # keep a right-handed frame
 
+    if properties.diagonal_inertia is not None:
+        # An authored tensor is taken as given, about whichever center is authored.
+        center = properties.center_of_mass or measured_center
+        inertia = properties.diagonal_inertia
+        axes = properties.principal_axes or (1.0, 0.0, 0.0, 0.0)
+        return ResolvedMass(float(mass), _triple(center), _triple(inertia), axes)
+
     center = properties.center_of_mass or measured_center
-    inertia = properties.diagonal_inertia or _triple(
-        [max(float(value), 1e-12) for value in eigenvalues]
-    )
+    if properties.center_of_mass is not None:
+        # USD expects the inertia about the authored center of mass, so shift the
+        # measured tensor there instead of exporting a mismatched pair.
+        tensor = _shift_inertia(tensor, mass, measured_center, center)
+        eigenvalues, eigenvectors = np.linalg.eigh(tensor)
+        if float(np.linalg.det(eigenvectors)) < 0.0:
+            eigenvectors[:, 0] *= -1.0
+    inertia = _triple([max(float(value), 1e-12) for value in eigenvalues])
     axes = properties.principal_axes or _quaternion(eigenvectors)
     return ResolvedMass(float(mass), _triple(center), _triple(inertia), axes)
+
+
+def _shift_inertia(
+    tensor: np.ndarray,
+    mass: float,
+    measured_center: tuple[float, float, float],
+    target_center: tuple[float, float, float],
+) -> np.ndarray:
+    """Parallel-axis: re-express an inertia tensor about a different center."""
+
+    offset = np.asarray(target_center, dtype=float) - np.asarray(measured_center, dtype=float)
+    return tensor + mass * (float(offset @ offset) * np.eye(3) - np.outer(offset, offset))
 
 
 def _triple(values) -> tuple[float, float, float]:
@@ -72,10 +101,30 @@ def _triple(values) -> tuple[float, float, float]:
     return (x, y, z)
 
 
-def _combine(meshes: list[trimesh.Trimesh]) -> trimesh.Trimesh | None:
+def _combine(meshes: list[trimesh.Trimesh], *, part_name: str) -> trimesh.Trimesh | None:
     """One solid for the part: a union when it succeeds, else the closed shapes."""
 
-    solids = [mesh for mesh in meshes if mesh.is_watertight and float(mesh.volume) > 0.0]
+    solids: list[trimesh.Trimesh] = []
+    open_shapes = 0
+    for mesh in meshes:
+        if not mesh.is_watertight:
+            open_shapes += 1
+            continue
+        solid = mesh
+        if float(solid.volume) < 0.0:
+            # Inverted winding still describes a real solid; flip it rather than
+            # discarding the shape's mass.
+            solid = solid.copy()
+            solid.fix_normals()
+        if float(solid.volume) > 0.0:
+            solids.append(solid)
+    if open_shapes:
+        # Dropping a shape would understate the part's mass with no signal, which is
+        # the silent wrongness this feature exists to avoid.
+        raise ValidationError(
+            f"part {part_name!r} has {open_shapes} shape(s) that are not closed solids, "
+            "so its mass cannot be measured; close the geometry or set an explicit mass"
+        )
     if not solids:
         return None
     if len(solids) == 1:

@@ -8,13 +8,12 @@ the part already contains.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Vec3, _as_vec3
-
-Quat: tuple[float, float, float, float]
 
 
 class MaterialDensity(StrEnum):
@@ -125,7 +124,7 @@ def _positive(value: object, *, field_name: str) -> float:
         number = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
         raise ValidationError(f"{field_name} must be a number") from exc
-    if not number > 0.0 or number != number or number in (float("inf"), float("-inf")):
+    if not math.isfinite(number) or number <= 0.0:
         raise ValidationError(f"{field_name} must be a positive, finite number")
     return number
 

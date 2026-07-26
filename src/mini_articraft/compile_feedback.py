@@ -579,7 +579,7 @@ _RUNTIME_RULES = (
 _STRUCTURE_RULES = ("- Fix the model structure first. Local geometry tuning comes after that.",)
 _RULES_BY_KIND = {
     "missing_mass": (
-        "- Give every part a mass: pass `mass=MassProperties(material=MaterialDensity.STEEL)` "
+        "- Give every part a mass: pass `mass_properties=MassProperties(material=MaterialDensity.STEEL)` "
         "to `model.part()`, choosing the material the part is actually made of.",
         "- Use `density=` for a material that is not in the library, or `mass=` in kilograms "
         "when you know the weight. Center of mass and inertia are measured from the geometry.",
