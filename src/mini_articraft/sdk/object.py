@@ -81,6 +81,26 @@ class Part:
             raise ValidationError(f"unknown shape {shape_name!r} on part {self.name!r}")
         return entry.geometry
 
+    def set_material(self, name: str, material: Material) -> None:
+        """Assign a material to an existing shape.
+
+        Lets materials be applied as a pass after geometry is authored, so a
+        model can build shapes (optionally with plain colors) and a later step
+        upgrades them to physically based surfaces.
+        """
+
+        shape_name = _as_name(name, field_name="shape name")
+        entry = self._shapes.get(shape_name)
+        if entry is None:
+            raise ValidationError(f"unknown shape {shape_name!r} on part {self.name!r}")
+        self._shapes[shape_name] = _ShapeData(
+            name=entry.name,
+            geometry=entry.geometry,
+            material=_as_material(
+                material, field_name=f"part {self.name!r} shape {shape_name!r} material"
+            ),
+        )
+
     def _iter_shapes(self) -> Iterator[_ShapeData]:
         return iter(self._shapes.values())
 

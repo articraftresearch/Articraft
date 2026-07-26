@@ -132,6 +132,9 @@ def _read_material(shape: Usd.Prim) -> dict[str, object] | None:
         "roughness": _attribute(shape, "material:roughness", 0.6),
         "opacity": _attribute(shape, "material:opacity", 1.0),
         "emissive": _attribute(shape, "material:emissive"),
+        # When set, USDLoader has already applied ambientCG texture maps; the
+        # viewer keeps those and only layers on the authored tint + metalness.
+        "textured": _attribute(shape, "material:textured") is not None,
     }
 
 

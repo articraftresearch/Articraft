@@ -9,11 +9,12 @@ import sys
 import time
 import traceback
 from collections.abc import Hashable, Iterable
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
 from mini_articraft.compile_result import CompileResult
+from mini_articraft.record import Record
 from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
 from mini_articraft.sdk.export import export_object
 
@@ -82,6 +83,85 @@ def compile_run(run_dir: Path, *, include_report: bool = True) -> dict[str, Any]
     result.compile_stats = tracker.finish()
     tracker.remove()
     return result.to_payload(include_report=include_report)
+
+
+@dataclass(frozen=True, slots=True)
+class TextureRunResult:
+    succeeded: bool
+    requested_shapes: int = 0
+    textured_shapes: int = 0
+    errors: tuple[str, ...] = ()
+    error: str | None = None
+    usdz: Path | None = None
+
+    @property
+    def applied(self) -> bool:
+        return self.textured_shapes > 0
+
+
+def texture_run(run_dir: Path) -> TextureRunResult:
+    """Re-export a compiled run's result with texture maps.
+
+    It rebuilds the final model, then re-exports a single textured USDZ in place
+    of the parametric attempt outputs. Any failure leaves the parametric result
+    untouched and is returned as data so it is never fatal to a run.
+    """
+
+    # Resolve before chdir: relative paths would otherwise break once the cwd
+    # moves into the workspace below.
+    run_dir = Path(run_dir).resolve()
+    workspace = run_dir / "workspace"
+    result_dir = run_dir / "result"
+    if not (workspace / "main.py").is_file():
+        return TextureRunResult(succeeded=False, error="workspace/main.py is required")
+
+    previous_cwd = Path.cwd()
+    sys.path.insert(0, str(workspace))
+    manifest = result_dir / "model.json"
+    previous_manifest = manifest.read_bytes() if manifest.is_file() else None
+    try:
+        os.chdir(workspace)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            globals_dict = runpy.run_path(str(workspace / "main.py"), run_name="__main__")
+            object_model = globals_dict.get("object_model")
+            if not isinstance(object_model, ArticulatedObject):
+                return TextureRunResult(
+                    succeeded=False,
+                    error="main.py must define object_model as an ArticulatedObject",
+                )
+            export_result = export_object(object_model, result_dir, textured=True)
+
+            report = export_result.textures
+            if report.textured_shapes == 0:
+                if previous_manifest is None:
+                    manifest.unlink(missing_ok=True)
+                else:
+                    manifest_temp = manifest.with_name(f".{manifest.name}.texture-restore")
+                    manifest_temp.write_bytes(previous_manifest)
+                    manifest_temp.replace(manifest)
+                export_result.usdz.unlink(missing_ok=True)
+            else:
+                for stale in (result_dir / "usdz").glob("*.usdz"):
+                    if stale != export_result.usdz:
+                        stale.unlink()
+                record_path = run_dir / "record.json"
+                if record_path.is_file():
+                    record = Record.load(record_path)
+                    record.result = export_result.usdz.relative_to(run_dir).as_posix()
+                    record.save(record_path)
+        return TextureRunResult(
+            succeeded=True,
+            requested_shapes=report.requested_shapes,
+            textured_shapes=report.textured_shapes,
+            errors=report.errors,
+            usdz=export_result.usdz if report.textured_shapes > 0 else None,
+        )
+    except Exception as exc:
+        return TextureRunResult(succeeded=False, error=f"{type(exc).__name__}: {exc}")
+    finally:
+        os.chdir(previous_cwd)
+        with contextlib.suppress(ValueError):
+            sys.path.remove(str(workspace))
 
 
 def _compile_workspace(
