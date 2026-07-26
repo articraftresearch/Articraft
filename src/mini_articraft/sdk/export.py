@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import json
 import math
-import shutil
 import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-import numpy as np
-import xatlas
 from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
     Gf,
     Sdf,
@@ -25,22 +22,14 @@ from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
     UsdValidation,
 )
 
-from mini_articraft.sdk import ambientcg
 from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
 from mini_articraft.sdk._mesh_core import geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
-from mini_articraft.sdk.materials import Material, SurfaceKind
+from mini_articraft.sdk.materials import Material
 from mini_articraft.sdk.object import ArticulatedObject, Geometry
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
-__all__ = ["ExportResult", "TextureExportReport", "export_object"]
-
-
-@dataclass(frozen=True)
-class TextureExportReport:
-    requested_shapes: int = 0
-    textured_shapes: int = 0
-    errors: tuple[str, ...] = ()
+__all__ = ["ExportResult", "export_object"]
 
 
 @dataclass(frozen=True)
@@ -48,22 +37,6 @@ class ExportResult:
     root: Path
     manifest: Path
     usdz: Path
-    textures: TextureExportReport
-
-
-@dataclass
-class _TextureResolver:
-    resolved: dict[SurfaceKind, ambientcg.TextureSet | None] = field(default_factory=dict)
-    errors: dict[SurfaceKind, str] = field(default_factory=dict)
-
-    def resolve(self, kind: SurfaceKind) -> ambientcg.TextureSet | None:
-        if kind not in self.resolved:
-            try:
-                self.resolved[kind] = ambientcg.fetch_material(kind)[0]
-            except Exception as exc:
-                self.resolved[kind] = None
-                self.errors[kind] = f"{kind.value}: {type(exc).__name__}: {exc}"
-        return self.resolved[kind]
 
 
 def export_object(
@@ -71,15 +44,8 @@ def export_object(
     output_dir: Path | str,
     *,
     mesh_tolerance: float = DEFAULT_MESH_TOLERANCE,
-    textured: bool = False,
 ) -> ExportResult:
-    """Publish ``obj`` as a validated USDZ package.
-
-    With ``textured=True``, materials with an explicit ``SurfaceKind`` are
-    upgraded to a tiling ambientCG PBR material with the maps embedded in the
-    package. Materials without one -- or whose maps cannot be fetched -- stay
-    parametric.
-    """
+    """Publish ``obj`` as a validated USDZ package."""
 
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -90,12 +56,7 @@ def export_object(
     payload = _object_to_payload(obj) | {"files": {"usdz": usdz.relative_to(root).as_posix()}}
     manifest_temp = manifest.with_name(f".{manifest.name}.tmp")
     try:
-        texture_report = _write_usdz(
-            obj,
-            usdz,
-            mesh_tolerance,
-            textured=textured,
-        )
+        _write_usdz(obj, usdz, mesh_tolerance)
         manifest_temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         manifest_temp.replace(manifest)
     except BaseException:
@@ -103,7 +64,7 @@ def export_object(
         raise
     finally:
         manifest_temp.unlink(missing_ok=True)
-    return ExportResult(root=root, manifest=manifest, usdz=usdz, textures=texture_report)
+    return ExportResult(root=root, manifest=manifest, usdz=usdz)
 
 
 def _next_usdz_path(usdz_dir: Path) -> Path:
@@ -115,9 +76,7 @@ def _write_usdz(
     obj: ArticulatedObject,
     path: Path,
     mesh_tolerance: float,
-    *,
-    textured: bool = False,
-) -> TextureExportReport:
+) -> None:
     if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
         raise ValueError("mesh_tolerance must be a positive finite number")
 
@@ -135,16 +94,7 @@ def _write_usdz(
         UsdPhysics.ArticulationRootAPI.Apply(object_prim)
         _attrs(object_prim, {"name": obj.name, "units": "meters"})
 
-        # Textured shapes copy their maps next to the layer (in temp_dir) so
-        # CreateNewUsdzPackage bundles them into the .usdz.
-        part_paths, texture_report = _write_parts(
-            stage,
-            f"{object_path}/parts",
-            obj,
-            mesh_tolerance,
-            textured=textured,
-            asset_dir=Path(temp_dir),
-        )
+        part_paths = _write_parts(stage, f"{object_path}/parts", obj, mesh_tolerance)
         _write_articulations(stage, f"{object_path}/joints", obj, part_paths)
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +110,6 @@ def _write_usdz(
             temp_path.replace(path)
         finally:
             temp_path.unlink(missing_ok=True)
-    return texture_report
 
 
 def _write_parts(
@@ -168,17 +117,11 @@ def _write_parts(
     scope_path: str,
     obj: ArticulatedObject,
     mesh_tolerance: float,
-    *,
-    textured: bool = False,
-    asset_dir: Path | None = None,
-) -> tuple[dict[str, str], TextureExportReport]:
+) -> dict[str, str]:
     UsdGeom.Scope.Define(stage, scope_path)
     transforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance).world_transforms({})
     safe_part_names = _safe_name_map(part.name for part in obj.parts)
     paths: dict[str, str] = {}
-    resolver = _TextureResolver() if textured else None
-    requested_shapes = 0
-    textured_shapes = 0
 
     for part in obj.parts:
         part_path = f"{scope_path}/{safe_part_names[part.name]}"
@@ -193,31 +136,12 @@ def _write_parts(
         materials_path = f"{part_path}/materials"
         shape_entries = list(part._iter_shapes())
         safe_shape_names = _safe_name_map(shape.name for shape in shape_entries)
-        if textured or any(shape.material is not None for shape in shape_entries):
+        if any(shape.material is not None for shape in shape_entries):
             UsdGeom.Scope.Define(stage, materials_path)
         for shape in shape_entries:
             safe_shape = safe_shape_names[shape.name]
             mesh_path = f"{shapes_path}/{safe_shape}"
             material_path = f"{materials_path}/{safe_shape}"
-
-            material = shape.material
-            surface = material.surface if material is not None else None
-            selection = resolver.resolve(surface) if resolver and surface else None
-            if resolver is not None and surface is not None:
-                requested_shapes += 1
-            if selection is not None and material is not None and asset_dir is not None:
-                _write_textured_shape(
-                    stage,
-                    mesh_path,
-                    material_path,
-                    shape,
-                    selection,
-                    material,
-                    asset_dir,
-                    mesh_tolerance,
-                )
-                textured_shapes += 1
-                continue
 
             points, faces = _mesh(shape.geometry, mesh_tolerance)
             mesh = UsdGeom.Mesh.Define(stage, mesh_path)
@@ -234,155 +158,7 @@ def _write_parts(
                 mesh.CreateDisplayOpacityAttr([shape.material.opacity])
                 _bind_material(stage, mesh, material_path, shape.material)
                 _attrs(mesh.GetPrim(), _material_attrs(shape.material))
-    errors = tuple(resolver.errors.values()) if resolver is not None else ()
-    return paths, TextureExportReport(
-        requested_shapes=requested_shapes,
-        textured_shapes=textured_shapes,
-        errors=errors,
-    )
-
-
-def _write_textured_shape(
-    stage: Usd.Stage,
-    mesh_path: str,
-    material_path: str,
-    shape,
-    texture_set,
-    material: Material,
-    asset_dir: Path,
-    mesh_tolerance: float,
-) -> None:
-    trimesh_obj = geometry_to_trimesh(shape.geometry, mesh_tolerance)
-    points, faces, uvs, normals = _unwrap_mesh(trimesh_obj)
-    gf_points = [Gf.Vec3f(*point) for point in points.tolist()]
-
-    mesh = UsdGeom.Mesh.Define(stage, mesh_path)
-    mesh.CreatePointsAttr(gf_points)
-    mesh.CreateFaceVertexCountsAttr([3] * len(faces))
-    mesh.CreateFaceVertexIndicesAttr(faces.reshape(-1).tolist())
-    mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
-    mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(gf_points))
-    mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
-    mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
-    primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(  # pyright: ignore[reportAttributeAccessIssue]
-        "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex
-    )
-    primvar.Set(  # pyright: ignore[reportAttributeAccessIssue]
-        [
-            Gf.Vec2f(*uv)  # pyright: ignore[reportAttributeAccessIssue]
-            for uv in uvs.tolist()
-        ]
-    )
-
-    tint = material.base_color[:3]
-    mesh.CreateDisplayColorAttr([Gf.Vec3f(*tint)])
-    mesh.CreateDisplayOpacityAttr([material.opacity])
-    _bind_textured_material(stage, mesh, material_path, texture_set, material, asset_dir)
-    _attrs(mesh.GetPrim(), {"name": shape.name})
-    # The viewer keeps USDLoader's texture maps and layers the authored tint +
-    # metalness on top (see viewer.html); these attrs carry that intent.
-    _attrs(
-        mesh.GetPrim(),
-        {
-            "material:metallic": material.metallic,
-            "material:roughness": material.roughness,
-            "material:baseColor": Gf.Vec3d(*tint),
-            "material:opacity": material.opacity,
-            "material:textured": 1.0,
-        },
-    )
-
-
-def _unwrap_mesh(trimesh_obj) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Generate a UV atlas while preserving source normals across seam vertices."""
-
-    vertices = np.asarray(trimesh_obj.vertices)
-    source_normals = np.asarray(trimesh_obj.vertex_normals)
-    vertex_map, faces, uvs = xatlas.parametrize(vertices, np.asarray(trimesh_obj.faces))
-    return (
-        vertices[vertex_map].astype(np.float32),
-        np.asarray(faces, dtype=np.int32),
-        np.asarray(uvs, dtype=np.float32),
-        source_normals[vertex_map].astype(np.float32),
-    )
-
-
-def _bind_textured_material(
-    stage: Usd.Stage,
-    mesh: UsdGeom.Mesh,
-    material_path: str,
-    texture_set,
-    authored: Material,
-    asset_dir: Path,
-) -> None:
-    local: dict[str, str] = {}
-    for channel, source in texture_set.maps().items():
-        destination = asset_dir / source.name
-        if not destination.exists():
-            shutil.copyfile(source, destination)
-        local[channel] = source.name
-
-    material = UsdShade.Material.Define(stage, material_path)
-    surface = UsdShade.Shader.Define(stage, f"{material_path}/surface")
-    surface.CreateIdAttr("UsdPreviewSurface")
-    surface.CreateInput("useSpecularWorkflow", Sdf.ValueTypeNames.Int).Set(0)
-
-    reader = UsdShade.Shader.Define(stage, f"{material_path}/stReader")
-    reader.CreateIdAttr("UsdPrimvarReader_float2")
-    reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
-    st_output = reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
-
-    def texture(name: str, filename: str, colorspace: str) -> UsdShade.Shader:
-        node = UsdShade.Shader.Define(stage, f"{material_path}/{name}")
-        node.CreateIdAttr("UsdUVTexture")
-        node.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(f"./{filename}")
-        node.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(st_output)
-        node.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set("repeat")
-        node.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set("repeat")
-        node.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set(colorspace)
-        return node
-
-    diffuse = texture("diffuseTex", local["base_color"], "sRGB")
-    diffuse.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
-        Gf.Vec4f(*authored.base_color)  # pyright: ignore[reportAttributeAccessIssue]
-    )
-    surface.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
-        diffuse.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
-    )
-    if authored.opacity < 1.0:
-        surface.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(authored.opacity)
-    if "roughness" in local:
-        rough = texture("roughTex", local["roughness"], "raw")
-        rough.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
-            Gf.Vec4f(*([authored.roughness] * 4))  # pyright: ignore[reportAttributeAccessIssue]
-        )
-        surface.CreateInput("roughness", Sdf.ValueTypeNames.Float).ConnectToSource(
-            rough.CreateOutput("r", Sdf.ValueTypeNames.Float)
-        )
-    if "normal" in local:
-        normal = texture("normalTex", local["normal"], "raw")
-        normal.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
-            Gf.Vec4f(2, 2, 2, 1)  # pyright: ignore[reportAttributeAccessIssue]
-        )
-        normal.CreateInput("bias", Sdf.ValueTypeNames.Float4).Set(
-            Gf.Vec4f(-1, -1, -1, 0)  # pyright: ignore[reportAttributeAccessIssue]
-        )
-        surface.CreateInput("normal", Sdf.ValueTypeNames.Normal3f).ConnectToSource(
-            normal.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
-        )
-    if authored.metallic > 0.0 and "metalness" in local:
-        metal = texture("metalTex", local["metalness"], "raw")
-        metal.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
-            Gf.Vec4f(*([authored.metallic] * 4))  # pyright: ignore[reportAttributeAccessIssue]
-        )
-        surface.CreateInput("metallic", Sdf.ValueTypeNames.Float).ConnectToSource(
-            metal.CreateOutput("r", Sdf.ValueTypeNames.Float)
-        )
-    else:
-        surface.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(authored.metallic)
-
-    material.CreateSurfaceOutput().ConnectToSource(surface.ConnectableAPI(), "surface")
-    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
+    return paths
 
 
 def _bind_material(
@@ -566,7 +342,6 @@ def _material_payload(material: Material | None) -> dict[str, object] | None:
         "metallic": material.metallic,
         "roughness": material.roughness,
         "emissive": list(material.emissive) if material.emissive is not None else None,
-        "surface": material.surface.value if material.surface is not None else None,
     }
 
 

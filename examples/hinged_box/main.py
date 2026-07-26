@@ -18,7 +18,6 @@ from mini_articraft.sdk import (
     Material,
     MotionLimits,
     Origin,
-    SurfaceKind,
     TestContext,
     TestReport,
 )
@@ -34,11 +33,7 @@ def build_object_model() -> ArticulatedObject:
     base.add(
         Box(0.10, 0.08, 0.04),
         name="body",
-        material=Material.metal(
-            (0.60, 0.62, 0.66),
-            roughness=0.5,
-            surface=SurfaceKind.ALUMINUM,
-        ),
+        material=Material.metal((0.60, 0.62, 0.66), roughness=0.5),
     )
 
     lid = model.part("lid")

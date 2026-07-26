@@ -7,7 +7,6 @@ from typing import Any, ClassVar
 from typer.testing import CliRunner
 
 from mini_articraft.cli import mini
-from mini_articraft.environments.worker import TextureRunResult
 from mini_articraft.record import Record, append_conversation
 from mini_articraft.settings import Settings, get_settings
 
@@ -113,50 +112,6 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
     assert FakeAgent.instances[0].image_path is None
     assert "status: success" in result.output
     assert "run: /tmp/run" in result.output
-
-
-def test_cli_applies_textures_only_after_generation(monkeypatch) -> None:
-    reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
-    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
-    applied: list[dict[str, Any]] = []
-    monkeypatch.setattr(mini, "_apply_textures", applied.append)
-
-    result = CliRunner().invoke(
-        mini.app,
-        ["generate", "make a steel ball", "--textures", "--no-tui"],
-    )
-
-    assert result.exit_code == 0
-    assert FakeAgent.instances[0].kwargs == {"max_turns": 100}
-    assert FakeAgent.instances[0].prompt == "make a steel ball"
-    assert applied == [FakeAgent.result]
-
-
-def test_apply_textures_updates_the_reported_result_path(monkeypatch, tmp_path: Path) -> None:
-    run_dir = tmp_path / "run"
-    final_usdz = run_dir / "result" / "usdz" / "0003.usdz"
-    monkeypatch.setattr(
-        mini,
-        "texture_run",
-        lambda _run: TextureRunResult(
-            succeeded=True,
-            requested_shapes=1,
-            textured_shapes=1,
-            usdz=final_usdz,
-        ),
-    )
-    result: dict[str, Any] = {
-        "status": "success",
-        "run": str(run_dir),
-        "result": "result/usdz/0002.usdz",
-    }
-
-    mini._apply_textures(result)
-
-    assert result["result"] == "result/usdz/0003.usdz"
 
 
 def test_cli_passes_reference_image_to_agent(monkeypatch, tmp_path: Path) -> None:
@@ -465,5 +420,4 @@ def test_main_args_keep_commands_and_help() -> None:
     assert mini._app_args(["generate", "articulated lamp"]) == ["generate", "articulated lamp"]
     assert mini._app_args(["replay", "run-x"]) == ["replay", "run-x"]
     assert mini._app_args(["view", "run-x"]) == ["view", "run-x"]
-    assert mini._app_args(["texture", "run-x"]) == ["texture", "run-x"]
     assert mini._app_args(["--help"]) == ["--help"]

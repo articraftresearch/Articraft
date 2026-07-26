@@ -6,8 +6,6 @@ is authored once, stored on a shape, exported into the USDZ package as a bound
 ``UsdPreviewSurface`` shader, and surfaced to the viewer so metal, plastic,
 rubber, and glass read differently instead of looking like flat display colors.
 
-The optional :class:`SurfaceKind` records the physical surface family so exporters
-can enrich it without inferring material behavior from shape names.
 """
 
 from __future__ import annotations
@@ -15,23 +13,12 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TypeAlias
 
 from mini_articraft.sdk.errors import ValidationError
 
 Color: TypeAlias = tuple[float, float, float, float]
 Rgb: TypeAlias = tuple[float, float, float]
-
-
-class SurfaceKind(StrEnum):
-    """Physical surface families understood by material exporters."""
-
-    ALUMINUM = "aluminum"
-    STEEL = "steel"
-    DARK_METAL = "dark_metal"
-    PLASTIC = "plastic"
-    RUBBER = "rubber"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,14 +32,12 @@ class Material:
     - ``roughness`` in ``[0, 1]``: ``0`` is a mirror-smooth surface, ``1`` is
       fully diffuse.
     - ``emissive`` is an optional ``(r, g, b)`` glow color, unlit by the scene.
-    - ``surface`` optionally records a physical surface family such as steel or plastic.
     """
 
     base_color: Color = (0.8, 0.8, 0.8, 1.0)
     metallic: float = 0.0
     roughness: float = 0.6
     emissive: Rgb | None = None
-    surface: SurfaceKind | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -68,8 +53,6 @@ class Material:
             object.__setattr__(
                 self, "emissive", _as_rgb(self.emissive, field_name="material emissive")
             )
-        if self.surface is not None and not isinstance(self.surface, SurfaceKind):
-            raise ValidationError("material surface must be a SurfaceKind")
 
     @property
     def opacity(self) -> float:
@@ -84,13 +67,11 @@ class Material:
         color: Sequence[float] = (0.82, 0.82, 0.85, 1.0),
         *,
         roughness: float = 0.35,
-        surface: SurfaceKind | None = SurfaceKind.STEEL,
     ) -> Material:
         return cls(
             base_color=_as_color(color, field_name="metal color"),
             metallic=1.0,
             roughness=roughness,
-            surface=surface,
         )
 
     @classmethod
@@ -99,13 +80,11 @@ class Material:
         color: Sequence[float],
         *,
         roughness: float = 0.45,
-        surface: SurfaceKind | None = SurfaceKind.PLASTIC,
     ) -> Material:
         return cls(
             base_color=_as_color(color, field_name="plastic color"),
             metallic=0.0,
             roughness=roughness,
-            surface=surface,
         )
 
     @classmethod
@@ -114,13 +93,11 @@ class Material:
         color: Sequence[float],
         *,
         roughness: float = 0.9,
-        surface: SurfaceKind | None = SurfaceKind.RUBBER,
     ) -> Material:
         return cls(
             base_color=_as_color(color, field_name="rubber color"),
             metallic=0.0,
             roughness=roughness,
-            surface=surface,
         )
 
     @classmethod

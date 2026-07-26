@@ -103,7 +103,6 @@ def test_key_apis_are_documented_by_their_owner_pages() -> None:
             "`ArticulatedObject`",
             "`Material`",
             "`Part`",
-            "`SurfaceKind`",
             "`part.add(...)`",
         ),
         "common/35_joints.md": (
