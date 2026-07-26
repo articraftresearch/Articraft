@@ -88,14 +88,15 @@ Create geometry through parts. The exact API is:
 ```python
 model = ArticulatedObject("object_name")
 base = model.part("base")
-base.add(shape, name="body", color=(0.55, 0.57, 0.60))
+base.add(shape, name="body", material=Material.metal((0.55, 0.57, 0.60)))
 ```
 
 `Part.add` accepts a build123d shape or a public mesh geometry value. The `name`
-argument is required and must be unique within the part. The `color` argument is
-optional and accepts RGB or RGBA. Use `part.get_shape(name)` when a named shape is
-needed later. Do not invent a `GeometryElement` API, and do not pass geometry to
-`model.part(...)`.
+argument is required and must be unique within the part. Use a typed `Material`
+preset when the physical surface is known; `Material.metal`, `plastic`, and
+`rubber` provide useful metallic and roughness defaults. Use `color` for a plain
+matte surface. Use `part.get_shape(name)` when a named shape is needed later. Do
+not invent a `GeometryElement` API, and do not pass geometry to `model.part(...)`.
 
 Create joints with `model.articulation(...)` and the documented
 `ArticulationType`, `Origin`, and `MotionLimits` values. Use `FIXED` for mounted

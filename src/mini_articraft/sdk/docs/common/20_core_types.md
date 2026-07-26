@@ -29,8 +29,9 @@ APIs.
 part's local coordinates. Apply a build123d `Pos`, `Rot`, or `Location` before
 adding a build123d shape. Mini Articraft does not add another shape transform.
 
-Every shape has a unique name within its part. A shape can also have an RGB or
-RGBA color. The SDK has no separate visual, material, texture, or asset type.
+Every shape has a unique name within its part. A shape can have a `Material`, or
+an RGB/RGBA color as shorthand for a matte material. The SDK has no separate
+visual or asset type.
 
 Read [articulated objects and parts](30_articulated_object.md) for named shape
 authoring and validation. Read [mesh geometry and solid
@@ -61,7 +62,7 @@ bounds, distance inspection, and compiler owned checks.
 The public SDK error types are `SDKError` and `ValidationError`. Read
 [errors](10_errors.md) for when each kind of failure is raised.
 
-Read [USDZ export](50_usdz_export.md) for the part and shape hierarchy, colors,
+Read [USDZ export](50_usdz_export.md) for the part and shape hierarchy, materials,
 joint targets, stage units, and output numbering.
 
 ## Public type ownership

@@ -72,7 +72,7 @@ The exporter converts invalid USD identifier characters. If two original names m
 identifier, later names receive suffixes such as `_2`. The manifest and custom USD attributes keep
 the original names.
 
-## Geometry and color
+## Geometry and materials
 
 Both build123d shapes and `MeshGeometry` values are exported as triangle meshes. Each mesh has:
 
@@ -84,11 +84,12 @@ Both build123d shapes and `MeshGeometry` values are exported as triangle meshes.
 The exporter uses `mesh_tolerance` when it tessellates a build123d shape. A `MeshGeometry` uses its
 current vertices and triangle faces.
 
-When a named shape has a color, the mesh gets `primvars:displayColor` and
-`primvars:displayOpacity`. An RGB color has opacity `1.0`. An RGBA color keeps its authored alpha.
-A shape without a color has no display color or opacity authored by mini-articraft.
+When a named shape has a material, the mesh gets a bound `UsdPreviewSurface` plus
+`primvars:displayColor` and `primvars:displayOpacity` fallbacks. An RGB color is
+shorthand for a matte material with opacity `1.0`; RGBA keeps its authored alpha.
+A shape without a material has no display color or material authored by mini-articraft.
 
-The exporter does not create materials, textures, inertial values, or separate collision meshes.
+The exporter does not create inertial values or separate collision meshes.
 
 ## Units and stage metadata
 

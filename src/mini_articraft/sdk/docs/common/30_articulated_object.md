@@ -69,6 +69,7 @@ part.add(
     *,
     name: str,
     color: Sequence[float] | None = None,
+    material: Material | None = None,
 ) -> build123d.Shape | MeshGeometry
 ```
 
@@ -93,6 +94,39 @@ body.add(trim, name="top_trim", color=(0.80, 0.80, 0.82, 0.70))
 
 This creates one rigid part with two named shapes and two colors. It does not
 create two rigid bodies.
+
+### Materials
+
+For a physically based surface, pass a `Material` instead of a `color`. A
+material uses the metallic/roughness workflow and is exported as a bound
+`UsdPreviewSurface`, so metal reads as metal and plastic reads as plastic in the
+viewer and in USDZ preview. `color` and `material` cannot both be set;
+`color=(r, g, b)` is shorthand for a matte dielectric material.
+
+```python
+from mini_articraft.sdk import Material
+
+body.add(
+    shell,
+    name="shell",
+    material=Material.metal((0.72, 0.74, 0.78), roughness=0.30),
+)
+body.add(trim, name="lens", material=Material.glass())
+```
+
+```python
+Material(
+    base_color: (r, g, b, a) in [0, 1],   # alpha is opacity
+    metallic: float = 0.0,                 # 0 dielectric, 1 raw metal
+    roughness: float = 0.6,                # 0 mirror, 1 fully diffuse
+    emissive: (r, g, b) | None = None,     # optional unlit glow
+)
+```
+
+Presets: `Material.metal(color, roughness=...)`, `Material.plastic(color)`,
+`Material.rubber(color)`, `Material.matte(color)`, `Material.glass(color)`.
+The presets provide useful metallic and roughness defaults; pass explicit values
+when the surface should look different.
 
 ### Build123d placement
 
@@ -190,7 +224,8 @@ Validation checks all of these rules:
 - Every part has at least one named nonempty shape.
 - Every build123d shape is nonempty and valid.
 - Every `MeshGeometry` has valid finite vertices and triangle indices.
-- Every shape color has three or four values in the allowed range.
+- Every shape color has three or four values in the allowed range, and every
+  shape material is a valid `Material`.
 - Part names are unique.
 - Every entry in `model.articulations` is an `Articulation`.
 - Articulation names are unique.

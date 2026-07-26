@@ -42,6 +42,7 @@ from mini_articraft.sdk.joints import (
     MotionLimits,
     Origin,
 )
+from mini_articraft.sdk.materials import Material
 from mini_articraft.sdk.object import ArticulatedObject, Part
 from mini_articraft.sdk.testing import (
     AllowedOverlap,
@@ -69,6 +70,7 @@ __all__ = [
     "FailureKind",
     "LatheGeometry",
     "LoftGeometry",
+    "Material",
     "MeshGeometry",
     "MotionLimits",
     "Origin",

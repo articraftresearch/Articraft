@@ -10,11 +10,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pxr import Gf, Sdf, Tf, Usd, UsdGeom, UsdPhysics, UsdUtils, UsdValidation
+from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
+    Gf,
+    Sdf,
+    Tf,
+    Usd,
+    UsdGeom,
+    UsdPhysics,
+    UsdShade,  # pyright: ignore[reportAttributeAccessIssue]
+    UsdUtils,
+    UsdValidation,
+)
 
 from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
 from mini_articraft.sdk._mesh_core import geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
+from mini_articraft.sdk.materials import Material
 from mini_articraft.sdk.object import ArticulatedObject, Geometry
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
@@ -34,6 +45,8 @@ def export_object(
     *,
     mesh_tolerance: float = DEFAULT_MESH_TOLERANCE,
 ) -> ExportResult:
+    """Publish ``obj`` as a validated USDZ package."""
+
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
     obj.validate()
@@ -59,7 +72,11 @@ def _next_usdz_path(usdz_dir: Path) -> Path:
     return usdz_dir / f"{(max(indexes) + 1) if indexes else 0:04d}.usdz"
 
 
-def _write_usdz(obj: ArticulatedObject, path: Path, mesh_tolerance: float) -> None:
+def _write_usdz(
+    obj: ArticulatedObject,
+    path: Path,
+    mesh_tolerance: float,
+) -> None:
     if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
         raise ValueError("mesh_tolerance must be a positive finite number")
 
@@ -116,10 +133,16 @@ def _write_parts(
 
         shapes_path = f"{part_path}/shapes"
         UsdGeom.Scope.Define(stage, shapes_path)
+        materials_path = f"{part_path}/materials"
         shape_entries = list(part._iter_shapes())
         safe_shape_names = _safe_name_map(shape.name for shape in shape_entries)
+        if any(shape.material is not None for shape in shape_entries):
+            UsdGeom.Scope.Define(stage, materials_path)
         for shape in shape_entries:
-            mesh_path = f"{shapes_path}/{safe_shape_names[shape.name]}"
+            safe_shape = safe_shape_names[shape.name]
+            mesh_path = f"{shapes_path}/{safe_shape}"
+            material_path = f"{materials_path}/{safe_shape}"
+
             points, faces = _mesh(shape.geometry, mesh_tolerance)
             mesh = UsdGeom.Mesh.Define(stage, mesh_path)
             mesh.CreatePointsAttr(points)
@@ -127,11 +150,52 @@ def _write_parts(
             mesh.CreateFaceVertexIndicesAttr([index for face in faces for index in face])
             mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
             mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(points))
-            if shape.color is not None:
-                mesh.CreateDisplayColorAttr([Gf.Vec3f(*shape.color[:3])])
-                mesh.CreateDisplayOpacityAttr([shape.color[3]])
             _attrs(mesh.GetPrim(), {"name": shape.name})
+            if shape.material is not None:
+                # displayColor stays as a fallback for renderers that ignore
+                # UsdShade; the bound UsdPreviewSurface carries the full material.
+                mesh.CreateDisplayColorAttr([Gf.Vec3f(*shape.material.base_color[:3])])
+                mesh.CreateDisplayOpacityAttr([shape.material.opacity])
+                _bind_material(stage, mesh, material_path, shape.material)
+                _attrs(mesh.GetPrim(), _material_attrs(shape.material))
     return paths
+
+
+def _bind_material(
+    stage: Usd.Stage,
+    mesh: UsdGeom.Mesh,
+    material_path: str,
+    material: Material,
+) -> None:
+    usd_material = UsdShade.Material.Define(stage, material_path)
+    shader = UsdShade.Shader.Define(stage, f"{material_path}/surface")
+    shader.CreateIdAttr("UsdPreviewSurface")
+    red, green, blue, alpha = material.base_color
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(red, green, blue))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(material.metallic)
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(material.roughness)
+    shader.CreateInput("useSpecularWorkflow", Sdf.ValueTypeNames.Int).Set(0)
+    if alpha < 1.0:
+        shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(alpha)
+    if material.emissive is not None:
+        shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).Set(
+            Gf.Vec3f(*material.emissive)
+        )
+    usd_material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(usd_material)
+
+
+def _material_attrs(material: Material) -> dict[str, object]:
+    red, green, blue, alpha = material.base_color
+    values: dict[str, object] = {
+        "material:metallic": material.metallic,
+        "material:roughness": material.roughness,
+        "material:baseColor": Gf.Vec3d(red, green, blue),
+        "material:opacity": alpha,
+    }
+    if material.emissive is not None:
+        values["material:emissive"] = Gf.Vec3d(*material.emissive)
+    return values
 
 
 def _write_articulations(
@@ -248,6 +312,7 @@ def _object_to_payload(obj: ArticulatedObject) -> dict[str, object]:
                         "name": shape.name,
                         "geometry_type": type(shape.geometry).__name__,
                         "color": shape.color,
+                        "material": _material_payload(shape.material),
                     }
                     for shape in part._iter_shapes()
                 ],
@@ -266,6 +331,17 @@ def _object_to_payload(obj: ArticulatedObject) -> dict[str, object]:
             }
             for item in obj.articulations
         ],
+    }
+
+
+def _material_payload(material: Material | None) -> dict[str, object] | None:
+    if material is None:
+        return None
+    return {
+        "base_color": list(material.base_color),
+        "metallic": material.metallic,
+        "roughness": material.roughness,
+        "emissive": list(material.emissive) if material.emissive is not None else None,
     }
 
 
