@@ -6,7 +6,12 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import ClassVar, cast
+
+import numpy as np
+import trimesh
+from scipy.spatial import cKDTree  # pyright: ignore[reportAttributeAccessIssue]
 
 from mini_articraft.sdk._collision import (
     Bounds,
@@ -17,6 +22,7 @@ from mini_articraft.sdk._collision import (
     Vec3,
     _pair_key,
 )
+from mini_articraft.sdk._mesh_core import geometry_to_trimesh
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType
 from mini_articraft.sdk.object import ArticulatedObject, Part, PartRef
@@ -65,6 +71,51 @@ class AllowedOverlap:
 
 
 @dataclass(frozen=True)
+class TestMetric:
+    __test__: ClassVar[bool] = False
+
+    name: str
+    value: float
+    unit: str = ""
+    minimum: float | None = None
+    maximum: float | None = None
+    passed: bool | None = None
+    details: str = ""
+
+
+@dataclass(frozen=True)
+class TestArtifact:
+    __test__: ClassVar[bool] = False
+
+    name: str
+    path: str
+    kind: str
+    caption: str = ""
+
+
+@dataclass(frozen=True)
+class GeometryMetrics:
+    bounds: Bounds
+    dimensions: Vec3
+    centroid: Vec3
+    triangle_count: int
+    component_count: int
+    watertight: bool
+    surface_area: float
+    signed_volume: float
+    orientation: str
+
+
+@dataclass(frozen=True)
+class PoseSample:
+    positions: tuple[tuple[str, float], ...]
+    label: str = ""
+
+    def as_dict(self) -> dict[str, float]:
+        return dict(self.positions)
+
+
+@dataclass(frozen=True)
 class TestReport:
     __test__: ClassVar[bool] = False
 
@@ -76,6 +127,8 @@ class TestReport:
     allowances: tuple[str, ...] = ()
     allowed_isolated_parts: tuple[str, ...] = ()
     allowed_overlaps: tuple[AllowedOverlap, ...] = ()
+    metrics: tuple[TestMetric, ...] = ()
+    artifacts: tuple[TestArtifact, ...] = ()
 
 
 @dataclass
@@ -93,6 +146,8 @@ class TestContext:
     _allowed_isolated_parts: dict[str, str] = field(default_factory=dict)
     _allowed_overlaps: list[AllowedOverlap] = field(default_factory=list)
     _pose: dict[str, float] = field(default_factory=dict)
+    _metrics: list[TestMetric] = field(default_factory=list)
+    _artifacts: list[TestArtifact] = field(default_factory=list)
     _kernel_cache: MeshCollisionKernel | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -113,6 +168,8 @@ class TestContext:
             allowances=tuple(self._allowances),
             allowed_isolated_parts=tuple(self._allowed_isolated_parts),
             allowed_overlaps=tuple(self._allowed_overlaps),
+            metrics=tuple(self._metrics),
+            artifacts=tuple(self._artifacts),
         )
 
     def check(self, name: str, ok: bool, details: str = "") -> bool:
@@ -125,6 +182,84 @@ class TestContext:
         text = str(text or "").strip()
         if text and text not in self._warnings:
             self._warnings.append(text)
+
+    def record_metric(
+        self,
+        name: str,
+        value: float,
+        *,
+        unit: str = "",
+        details: str = "",
+    ) -> TestMetric:
+        metric = TestMetric(
+            name=_plain_name(name, "metric name"),
+            value=_finite(value, "metric value"),
+            unit=str(unit).strip(),
+            details=str(details or ""),
+        )
+        self._metrics.append(metric)
+        return metric
+
+    def expect_metric(
+        self,
+        name: str,
+        value: float,
+        *,
+        minimum: float | None = None,
+        maximum: float | None = None,
+        unit: str = "",
+        details: str = "",
+    ) -> bool:
+        metric_name = _plain_name(name, "metric name")
+        measured = _finite(value, "metric value")
+        lower = None if minimum is None else _finite(minimum, "metric minimum")
+        upper = None if maximum is None else _finite(maximum, "metric maximum")
+        if lower is not None and upper is not None and upper < lower:
+            raise ValidationError("metric maximum must be greater than or equal to minimum")
+        ok = (lower is None or measured >= lower) and (upper is None or measured <= upper)
+        self._metrics.append(
+            TestMetric(
+                name=metric_name,
+                value=measured,
+                unit=str(unit).strip(),
+                minimum=lower,
+                maximum=upper,
+                passed=ok,
+                details=str(details or ""),
+            )
+        )
+        bounds = f"minimum={lower!r} maximum={upper!r}"
+        return self._record(metric_name, ok, f"value={measured:.9g} {bounds} {details}".strip())
+
+    def attach_artifact(
+        self,
+        path: str | Path,
+        *,
+        name: str | None = None,
+        kind: str | None = None,
+        caption: str = "",
+    ) -> TestArtifact:
+        raw = Path(path)
+        if raw.is_absolute() or ".." in raw.parts:
+            raise ValidationError("artifact path must be relative and stay inside the workspace")
+        resolved = (Path.cwd() / raw).resolve()
+        try:
+            resolved.relative_to(Path.cwd().resolve())
+        except ValueError as exc:
+            raise ValidationError("artifact path must stay inside the workspace") from exc
+        if not resolved.is_file():
+            raise ValidationError(f"artifact file does not exist: {raw.as_posix()}")
+        artifact_kind = str(kind or _artifact_kind(raw)).strip().lower()
+        if artifact_kind not in {"image", "json", "csv", "text"}:
+            raise ValidationError("artifact kind must be image, json, csv, or text")
+        artifact = TestArtifact(
+            name=_plain_name(name or raw.stem, "artifact name"),
+            path=raw.as_posix(),
+            kind=artifact_kind,
+            caption=str(caption or "").strip(),
+        )
+        self._artifacts.append(artifact)
+        return artifact
 
     def allow_overlap(
         self,
@@ -202,6 +337,248 @@ class TestContext:
             _part_name(part, field_name="part"), shape, self._pose
         )
 
+    def part_world_point(self, part: PartRef, point: Sequence[float]) -> Vec3:
+        part_name = _part_name(part, field_name="part")
+        local = np.asarray(_vec3(point, "point"), dtype=np.float64)
+        transform = self._kernel().world_transforms(self._pose).get(part_name)
+        if transform is None:
+            raise ValidationError(f"unknown part: {part_name!r}")
+        world = transform @ np.asarray([*local, 1.0], dtype=np.float64)
+        return (float(world[0]), float(world[1]), float(world[2]))
+
+    def measure_geometry(
+        self,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+    ) -> GeometryMetrics:
+        meshes = self._selected_world_meshes(part, shape)
+        vertices = np.concatenate([np.asarray(mesh.vertices) for mesh in meshes], axis=0)
+        combined = trimesh.util.concatenate(meshes)
+        bounds_array = np.asarray([vertices.min(axis=0), vertices.max(axis=0)])
+        dimensions = bounds_array[1] - bounds_array[0]
+        area = sum(float(mesh.area) for mesh in meshes)
+        signed_volume = sum(_signed_mesh_volume(mesh) for mesh in meshes)
+        components = sum(len(_split_components(mesh)) for mesh in meshes)
+        watertight = all(bool(mesh.is_watertight) for mesh in meshes)
+        if not watertight:
+            orientation = "open"
+        elif signed_volume > 0.0:
+            orientation = "outward"
+        elif signed_volume < 0.0:
+            orientation = "inward"
+        else:
+            orientation = "degenerate"
+        return GeometryMetrics(
+            bounds=(
+                tuple(float(value) for value in bounds_array[0]),
+                tuple(float(value) for value in bounds_array[1]),
+            ),  # type: ignore[arg-type]
+            dimensions=tuple(float(value) for value in dimensions),  # type: ignore[arg-type]
+            centroid=tuple(float(value) for value in combined.centroid),  # type: ignore[arg-type]
+            triangle_count=sum(len(mesh.faces) for mesh in meshes),
+            component_count=components,
+            watertight=watertight,
+            surface_area=area,
+            signed_volume=signed_volume,
+            orientation=orientation,
+        )
+
+    def sample_joint(
+        self,
+        articulation: str | Articulation,
+        positions: Sequence[float] | None = None,
+        *,
+        samples: int = 5,
+    ) -> tuple[PoseSample, ...]:
+        joint = self.model.get_articulation(articulation)
+        values = (
+            _articulation_sweep_values(joint, max(2, int(samples)))
+            if positions is None
+            else [_finite(value, "joint sample") for value in positions]
+        )
+        if not values:
+            raise ValidationError("positions must contain at least one joint value")
+        return tuple(
+            PoseSample(
+                positions=tuple(sorted({**self._pose, joint.name: value}.items())),
+                label=f"{joint.name}={value:.6g}",
+            )
+            for value in values
+        )
+
+    def track_point(
+        self,
+        part: PartRef,
+        point: Sequence[float],
+        poses: Sequence[PoseSample | Mapping[object, float]],
+    ) -> tuple[Vec3, ...]:
+        tracked: list[Vec3] = []
+        for pose in _pose_dicts(poses):
+            with self.pose(pose):
+                tracked.append(self.part_world_point(part, point))
+        return tuple(tracked)
+
+    def expect_bounds(
+        self,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+        minimum: Sequence[float] | None = None,
+        maximum: Sequence[float] | None = None,
+        tolerance: float = 0.0,
+        name: str | None = None,
+    ) -> bool:
+        if minimum is None and maximum is None:
+            raise ValidationError("expect_bounds requires minimum, maximum, or both")
+        metrics = self.measure_geometry(part, shape=shape)
+        expected_min = None if minimum is None else _vec3(minimum, "minimum")
+        expected_max = None if maximum is None else _vec3(maximum, "maximum")
+        tolerance = _non_negative(tolerance, "tolerance")
+        ok = True
+        if expected_min is not None:
+            ok = ok and all(
+                abs(metrics.bounds[0][axis] - expected_min[axis]) <= tolerance for axis in range(3)
+            )
+        if expected_max is not None:
+            ok = ok and all(
+                abs(metrics.bounds[1][axis] - expected_max[axis]) <= tolerance for axis in range(3)
+            )
+        selector = _geometry_selector(part, shape)
+        return self._record(
+            name or f"expect_bounds({selector})",
+            ok,
+            f"bounds={metrics.bounds!r} expected_min={expected_min!r} "
+            f"expected_max={expected_max!r} tolerance={tolerance:.6g}",
+        )
+
+    def expect_radial_extent(
+        self,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+        axis: Sequence[float] = (0.0, 0.0, 1.0),
+        origin: Sequence[float] = (0.0, 0.0, 0.0),
+        minimum: float | None = None,
+        maximum: float | None = None,
+        name: str | None = None,
+    ) -> bool:
+        direction = np.asarray(_vec3(axis, "axis"), dtype=np.float64)
+        length = float(np.linalg.norm(direction))
+        if length <= 0.0:
+            raise ValidationError("axis must be non-zero")
+        direction /= length
+        center = np.asarray(_vec3(origin, "origin"), dtype=np.float64)
+        vertices = self._selected_world_vertices(part, shape)
+        offsets = vertices - center
+        projected = offsets - np.outer(offsets @ direction, direction)
+        extent = float(np.linalg.norm(projected, axis=1).max(initial=0.0))
+        selector = _geometry_selector(part, shape)
+        return self.expect_metric(
+            name or f"radial_extent({selector})",
+            extent,
+            minimum=minimum,
+            maximum=maximum,
+            unit="m",
+            details=f"axis={tuple(direction)!r} origin={tuple(center)!r}",
+        )
+
+    def expect_component_count(
+        self,
+        expected: int,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+        name: str | None = None,
+    ) -> bool:
+        expected = int(expected)
+        if expected < 1:
+            raise ValidationError("expected component count must be at least 1")
+        metrics = self.measure_geometry(part, shape=shape)
+        selector = _geometry_selector(part, shape)
+        return self._record(
+            name or f"expect_component_count({selector})",
+            metrics.component_count == expected,
+            f"components={metrics.component_count} expected={expected}",
+        )
+
+    def expect_watertight(
+        self,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+        name: str | None = None,
+    ) -> bool:
+        metrics = self.measure_geometry(part, shape=shape)
+        selector = _geometry_selector(part, shape)
+        return self._record(
+            name or f"expect_watertight({selector})",
+            metrics.watertight,
+            f"watertight={metrics.watertight} components={metrics.component_count}",
+        )
+
+    def expect_positive_volume(
+        self,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+        minimum: float = 0.0,
+        name: str | None = None,
+    ) -> bool:
+        minimum = _non_negative(minimum, "minimum")
+        metrics = self.measure_geometry(part, shape=shape)
+        selector = _geometry_selector(part, shape)
+        metric_name = name or f"signed_volume({selector})"
+        ok = metrics.signed_volume > minimum
+        details = f"orientation={metrics.orientation} watertight={metrics.watertight}"
+        self._metrics.append(
+            TestMetric(
+                name=metric_name,
+                value=metrics.signed_volume,
+                unit="m^3",
+                minimum=minimum,
+                passed=ok,
+                details=details,
+            )
+        )
+        return self._record(
+            metric_name,
+            ok,
+            f"value={metrics.signed_volume:.9g} must be greater than {minimum:.9g} {details}",
+        )
+
+    def expect_symmetry(
+        self,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+        plane_origin: Sequence[float] = (0.0, 0.0, 0.0),
+        plane_normal: Sequence[float] = (1.0, 0.0, 0.0),
+        tolerance: float = 0.001,
+        name: str | None = None,
+    ) -> bool:
+        origin = np.asarray(_vec3(plane_origin, "plane_origin"), dtype=np.float64)
+        normal = np.asarray(_vec3(plane_normal, "plane_normal"), dtype=np.float64)
+        length = float(np.linalg.norm(normal))
+        if length <= 0.0:
+            raise ValidationError("plane_normal must be non-zero")
+        normal /= length
+        tolerance = _non_negative(tolerance, "tolerance")
+        vertices = self._selected_world_vertices(part, shape)
+        if len(vertices) > 20_000:
+            vertices = vertices[np.linspace(0, len(vertices) - 1, 20_000, dtype=int)]
+        reflected = vertices - 2.0 * np.outer((vertices - origin) @ normal, normal)
+        distances, _indices = cKDTree(vertices).query(reflected, workers=1)
+        deviation = float(np.max(distances, initial=0.0))
+        selector = _geometry_selector(part, shape)
+        return self.expect_metric(
+            name or f"symmetry_deviation({selector})",
+            deviation,
+            maximum=tolerance,
+            unit="m",
+            details=f"plane_origin={tuple(origin)!r} plane_normal={tuple(normal)!r}",
+        )
+
     def distance_between(
         self,
         part_a: PartRef,
@@ -211,6 +588,135 @@ class TestContext:
         shape_b: str | None = None,
     ) -> DistanceFinding:
         return self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
+
+    def expect_no_collision_at_poses(
+        self,
+        part_a: PartRef,
+        part_b: PartRef,
+        poses: Sequence[PoseSample | Mapping[object, float]],
+        *,
+        shape_a: str | None = None,
+        shape_b: str | None = None,
+        name: str | None = None,
+    ) -> bool:
+        failures: list[str] = []
+        for index, pose in enumerate(_pose_dicts(poses)):
+            with self.pose(pose):
+                query = self._collision_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
+            if query.collided:
+                failures.append(f"sample={index} pose={pose!r} {_collision_details(query)}")
+        return self._record(
+            name
+            or f"expect_no_collision_at_poses({_part_name(part_a, field_name='part_a')},"
+            f"{_part_name(part_b, field_name='part_b')})",
+            not failures,
+            "all samples clear" if not failures else "\n".join(failures[:10]),
+            kind=FailureKind.OVERLAP,
+        )
+
+    def expect_distance_at_poses(
+        self,
+        part_a: PartRef,
+        part_b: PartRef,
+        poses: Sequence[PoseSample | Mapping[object, float]],
+        *,
+        shape_a: str | None = None,
+        shape_b: str | None = None,
+        minimum: float = 0.0,
+        maximum: float | None = None,
+        name: str | None = None,
+    ) -> bool:
+        minimum = _non_negative(minimum, "minimum")
+        maximum = None if maximum is None else _non_negative(maximum, "maximum")
+        if maximum is not None and maximum < minimum:
+            raise ValidationError("maximum must be greater than or equal to minimum")
+        failures: list[str] = []
+        measured: list[float] = []
+        for index, pose in enumerate(_pose_dicts(poses)):
+            with self.pose(pose):
+                result = self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
+            measured.append(result.distance)
+            if result.distance < minimum or (maximum is not None and result.distance > maximum):
+                failures.append(f"sample={index} pose={pose!r} {_distance_details(result)}")
+        return self._record(
+            name
+            or f"expect_distance_at_poses({_part_name(part_a, field_name='part_a')},"
+            f"{_part_name(part_b, field_name='part_b')})",
+            not failures,
+            f"range=({min(measured):.6g},{max(measured):.6g}) minimum={minimum:.6g} "
+            f"maximum={maximum!r}"
+            if not failures
+            else "\n".join(failures[:10]),
+        )
+
+    def expect_contact_at_poses(
+        self,
+        part_a: PartRef,
+        part_b: PartRef,
+        poses: Sequence[PoseSample | Mapping[object, float]],
+        *,
+        shape_a: str | None = None,
+        shape_b: str | None = None,
+        contact_tol: float = DEFAULT_CONTACT_TOLERANCE,
+        name: str | None = None,
+    ) -> bool:
+        tolerance = _non_negative(contact_tol, "contact_tol")
+        failures: list[str] = []
+        for index, pose in enumerate(_pose_dicts(poses)):
+            with self.pose(pose):
+                result = self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
+            if not result.collided and result.distance > tolerance:
+                failures.append(f"sample={index} pose={pose!r} {_distance_details(result)}")
+        return self._record(
+            name
+            or f"expect_contact_at_poses({_part_name(part_a, field_name='part_a')},"
+            f"{_part_name(part_b, field_name='part_b')})",
+            not failures,
+            "contact held at every sample" if not failures else "\n".join(failures[:10]),
+            kind=FailureKind.CONTACT,
+        )
+
+    def expect_within_at_poses(
+        self,
+        inner_part: PartRef,
+        outer_part: PartRef,
+        poses: Sequence[PoseSample | Mapping[object, float]],
+        *,
+        inner_shape: str | None = None,
+        outer_shape: str | None = None,
+        axes: str | Sequence[str] = "xyz",
+        margin: float = 0.0,
+        name: str | None = None,
+    ) -> bool:
+        inner_name = _part_name(inner_part, field_name="inner_part")
+        outer_name = _part_name(outer_part, field_name="outer_part")
+        axis_names = _axis_names(axes)
+        margin = _non_negative(margin, "margin")
+        failures: list[str] = []
+        for sample_index, pose in enumerate(_pose_dicts(poses)):
+            with self.pose(pose):
+                inner_bounds = self._bounds(inner_name, inner_shape)
+                outer_bounds = self._bounds(outer_name, outer_shape)
+            failed_axes = [
+                axis_name
+                for axis_name in axis_names
+                if (
+                    inner_bounds[0][_axis_index(axis_name)]
+                    < outer_bounds[0][_axis_index(axis_name)] - margin
+                    or inner_bounds[1][_axis_index(axis_name)]
+                    > outer_bounds[1][_axis_index(axis_name)] + margin
+                )
+            ]
+            if failed_axes:
+                failures.append(
+                    f"sample={sample_index} pose={pose!r} axes={failed_axes!r} "
+                    f"inner_bounds={inner_bounds!r} outer_bounds={outer_bounds!r}"
+                )
+        return self._record(
+            name or f"expect_within_at_poses({inner_name},{outer_name})",
+            not failures,
+            "contained at every sample" if not failures else "\n".join(failures[:10]),
+        )
 
     def expect_no_collision(
         self,
@@ -714,6 +1220,46 @@ class TestContext:
             return self._kernel().part_world_bounds(part_name, self._pose)
         return self._kernel().shape_world_bounds(part_name, shape_name, self._pose)
 
+    def _selected_world_meshes(
+        self,
+        part: PartRef | None,
+        shape: str | None,
+    ) -> list[trimesh.Trimesh]:
+        if shape is not None and part is None:
+            raise ValidationError("shape requires a part selector")
+        selected_part = None if part is None else _part_name(part, field_name="part")
+        transforms = self._kernel().world_transforms(self._pose)
+        meshes: list[trimesh.Trimesh] = []
+        for model_part in self.model.parts:
+            if selected_part is not None and model_part.name != selected_part:
+                continue
+            transform = transforms.get(model_part.name)
+            if transform is None:
+                continue
+            for entry in model_part._iter_shapes():
+                if shape is not None and entry.name != shape:
+                    continue
+                mesh = geometry_to_trimesh(entry.geometry, self.mesh_tolerance).copy()
+                mesh.apply_transform(transform)
+                meshes.append(mesh)
+        if selected_part is not None:
+            self.model.get_part(selected_part)
+            if shape is not None:
+                self.model.get_part(selected_part).get_shape(shape)
+        if not meshes:
+            raise ValidationError("geometry selector did not match any shapes")
+        return meshes
+
+    def _selected_world_vertices(
+        self,
+        part: PartRef | None,
+        shape: str | None,
+    ) -> np.ndarray:
+        return np.concatenate(
+            [np.asarray(mesh.vertices) for mesh in self._selected_world_meshes(part, shape)],
+            axis=0,
+        )
+
     def _overlap_is_allowed(self, query: CollisionQuery) -> bool:
         if query.shape_a is None or query.shape_b is None:
             return False
@@ -752,6 +1298,84 @@ def _part_name(value: PartRef, *, field_name: str) -> str:
     if not isinstance(raw, str) or not raw.strip():
         raise ValidationError(f"{field_name} must be a part name or Part")
     return raw.strip()
+
+
+def _plain_name(value: object, field_name: str) -> str:
+    name = str(value or "").strip()
+    if not name:
+        raise ValidationError(f"{field_name} must be non-empty")
+    return name
+
+
+def _artifact_kind(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        return "image"
+    if suffix == ".json":
+        return "json"
+    if suffix == ".csv":
+        return "csv"
+    if suffix in {".txt", ".md"}:
+        return "text"
+    raise ValidationError(
+        "artifact type could not be inferred; use PNG, JPEG, WebP, JSON, CSV, or text"
+    )
+
+
+def _vec3(value: Sequence[float], field_name: str) -> Vec3:
+    if isinstance(value, str | bytes):
+        raise ValidationError(f"{field_name} must contain 3 numeric values")
+    try:
+        values = tuple(_finite(item, field_name) for item in value)
+    except TypeError as exc:
+        raise ValidationError(f"{field_name} must contain 3 numeric values") from exc
+    if len(values) != 3:
+        raise ValidationError(f"{field_name} must contain 3 numeric values")
+    return cast(Vec3, values)
+
+
+def _geometry_selector(part: PartRef | None, shape: str | None) -> str:
+    if part is None:
+        return "model"
+    part_name = _part_name(part, field_name="part")
+    return part_name if shape is None else f"{part_name}/{shape}"
+
+
+def _signed_mesh_volume(mesh: trimesh.Trimesh) -> float:
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    triangles = vertices[faces]
+    return float(
+        np.einsum(
+            "ij,ij->i",
+            triangles[:, 0],
+            np.cross(triangles[:, 1], triangles[:, 2]),
+        ).sum()
+        / 6.0
+    )
+
+
+def _split_components(mesh: trimesh.Trimesh) -> list[trimesh.Trimesh]:
+    try:
+        found = list(mesh.split(only_watertight=False))
+    except Exception:
+        found = []
+    return found or [mesh]
+
+
+def _pose_dicts(
+    poses: Sequence[PoseSample | Mapping[object, float]],
+) -> list[dict[object, float]]:
+    if not poses:
+        raise ValidationError("poses must contain at least one sample")
+    result: list[dict[object, float]] = []
+    for pose in poses:
+        values = cast(
+            Mapping[object, float],
+            pose.as_dict() if isinstance(pose, PoseSample) else pose,
+        )
+        result.append(dict(values))
+    return result
 
 
 def _articulation_sweep_values(articulation: Articulation, samples: int) -> list[float]:
@@ -910,7 +1534,11 @@ __all__ = [
     "AllowedOverlap",
     "DistanceFinding",
     "FailureKind",
+    "GeometryMetrics",
+    "PoseSample",
+    "TestArtifact",
     "TestContext",
     "TestFailure",
+    "TestMetric",
     "TestReport",
 ]

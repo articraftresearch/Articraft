@@ -38,6 +38,8 @@ def test_tool_schemas_include_prompting_guidance() -> None:
     edit_props = by_name["edit"]["parameters"]["properties"]
 
     assert "session ID for ongoing interaction" in by_name["exec_command"]["description"]
+    assert "$MINI_ARTICRAFT_PYTHON" in by_name["exec_command"]["description"]
+    assert "does not render, copy, or attach images" in by_name["compile"]["description"]
     assert exec_props["command"]["description"] == "Shell command to execute."
     assert (
         exec_props["max_output_tokens"]["description"]
@@ -374,7 +376,8 @@ def test_exec_command_does_not_receive_api_credentials(monkeypatch, tmp_path) ->
     command = (
         f"{shlex.quote(sys.executable)} -c "
         "'import json, os; print(json.dumps({key: os.environ.get(key) for key in "
-        '["OPENAI_API_KEY", "EXAMPLE_API_KEY", "VISIBLE_SETTING"]}))\''
+        '["OPENAI_API_KEY", "EXAMPLE_API_KEY", "VISIBLE_SETTING", '
+        '"MINI_ARTICRAFT_PYTHON"]}))\''
     )
 
     result = run(get("exec_command").run(ctx, {"command": command}))
@@ -383,7 +386,115 @@ def test_exec_command_does_not_receive_api_credentials(monkeypatch, tmp_path) ->
         "OPENAI_API_KEY": None,
         "EXAMPLE_API_KEY": None,
         "VISIBLE_SETTING": "visible",
+        "MINI_ARTICRAFT_PYTHON": sys.executable,
     }
+
+
+def test_exec_command_renders_public_sdk_previews_before_compile(tmp_path) -> None:
+    ctx = context(tmp_path)
+    ctx.workspace.joinpath("main.py").write_text(
+        """from mini_articraft.sdk import (
+    ArticulatedObject,
+    ArticulationType,
+    BoxGeometry,
+    MotionLimits,
+    Origin,
+    TestContext,
+    TestReport,
+)
+
+object_model = ArticulatedObject("slider")
+object_model.part("base").add(BoxGeometry((0.5, 0.5, 0.5)), name="base")
+object_model.part("slider").add(BoxGeometry((0.2, 0.2, 0.2)), name="block")
+object_model.articulation(
+    "slide",
+    ArticulationType.PRISMATIC,
+    "base",
+    "slider",
+    origin=Origin(xyz=(1.0, 0.0, 0.0)),
+    axis=(1.0, 0.0, 0.0),
+    motion_limits=MotionLimits(lower=0.0, upper=1.0),
+)
+
+def run_tests() -> TestReport:
+    return TestContext(object_model).report()
+""",
+        encoding="utf-8",
+    )
+    ctx.workspace.joinpath("previews.py").write_text(
+        """from main import object_model
+from mini_articraft.sdk import (
+    MeridionalSectionView,
+    ModelView,
+    MotionStripView,
+    SectionView,
+    render_view,
+)
+
+render_view(
+    object_model,
+    ModelView.three_quarter(
+        width=240,
+        height=180,
+        selected_parts=("slider",),
+    ),
+    "qa/previews/selected.png",
+)
+render_view(
+    object_model,
+    SectionView(width=240, height=180, plane_normal=(0.0, 1.0, 0.0)),
+    "qa/previews/section.png",
+)
+render_view(
+    object_model,
+    MeridionalSectionView(width=240, height=180),
+    "qa/previews/meridional.png",
+)
+render_view(
+    object_model,
+    MotionStripView(
+        "slide",
+        positions=(0.0, 0.5, 1.0),
+        view=ModelView.side(width=160, height=140),
+    ),
+    "qa/previews/motion.png",
+)
+""",
+        encoding="utf-8",
+    )
+
+    result = run(
+        get("exec_command").run(
+            ctx,
+            {"command": '"$MINI_ARTICRAFT_PYTHON" previews.py'},
+        )
+    )
+
+    assert result["returncode"] == 0, result
+    assert ctx.compile_result is None
+    for name in ("selected.png", "section.png", "meridional.png", "motion.png"):
+        image_path = ctx.workspace / "qa" / "previews" / name
+        assert image_path.is_file()
+        with Image.open(image_path) as image:
+            assert image.width > 0
+            assert image.height > 0
+
+
+def test_preview_output_invalidates_compile_freshness(tmp_path) -> None:
+    ctx = context(tmp_path)
+    ctx.successful_compile_result = {"status": "success"}
+    ctx.successful_compile_digest = workspace_digest(ctx.workspace)
+    assert ctx.refresh_compile_freshness()
+
+    result = run(
+        get("exec_command").run(
+            ctx,
+            {"command": "mkdir -p qa/previews && printf preview > qa/previews/detail.txt"},
+        )
+    )
+
+    assert result["returncode"] == 0
+    assert not ctx.refresh_compile_freshness()
 
 
 def test_exec_command_reports_timeout(tmp_path) -> None:
@@ -563,6 +674,9 @@ def run_tests() -> TestReport:
     assert result["status"] == "success"
     assert set(result) == {"status", "compile_signals"}
     assert result["compile_signals"].count("<compile_signals>") == 1
+    serialized = json.dumps(result)
+    assert "input_image" not in serialized
+    assert "data:image" not in serialized
     assert ctx.compile_result is not None
     assert ctx.compile_result["compile_report"]["status"] == "success"
     assert ctx.refresh_compile_freshness()

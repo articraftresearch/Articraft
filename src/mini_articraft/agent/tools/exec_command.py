@@ -18,7 +18,10 @@ TOOL = Tool(
     "exec_command",
     schema(
         "exec_command",
-        "Runs a command in the run directory, returning output or a session ID for ongoing interaction. Use bounded yields for long work, then call write_stdin to poll or send input.",
+        "Runs a command in the run directory, returning output or a session ID for ongoing "
+        "interaction. Python commands can import the public mini-articraft SDK through "
+        "`$MINI_ARTICRAFT_PYTHON`. Use bounded yields for long work, then call write_stdin to "
+        "poll or send input.",
         {
             "command": {
                 "type": "string",

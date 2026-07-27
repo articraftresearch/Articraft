@@ -63,20 +63,20 @@ object_model = build_object_model()
 
 
 def run_tests() -> TestReport:
-    return TestContext(object_model).report()
+    ctx = TestContext(object_model)
+    ctx.expect_no_collision("base", "pin", shape_a="body", shape_b="body")
+    return ctx.report()
 """
 
 OVERLAP_ALLOWED_MAIN = OVERLAP_MAIN.replace(
-    "    return TestContext(object_model).report()",
-    """    ctx = TestContext(object_model)
-    ctx.allow_overlap(
+    '    ctx.expect_no_collision("base", "pin", shape_a="body", shape_b="body")',
+    """    ctx.allow_overlap(
         "base",
         "pin",
         reason="intentional press-fit embed",
         shape_a="body",
         shape_b="body",
-    )
-    return ctx.report()""",
+    )""",
 )
 
 
@@ -183,6 +183,94 @@ def test_a_cached_success_does_not_recompile(tmp_path: Path) -> None:
     assert env.compile_count == 1
 
 
+def test_agent_can_extend_locally_and_inspect_visual_evidence(tmp_path: Path) -> None:
+    env = WarmEnvironment(output_dir=tmp_path)
+    helper = """from build123d import Box
+
+
+def body_shape():
+    return Box(0.4, 0.3, 0.2)
+"""
+    main = """from geometry_helpers import body_shape
+from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+
+object_model = ArticulatedObject("local_extension")
+object_model.part("body").add(body_shape(), name="shell")
+
+def run_tests() -> TestReport:
+    ctx = TestContext(object_model)
+    metrics = ctx.measure_geometry()
+    ctx.expect_metric("triangle count", metrics.triangle_count, minimum=12)
+    ctx.attach_artifact(
+        "qa/previews/body_section.png",
+        name="body section",
+    )
+    return ctx.report()
+"""
+    previews = """from main import object_model
+from mini_articraft.sdk import SectionView, render_view
+
+
+render_view(
+    object_model,
+    SectionView(plane_normal=(0.0, 1.0, 0.0)),
+    "qa/previews/body_section.png",
+)
+"""
+
+    def inspect_working_preview(query: ModelQuery) -> Response:
+        assert not compile_signals_shown(query.tool_outputs())
+        return calls(
+            tool_call(
+                "view_image",
+                {"path": "qa/previews/body_section.png"},
+            )
+        )
+
+    artifacts = run_scenario(
+        "a checked box",
+        [
+            calls(tool_call("write", {"path": "geometry_helpers.py", "content": helper})),
+            write_main(main),
+            calls(tool_call("write", {"path": "previews.py", "content": previews})),
+            calls(
+                tool_call(
+                    "exec_command",
+                    {"command": '"$MINI_ARTICRAFT_PYTHON" previews.py'},
+                )
+            ),
+            inspect_working_preview,
+            compile_workspace(),
+            text("done"),
+        ],
+        env=env,
+        max_turns=7,
+    )
+
+    assert artifacts.record.status == "success"
+    assert artifacts.workspace.joinpath("geometry_helpers.py").is_file()
+    assert artifacts.workspace.joinpath("previews.py").is_file()
+    assert len(artifacts.recorder.tool_finishes("view_image")) == 1
+    tool_names = [event.name for event in artifacts.recorder.of(ToolStarted)]
+    assert tool_names.index("exec_command") < tool_names.index("compile")
+    assert tool_names.index("view_image") < tool_names.index("compile")
+    compile_outputs = [
+        event
+        for event in artifacts.conversation
+        if event.get("type") == "function_call_output"
+        and "compile_signals" in str(event.get("output"))
+    ]
+    assert compile_outputs
+    assert "workspace_path=qa/previews/body_section.png" in str(compile_outputs[-1]["output"])
+    assert all("input_image" not in str(event["output"]) for event in compile_outputs)
+    assert all("data:image" not in str(event["output"]) for event in compile_outputs)
+    assert {
+        path.relative_to(artifacts.workspace).as_posix()
+        for path in artifacts.workspace.rglob("*.png")
+    } == {"qa/previews/body_section.png"}
+    assert not list(artifacts.run_dir.joinpath("result").rglob("*.png"))
+
+
 def test_failure_streak_resets_after_a_successful_compile(tmp_path: Path) -> None:
     """A success clears the streak: the next failure is not flagged as repeated."""
     env = WarmEnvironment(output_dir=tmp_path)
@@ -237,7 +325,7 @@ def test_overlap_allowance_flows_through_the_real_worker(tmp_path: Path) -> None
     assert artifacts.record.status == "success"
     assert env.compile_count == 2
     codes = event_signal_codes(artifacts.recorder)
-    assert "QC_REAL_OVERLAP" in codes
+    assert "TEST_REAL_OVERLAP" in codes
     assert "NOTE_ALLOWED_OVERLAP" in codes
     final_signals = compile_signals_shown(artifacts.tool_outputs())[-1]
     assert "allowed by justification" in final_signals

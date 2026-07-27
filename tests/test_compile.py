@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 import mini_articraft.environments.local as local_module
 from mini_articraft.environments.local import (
@@ -77,6 +78,14 @@ def test_compile_path_exports_usdz_but_only_updates_attempt_data(tmp_path) -> No
     assert not run_dir.joinpath("result", ".compile-progress.json").exists()
     manifest = json.loads(run_dir.joinpath("result", "model.json").read_text())
     assert manifest["name"] == "object"
+    assert result["qa_report"] == str(run_dir / "result" / "qa" / "report.html")
+    assert Path(result["qa_report"]).is_file()
+    qa_payload = json.loads(run_dir.joinpath("result", "qa", "report.json").read_text())
+    assert qa_payload["export_audit"]["shape_count"] == 1
+    assert qa_payload["artifacts"] == []
+    assert not run_dir.joinpath("workspace", "qa").exists()
+    assert not run_dir.joinpath("result", "qa", "artifacts").exists()
+    assert not list(run_dir.joinpath("result").rglob("*.png"))
 
     assert Record.load(run_dir / "record.json") == Record(
         run_id="box",
@@ -114,6 +123,9 @@ def run_tests() -> TestReport:
     assert Path(first["usdz"]).is_file()
     assert Path(second["usdz"]).is_file()
     assert run_dir.joinpath("result", "model.json").is_file()
+    assert run_dir.joinpath("result", "qa", "report.html").is_file()
+    report = json.loads(run_dir.joinpath("result", "qa", "report.json").read_text())
+    assert report["test_report"]["passed"] is False
     record = Record.load(run_dir / "record.json")
     assert record.status == "created"
     assert record.attempts == 2
@@ -275,7 +287,7 @@ def run_tests():
     assert "must return TestReport" in env.compile_path(bad_report)["error"]
 
 
-def test_baseline_overlap_failure_still_saves_the_intermediate_usdz(tmp_path) -> None:
+def test_baseline_overlap_is_a_nonblocking_compiler_diagnostic(tmp_path) -> None:
     env = LocalEnvironment(output_dir=tmp_path)
     run_dir = env.create_run("overlap")
     write_main(
@@ -295,9 +307,88 @@ def run_tests() -> TestReport:
 
     result = env.compile_path(run_dir)
 
-    assert result["status"] == "error"
-    assert "fail_if_parts_overlap_in_current_pose" in result["error"]
+    assert result["status"] == "success"
+    assert any(
+        "fail_if_parts_overlap_in_current_pose" in warning
+        for warning in result["test_report"]["warnings"]
+    )
     assert Path(result["usdz"]).is_file()
+
+
+def test_compile_copies_custom_visual_and_data_artifacts(tmp_path) -> None:
+    env = LocalEnvironment(output_dir=tmp_path)
+    run_dir = env.create_run("custom-evidence")
+    write_main(
+        run_dir,
+        """import json
+from pathlib import Path
+from build123d import Box
+from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+
+object_model = ArticulatedObject("evidence")
+object_model.part("body").add(Box(1, 1, 1), name="box")
+
+def run_tests() -> TestReport:
+    ctx = TestContext(object_model)
+    Path("qa").mkdir(exist_ok=True)
+    Path("qa/measurements.json").write_text(
+        json.dumps({"width": 1.0}), encoding="utf-8"
+    )
+    ctx.attach_artifact("qa/measurements.json", name="measurements")
+    ctx.attach_artifact("qa/custom_view.png", name="custom view")
+    return ctx.report()
+""",
+    )
+    qa_dir = run_dir / "workspace" / "qa"
+    qa_dir.mkdir()
+    Image.new("RGB", (8, 8), color="white").save(qa_dir / "custom_view.png")
+    Image.new("RGB", (8, 8), color="white").save(qa_dir / "working_preview.png")
+
+    result = env.compile_path(run_dir)
+
+    assert result["status"] == "success", result
+    report = json.loads(run_dir.joinpath("result", "qa", "report.json").read_text())
+    assert {item["name"] for item in report["artifacts"]} == {
+        "measurements",
+        "custom view",
+    }
+    assert {item["name"] for item in result["test_report"]["artifacts"]} == {
+        "measurements",
+        "custom view",
+    }
+    assert "workspace_path=qa/custom_view.png" in result["compile_report"]["signals_text"]
+    assert all(item["name"] != "working_preview" for item in report["artifacts"])
+    assert run_dir.joinpath("workspace", "qa", "working_preview.png").is_file()
+    custom = next(item for item in report["artifacts"] if item["name"] == "custom view")
+    assert custom["report_path"] == "../../workspace/qa/custom_view.png"
+    assert not list(run_dir.joinpath("result").rglob("*.png"))
+
+
+def test_missing_registered_artifact_becomes_a_report_warning(tmp_path) -> None:
+    env = LocalEnvironment(output_dir=tmp_path)
+    run_dir = env.create_run("missing-evidence")
+    write_main(
+        run_dir,
+        """from pathlib import Path
+from build123d import Box
+from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+
+object_model = ArticulatedObject("evidence")
+object_model.part("body").add(Box(1, 1, 1), name="box")
+
+def run_tests() -> TestReport:
+    ctx = TestContext(object_model)
+    Path("temporary.txt").write_text("evidence", encoding="utf-8")
+    ctx.attach_artifact("temporary.txt")
+    Path("temporary.txt").unlink()
+    return ctx.report()
+""",
+    )
+
+    result = env.compile_path(run_dir)
+
+    assert result["status"] == "success"
+    assert any("could not be copied" in item for item in result["test_report"]["warnings"])
 
 
 def test_disconnected_geometry_is_a_compiler_warning(tmp_path) -> None:

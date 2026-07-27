@@ -96,10 +96,27 @@ class ModelQuery:
 
 def _tool_outputs(messages: Messages) -> list[dict[str, Any]]:
     return [
-        json.loads(str(message.get("output") or "{}"))
+        _tool_output_payload(message)
         for message in messages
         if message.get("type") == "function_call_output"
     ]
+
+
+def _tool_output_payload(message: dict[str, Any]) -> dict[str, Any]:
+    output = message.get("output") or "{}"
+    if isinstance(output, list):
+        output = next(
+            (
+                item.get("text")
+                for item in output
+                if isinstance(item, dict) and item.get("type") == "input_text"
+            ),
+            "{}",
+        )
+    if isinstance(output, dict):
+        return output
+    parsed = json.loads(str(output))
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _record_query(

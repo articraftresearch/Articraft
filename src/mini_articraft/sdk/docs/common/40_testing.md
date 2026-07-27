@@ -114,6 +114,8 @@ TestReport(
     allowances: tuple[str, ...] = (),
     allowed_isolated_parts: tuple[str, ...] = (),
     allowed_overlaps: tuple[AllowedOverlap, ...] = (),
+    metrics: tuple[TestMetric, ...] = (),
+    artifacts: tuple[TestArtifact, ...] = (),
 )
 ```
 
@@ -121,18 +123,79 @@ TestReport(
 report fail. `checks_run` counts recorded checks. Calling `warn()` or an allowance method does
 not increase that count.
 
+### `TestMetric`, `TestArtifact`, and `GeometryMetrics`
+
+`record_metric(...)` and `expect_metric(...)` add a `TestMetric` to the report.
+An expected metric also records a blocking authored check.
+
+`attach_artifact(...)` adds a `TestArtifact` for a file that already exists.
+Read [visual evidence and QA artifacts](45_visual_evidence.md) for the preview
+workflow and supported file types.
+
+`measure_geometry(...)` returns `GeometryMetrics`.
+
+```python
+GeometryMetrics(
+    bounds: tuple[Vec3, Vec3],
+    dimensions: Vec3,
+    centroid: Vec3,
+    triangle_count: int,
+    component_count: int,
+    watertight: bool,
+    surface_area: float,
+    signed_volume: float,
+    orientation: str,
+)
+```
+
+`orientation` is `outward`, `inward`, `open`, or `degenerate`.
+
 ### Reporting methods
 
 ```python
 ctx.check(name, ok, details="")
 ctx.fail(name, details)
 ctx.warn(text)
+ctx.record_metric(name, value, unit="", details="")
+ctx.expect_metric(name, value, minimum=None, maximum=None, unit="", details="")
 report = ctx.report()
 ```
 
 `check()` records a blocking failure when `ok` is false. `fail()` always records a blocking
 failure and returns false. `warn()` records a nonblocking message and ignores an exact duplicate.
 `report()` returns the checks recorded so far.
+
+## Shape measurements
+
+```python
+ctx.measure_geometry(part=None, *, shape=None) -> GeometryMetrics
+ctx.expect_bounds(part=None, *, shape=None, minimum=None, maximum=None, tolerance=0.0)
+ctx.expect_radial_extent(
+    part=None,
+    *,
+    shape=None,
+    axis=(0.0, 0.0, 1.0),
+    origin=(0.0, 0.0, 0.0),
+    minimum=None,
+    maximum=None,
+)
+ctx.expect_component_count(expected, part=None, *, shape=None)
+ctx.expect_watertight(part=None, *, shape=None)
+ctx.expect_positive_volume(part=None, *, shape=None, minimum=0.0)
+ctx.expect_symmetry(
+    part=None,
+    *,
+    shape=None,
+    plane_origin=(0.0, 0.0, 0.0),
+    plane_normal=(1.0, 0.0, 0.0),
+    tolerance=0.001,
+)
+```
+
+Leave out `part` to measure the full model at the current pose. A shape selector
+requires a part. Signed volume is positive when a closed mesh has outward face
+winding. `expect_positive_volume(...)` requires the signed volume to be greater
+than its `minimum`.
 
 ## Poses
 
@@ -165,6 +228,28 @@ The context restores the previous pose when the `with` block ends. Nested pose b
 restore the pose that was active before each block.
 
 `pose()` does not clamp values to `MotionLimits`. Use positions that are valid for the design.
+
+### `PoseSample`
+
+`sample_joint(...)` returns `PoseSample` records.
+
+```python
+poses = ctx.sample_joint("lid_hinge", samples=5)
+poses = ctx.sample_joint("lid_hinge", positions=(0.0, 0.4, 0.8))
+```
+
+Use these records with:
+
+```python
+ctx.expect_no_collision_at_poses(part_a, part_b, poses, ...)
+ctx.expect_distance_at_poses(part_a, part_b, poses, minimum=0.0, maximum=None, ...)
+ctx.expect_contact_at_poses(part_a, part_b, poses, contact_tol=1e-6, ...)
+ctx.expect_within_at_poses(inner_part, outer_part, poses, ...)
+ctx.track_point(part, local_point, poses) -> tuple[Vec3, ...]
+```
+
+`part_world_point(part, point)` transforms one point from a part's local frame
+into the current world pose.
 
 ## World inspection
 
@@ -315,9 +400,12 @@ allowances into a new context and runs these baseline checks before export:
 4. `warn_if_part_contains_disconnected_geometry_islands()`
 5. `warn_if_absurd_dimensions()`
 6. `fail_if_parts_overlap_in_current_pose()`
+7. `fail_if_articulation_separates_child()`
 
 If model validity or the root check fails, the worker stops the rest of the baseline pass. When the
-object is valid enough to export, the worker saves the USDZ even if another blocking check fails.
+object is valid enough to export, only model validity, the single root rule, and USDZ validation
+can block the compiler. The other baseline methods appear as nonblocking diagnostics. Add an
+authored check when one of those findings is important to the requested object.
 The failed check still makes the compile fail and prevents final publication.
 
 The merged report keeps one copy of each check name. A compiler failure replaces an authored
