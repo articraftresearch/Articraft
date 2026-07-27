@@ -103,8 +103,8 @@ async def main():
 ```
 
 `generate_async()` works with normal asyncio tasks, cancellation, and timeouts.
-Cancellation takes effect at the next await point; a compile already in progress
-may finish first.
+Cancellation takes effect at the next await point. A compile already in progress
+finishes before cancellation completes so it is not abandoned in the background.
 
 ### Run the checks
 

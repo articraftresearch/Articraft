@@ -13,7 +13,6 @@ a typed :class:`GenerationResult`::
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,7 +78,8 @@ def generate(
     ``on_event`` is called synchronously as the agent reports progress. Asyncio
     applications must use :func:`generate_async` instead. A completed agent
     failure is returned as a result with ``status == "error"``; invalid input
-    and failures before a run completes raise exceptions.
+    and failures before a run completes raise exceptions. Event-handler errors
+    are logged and do not interrupt generation.
     """
     try:
         asyncio.get_running_loop()
@@ -114,9 +114,10 @@ async def generate_async(
     """Generate an object on the current event loop.
 
     The coroutine supports normal asyncio cancellation and timeout handling.
-    Cancellation takes effect at the next await point, so a synchronous compile
-    already in progress may finish first. ``on_event`` runs on the current event
-    loop and must not block it.
+    Cancellation takes effect at the next await point. An active compile is
+    allowed to finish before cancellation completes so it is not abandoned in a
+    background thread. ``on_event`` runs on the current event loop and must not
+    block it.
     """
     settings, image_path = _resolve_request(
         prompt,
@@ -239,23 +240,16 @@ async def _run_generation(
     on_event: EventHandler | None = None,
 ) -> dict[str, Any]:
     """Run one agent generation against fully resolved settings."""
+    env = LocalEnvironment(
+        output_dir=settings.output_dir,
+        timeout_seconds=settings.compile_timeout_seconds,
+        physics_enabled=settings.physics_enabled,
+    )
     model_client = create_model(settings)
-    try:
-        env = LocalEnvironment(
-            output_dir=settings.output_dir,
-            timeout_seconds=settings.compile_timeout_seconds,
-            physics_enabled=settings.physics_enabled,
-        )
-        agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
-        if on_event is not None:
-            agent_kwargs["on_event"] = on_event
-        return await Agent(model_client, env, **agent_kwargs).run(prompt, image_path=image_path)
-    finally:
-        # Agent.run closes the model too; close() is idempotent, and this
-        # finally covers failures before the agent loop starts. Teardown must
-        # not replace the generation outcome with a close error.
-        with contextlib.suppress(Exception):
-            await model_client.close()
+    agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
+    if on_event is not None:
+        agent_kwargs["on_event"] = on_event
+    return await Agent(model_client, env, **agent_kwargs).run(prompt, image_path=image_path)
 
 
 def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:
@@ -263,16 +257,34 @@ def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:
     if status not in get_args(GenerationStatus):
         raise ValueError(f"unexpected generation status: {status or '<empty>'}")
 
-    run_dir = Path(str(payload.get("run") or ""))
-    if not str(run_dir) or str(run_dir) == ".":
+    raw_run_dir = str(payload.get("run") or "")
+    raw_run_path = Path(raw_run_dir)
+    if not raw_run_dir.strip() or raw_run_path == Path():
         raise ValueError("generation result is missing its run directory")
+    run_dir = raw_run_path.resolve()
+    if not run_dir.name:
+        raise ValueError("generation result has an invalid run directory")
 
     result = str(payload.get("result") or "")
     artifact = Path(result) if result else None
     if artifact is not None and not artifact.is_absolute():
         artifact = run_dir / artifact
+    if artifact is not None:
+        artifact = artifact.resolve()
+        if artifact == run_dir:
+            raise ValueError("generation artifact must be a file beneath its run directory")
+        try:
+            artifact.relative_to(run_dir)
+        except ValueError as exc:
+            raise ValueError("generation artifact must stay inside its run directory") from exc
     if status == "success" and artifact is None:
         raise ValueError("successful generation result is missing its artifact")
+    if status == "error" and artifact is not None:
+        raise ValueError("failed generation result unexpectedly contains an artifact")
+
+    run_id = str(payload.get("run_id") or run_dir.name)
+    if run_id != run_dir.name:
+        raise ValueError("generation result run id does not match its run directory")
 
     raw_usage = payload.get("token_usage")
     token_usage = (
@@ -287,7 +299,7 @@ def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:
         status=cast(GenerationStatus, status),
         run_dir=run_dir,
         artifact=artifact,
-        run_id=str(payload.get("run_id") or run_dir.name),
+        run_id=run_id,
         message=str(payload.get("message") or ""),
         error=str(payload.get("error") or ""),
         attempts=int(payload.get("attempts") or 0),

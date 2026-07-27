@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from pydantic import ValidationError
 import mini_articraft
 from mini_articraft import api
 from mini_articraft.agent import events
+from mini_articraft.record import Record
 from mini_articraft.settings import Settings, get_settings
 
 
@@ -210,7 +212,7 @@ def test_generate_end_to_end_with_scripted_model(monkeypatch, tmp_path: Path) ->
     assert isinstance(seen[0], events.RunStarted)
     assert isinstance(seen[-1], events.RunFinished)
     assert seen[-1].status == "success"
-    assert model.close_calls >= 1
+    assert model.close_calls == 1
 
 
 def test_error_result_has_no_artifact() -> None:
@@ -233,8 +235,69 @@ def test_result_rejects_incomplete_internal_payload() -> None:
         api._result_from_payload({"run": "runs/test"})
     with pytest.raises(ValueError, match="missing its run directory"):
         api._result_from_payload({"status": "error"})
+    with pytest.raises(ValueError, match="missing its run directory"):
+        api._result_from_payload({"status": "error", "run": "."})
+    with pytest.raises(ValueError, match="invalid run directory"):
+        api._result_from_payload({"status": "error", "run": "/"})
     with pytest.raises(ValueError, match="missing its artifact"):
         api._result_from_payload({"status": "success", "run": "runs/test"})
+    with pytest.raises(ValueError, match="file beneath"):
+        api._result_from_payload({"status": "success", "run": "runs/test", "result": "."})
+    with pytest.raises(ValueError, match="unexpectedly contains an artifact"):
+        api._result_from_payload(
+            {"status": "error", "run": "runs/test", "result": "result/model.usdz"}
+        )
+    with pytest.raises(ValueError, match="must stay inside"):
+        api._result_from_payload(
+            {"status": "success", "run": "runs/test", "result": "../outside.usdz"}
+        )
+    with pytest.raises(ValueError, match="run id does not match"):
+        api._result_from_payload(
+            {
+                "status": "success",
+                "run_id": "other",
+                "run": "runs/test",
+                "result": "result/model.usdz",
+            }
+        )
+
+
+def test_result_paths_remain_stable_after_cwd_changes(monkeypatch, tmp_path: Path) -> None:
+    original_cwd = tmp_path / "original"
+    original_cwd.mkdir()
+    monkeypatch.chdir(original_cwd)
+
+    result = api._result_from_payload(
+        {
+            "status": "success",
+            "run": "runs/test",
+            "result": "result/model.usdz",
+        }
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert result.run_dir == original_cwd / "runs/test"
+    assert result.artifact == original_cwd / "runs/test/result/model.usdz"
+
+    absolute = api._result_from_payload(
+        {
+            "status": "success",
+            "run": str(original_cwd / "runs/test"),
+            "result": str(original_cwd / "runs/test/result/model.usdz"),
+        }
+    )
+    assert absolute.artifact == original_cwd / "runs/test/result/model.usdz"
+
+    whitespace_run = original_cwd / " run "
+    whitespace = api._result_from_payload(
+        {
+            "status": "success",
+            "run": str(whitespace_run),
+            "result": "result/model.usdz",
+        }
+    )
+    assert whitespace.run_dir == whitespace_run
+    assert whitespace.artifact == whitespace_run / "result/model.usdz"
 
 
 def test_generate_async_runs_on_the_ambient_loop(monkeypatch, tmp_path: Path) -> None:
@@ -294,7 +357,83 @@ def test_generate_async_uses_native_task_cancellation(monkeypatch, tmp_path: Pat
             await task
 
     run(cancel_running_generation())
-    assert model.close_calls >= 1
+    record_path = next((tmp_path / "runs").glob("*/record.json"))
+    assert model.close_calls == 1
+    assert Record.load(record_path).status == "error"
+    assert Record.load(record_path).error == "generation cancelled"
+
+
+@pytest.mark.parametrize("compile_fails", [False, True])
+def test_generate_async_finishes_active_compile_before_cancelling(
+    monkeypatch, tmp_path: Path, compile_fails: bool
+) -> None:
+    compile_started = threading.Event()
+    release_compile = threading.Event()
+    model = ScriptedModel(
+        [
+            calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+            calls(tool_call("compile")),
+        ]
+    )
+
+    class BlockingEnvironment(WarmEnvironment):
+        def compile_path(self, run_dir: Path | str) -> dict[str, Any]:
+            compile_started.set()
+            if not release_compile.wait(timeout=5):
+                raise TimeoutError("test did not release compile")
+            if compile_fails:
+                raise RuntimeError("compile failed during cancellation")
+            return super().compile_path(run_dir)
+
+    monkeypatch.setattr(api, "create_model", lambda settings: model)
+    monkeypatch.setattr(api, "LocalEnvironment", BlockingEnvironment)
+    monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+
+    async def cancel_during_compile() -> None:
+        task = asyncio.create_task(
+            mini_articraft.generate_async("a box", output_dir=tmp_path / "runs")
+        )
+        assert await asyncio.to_thread(compile_started.wait, 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release_compile.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        run(cancel_during_compile())
+    finally:
+        release_compile.set()
+
+    record_path = next((tmp_path / "runs").glob("*/record.json"))
+    assert model.close_calls == 1
+    assert Record.load(record_path).error == "generation cancelled"
+
+
+def test_generate_async_supports_concurrent_identical_prompts(monkeypatch, tmp_path: Path) -> None:
+    script = [
+        calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+        calls(tool_call("compile")),
+        text("done"),
+    ]
+    monkeypatch.setattr(api, "create_model", lambda settings: ScriptedModel(list(script)))
+    monkeypatch.setattr(api, "LocalEnvironment", WarmEnvironment)
+    monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+
+    async def generate_twice() -> list[api.GenerationResult]:
+        return list(
+            await asyncio.gather(
+                mini_articraft.generate_async("a box", output_dir=tmp_path / "runs"),
+                mini_articraft.generate_async("a box", output_dir=tmp_path / "runs"),
+            )
+        )
+
+    first, second = run(generate_twice())
+
+    assert first.succeeded and second.succeeded
+    assert first.run_id != second.run_id
+    assert first.run_dir != second.run_dir
 
 
 def test_generate_rejects_active_event_loop() -> None:

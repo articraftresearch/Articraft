@@ -56,9 +56,12 @@ class FakeAgent:
         *,
         image_path: Path | None = None,
     ) -> dict[str, object]:
-        self.prompt = prompt
-        self.image_path = image_path
-        return self.result
+        try:
+            self.prompt = prompt
+            self.image_path = image_path
+            return self.result
+        finally:
+            await self.model.close()
 
 
 def reset_fakes() -> None:
