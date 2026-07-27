@@ -31,6 +31,13 @@ def _model() -> ArticulatedObject:
     return model
 
 
+# The usd-core stubs omit these schemas; bind them once instead of repeating the
+# suppression at every call site.
+_CollisionAPI = UsdPhysics.CollisionAPI  # pyright: ignore[reportAttributeAccessIssue]
+_MeshCollisionAPI = UsdPhysics.MeshCollisionAPI  # pyright: ignore[reportAttributeAccessIssue]
+_Imageable = UsdGeom.Imageable  # pyright: ignore[reportAttributeAccessIssue]
+
+
 def _open_meshes(usdz: str) -> tuple[Usd.Stage, dict[str, Usd.Prim]]:
     """Return the stage alongside its meshes.
 
@@ -56,11 +63,11 @@ def test_export_authors_collision_apis_per_role(tmp_path: Path) -> None:
     stage, meshes = _open_meshes(str(result.usdz))
     assert stage
 
-    assert meshes["shell"].HasAPI(UsdPhysics.CollisionAPI)
-    assert meshes["proxy"].HasAPI(UsdPhysics.CollisionAPI)
+    assert meshes["shell"].HasAPI(_CollisionAPI)
+    assert meshes["proxy"].HasAPI(_CollisionAPI)
     # A visual-only shape must not be a collider, or the simulator collides with
     # decoration the author explicitly excluded.
-    assert not meshes["badge"].HasAPI(UsdPhysics.CollisionAPI)
+    assert not meshes["badge"].HasAPI(_CollisionAPI)
 
 
 def test_export_records_the_requested_approximation(tmp_path: Path) -> None:
@@ -69,7 +76,7 @@ def test_export_records_the_requested_approximation(tmp_path: Path) -> None:
     assert stage
 
     def approximation(name: str) -> str:
-        return UsdPhysics.MeshCollisionAPI(meshes[name]).GetApproximationAttr().Get()
+        return _MeshCollisionAPI(meshes[name]).GetApproximationAttr().Get()
 
     assert approximation("shell") == "convexDecomposition"
     assert approximation("proxy") == "convexHull"
@@ -81,9 +88,9 @@ def test_collision_only_shapes_export_invisible(tmp_path: Path) -> None:
     assert stage
 
     # The collider has to stay on the stage to resolve, but nothing should draw it.
-    assert UsdGeom.Imageable(meshes["proxy"]).ComputeVisibility() == "invisible"
-    assert UsdGeom.Imageable(meshes["shell"]).ComputeVisibility() == "inherited"
-    assert UsdGeom.Imageable(meshes["badge"]).ComputeVisibility() == "inherited"
+    assert _Imageable(meshes["proxy"]).ComputeVisibility() == "invisible"
+    assert _Imageable(meshes["shell"]).ComputeVisibility() == "inherited"
+    assert _Imageable(meshes["badge"]).ComputeVisibility() == "inherited"
 
 
 def test_manifest_records_role_and_approximation(tmp_path: Path) -> None:
