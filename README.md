@@ -93,14 +93,18 @@ events as they happen.
 Async applications use the native coroutine:
 
 ```python
-result = await mini_articraft.generate_async(
-    "reconstruct this desk lamp",
-    image="reference.png",
-    on_event=print,
-)
+async def main():
+    result = await mini_articraft.generate_async(
+        "reconstruct this desk lamp",
+        image="reference.png",
+        on_event=print,
+    )
+    print(result.status, result.artifact)
 ```
 
 `generate_async()` works with normal asyncio tasks, cancellation, and timeouts.
+Cancellation takes effect at the next await point; a compile already in progress
+may finish first.
 
 ### Run the checks
 

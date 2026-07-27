@@ -233,6 +233,8 @@ def test_result_rejects_incomplete_internal_payload() -> None:
         api._result_from_payload({"run": "runs/test"})
     with pytest.raises(ValueError, match="missing its run directory"):
         api._result_from_payload({"status": "error"})
+    with pytest.raises(ValueError, match="missing its artifact"):
+        api._result_from_payload({"status": "success", "run": "runs/test"})
 
 
 def test_generate_async_runs_on_the_ambient_loop(monkeypatch, tmp_path: Path) -> None:
@@ -313,10 +315,15 @@ def test_root_import_is_lazy_and_exports_python_api() -> None:
             "    'PIL', 'anthropic', 'websockets',",
             ") if name in sys.modules]",
             "assert not heavy, heavy",
+            "public = {'Event', 'EventHandler', 'GenerationResult', 'GenerationStatus',",
+            "          'Provider', 'generate', 'generate_async'}",
+            "assert public <= set(dir(mini_articraft))",
+            "assert 'mini_articraft.api' not in sys.modules",
             "assert callable(mini_articraft.generate)",
             "assert callable(mini_articraft.generate_async)",
             "assert callable(mini_articraft.GenerationResult)",
             "assert 'mini_articraft.api' in sys.modules",
+            "assert mini_articraft.generate is mini_articraft.__dict__['generate']",
         ]
     )
 

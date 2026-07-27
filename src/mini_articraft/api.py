@@ -2,12 +2,12 @@
 
 Use :func:`generate` from synchronous code and :func:`generate_async` from
 asyncio applications. Both functions run the same async agent core and return
-a typed :class:`GenerationResult`.
+a typed :class:`GenerationResult`::
 
->>> import mini_articraft
->>> result = mini_articraft.generate("a desk fan", on_event=print)
->>> result.artifact
-PosixPath('runs/20260727-120000-a-desk-fan/result/model.usdz')
+    import mini_articraft
+
+    result = mini_articraft.generate("a desk fan", on_event=print)
+    print(result.status, result.artifact)
 """
 
 from __future__ import annotations
@@ -42,7 +42,11 @@ _PROVIDERS: tuple[str, ...] = get_args(Provider)
 
 @dataclass(slots=True)
 class GenerationResult:
-    """The completed run and its generated artifact, if successful."""
+    """The completed run and its generated artifact, if successful.
+
+    ``run_dir`` is the run directory. ``artifact`` is the generated file
+    beneath that directory, or ``None`` when ``status`` is ``"error"``.
+    """
 
     status: GenerationStatus
     run_dir: Path
@@ -73,7 +77,9 @@ def generate(
     """Generate an object and block until the run finishes.
 
     ``on_event`` is called synchronously as the agent reports progress. Asyncio
-    applications must use :func:`generate_async` instead.
+    applications must use :func:`generate_async` instead. A completed agent
+    failure is returned as a result with ``status == "error"``; invalid input
+    and failures before a run completes raise exceptions.
     """
     try:
         asyncio.get_running_loop()
@@ -108,7 +114,9 @@ async def generate_async(
     """Generate an object on the current event loop.
 
     The coroutine supports normal asyncio cancellation and timeout handling.
-    ``on_event`` runs on the current event loop and must not block it.
+    Cancellation takes effect at the next await point, so a synchronous compile
+    already in progress may finish first. ``on_event`` runs on the current event
+    loop and must not block it.
     """
     settings, image_path = _resolve_request(
         prompt,
@@ -263,6 +271,8 @@ def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:
     artifact = Path(result) if result else None
     if artifact is not None and not artifact.is_absolute():
         artifact = run_dir / artifact
+    if status == "success" and artifact is None:
+        raise ValueError("successful generation result is missing its artifact")
 
     raw_usage = payload.get("token_usage")
     token_usage = (
