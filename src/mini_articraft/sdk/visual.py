@@ -47,6 +47,30 @@ class Reticle:
 
 
 @dataclass(frozen=True)
+class ProjectedPoint:
+    position: Vec3
+    u: float
+    v: float
+    depth: float
+    in_frame: bool
+
+
+@dataclass(frozen=True)
+class SurfaceHit:
+    part: str
+    shape: str
+    position: Vec3
+    normal: Vec3
+    distance: float
+
+
+@dataclass(frozen=True)
+class ViewProbe:
+    reticle: Reticle
+    hit: SurfaceHit | None
+
+
+@dataclass(frozen=True)
 class PointOverlay:
     position: Vec3
     label: str = ""
@@ -171,6 +195,50 @@ class _RenderMesh:
     color: tuple[int, int, int]
 
 
+@dataclass(frozen=True)
+class _ViewFrame:
+    center: np.ndarray
+    right: np.ndarray
+    up: np.ndarray
+    forward: np.ndarray
+    projection: Projection
+    scale: float
+    offset: tuple[float, float]
+    width: int
+    height: int
+    radius: float
+
+    def project(self, points: np.ndarray) -> np.ndarray:
+        projected = _project_points(
+            points,
+            self.center,
+            self.right,
+            self.up,
+            self.forward,
+            projection=self.projection,
+            perspective_radius=self.radius,
+        )
+        projected[:, 0] = projected[:, 0] * self.scale + self.offset[0]
+        projected[:, 1] = -projected[:, 1] * self.scale + self.offset[1]
+        return projected
+
+    def ray(self, point: ImagePoint) -> tuple[np.ndarray, np.ndarray]:
+        screen_x = (point.u * self.width - self.offset[0]) / self.scale
+        screen_y = -(point.v * self.height - self.offset[1]) / self.scale
+        if self.projection == "orthographic":
+            origin = (
+                self.center
+                + self.right * screen_x
+                + self.up * screen_y
+                + self.forward * self.radius * 4.0
+            )
+            return origin, -self.forward
+        camera_distance = self.radius * 2.8
+        origin = self.center + self.forward * camera_distance
+        direction = self.right * screen_x + self.up * screen_y - self.forward * camera_distance
+        return origin, direction / np.linalg.norm(direction)
+
+
 def annotate_image(
     source: str | Path,
     reticles: tuple[Reticle, ...],
@@ -222,6 +290,55 @@ def render_view(
     return output_path
 
 
+def project_model_points(
+    model: ArticulatedObject,
+    view: ModelView,
+    points: tuple[Vec3, ...],
+    *,
+    pose: dict[str, float] | PoseSample | None = None,
+    mesh_tolerance: float = DEFAULT_MESH_TOLERANCE,
+) -> tuple[ProjectedPoint, ...]:
+    """Project world points through the exact framing used by ``render_view``."""
+    pose_values = pose.as_dict() if isinstance(pose, PoseSample) else dict(pose or {})
+    meshes = _world_meshes_for_view(model, view, pose_values, mesh_tolerance)
+    frame = _view_frame(meshes, view)
+    world = np.asarray(points, dtype=np.float64)
+    if world.size == 0:
+        return ()
+    if world.ndim != 2 or world.shape[1] != 3 or not np.all(np.isfinite(world)):
+        raise ValidationError("projected points must contain 3 finite values")
+    screen = frame.project(world)
+    return tuple(
+        ProjectedPoint(
+            cast(Vec3, tuple(float(value) for value in point)),
+            float(pixel[0] / view.width),
+            float(pixel[1] / view.height),
+            float(pixel[2]),
+            0.0 <= pixel[0] <= view.width and 0.0 <= pixel[1] <= view.height,
+        )
+        for point, pixel in zip(world, screen, strict=True)
+    )
+
+
+def probe_view(
+    model: ArticulatedObject,
+    view: ModelView,
+    reticles: tuple[Reticle, ...],
+    *,
+    pose: dict[str, float] | PoseSample | None = None,
+    mesh_tolerance: float = DEFAULT_MESH_TOLERANCE,
+) -> tuple[ViewProbe, ...]:
+    """Raycast normalized reticles through the exact framing used by ``render_view``."""
+    pose_values = pose.as_dict() if isinstance(pose, PoseSample) else dict(pose or {})
+    meshes = _world_meshes_for_view(model, view, pose_values, mesh_tolerance)
+    frame = _view_frame(meshes, view)
+    probes = []
+    for reticle in reticles:
+        origin, direction = frame.ray(reticle.point)
+        probes.append(ViewProbe(reticle, _nearest_hit(meshes, origin, direction)))
+    return tuple(probes)
+
+
 def _render_model(
     model: ArticulatedObject,
     view: ModelView,
@@ -231,30 +348,11 @@ def _render_model(
     fit_vertices: np.ndarray | None = None,
 ) -> Image.Image:
     _validate_size(view.width, view.height)
-    meshes = _world_meshes(
-        model,
-        pose,
-        mesh_tolerance,
-        color_by=view.color_by,
-        selected_parts=view.selected_parts,
-        selected_shapes=view.selected_shapes,
-    )
+    meshes = _world_meshes_for_view(model, view, pose, mesh_tolerance)
     vertices = np.concatenate([np.asarray(item.mesh.vertices) for item in meshes], axis=0)
     fit = vertices if fit_vertices is None else fit_vertices
-    center = (fit.min(axis=0) + fit.max(axis=0)) * 0.5
-    forward, right, camera_up = _camera_basis(view.direction, view.up)
-    combined = np.concatenate((vertices, fit), axis=0)
-    combined_projection = _project_points(
-        combined,
-        center,
-        right,
-        camera_up,
-        forward,
-        projection=view.projection,
-    )
-    projected = combined_projection[: len(vertices)]
-    fit_projection = combined_projection[len(vertices) :]
-    scale, offset = _fit_projection(fit_projection[:, :2], view.width, view.height)
+    frame = _view_frame(meshes, view, fit_vertices=fit)
+    projected = frame.project(vertices)
     image_array = np.empty((view.height, view.width, 3), dtype=np.uint8)
     image_array[:] = np.asarray(view.background, dtype=np.uint8)
     depth_buffer = np.full((view.height, view.width), np.inf, dtype=np.float64)
@@ -264,9 +362,7 @@ def _render_model(
     for item in meshes:
         mesh_vertices = np.asarray(item.mesh.vertices)
         count = len(mesh_vertices)
-        screen = projected[vertex_offset : vertex_offset + count].copy()
-        screen[:, 0] = screen[:, 0] * scale + offset[0]
-        screen[:, 1] = -screen[:, 1] * scale + offset[1]
+        screen = projected[vertex_offset : vertex_offset + count]
         vertex_offset += count
         triangles = screen[np.asarray(item.mesh.faces)]
         world_triangles = mesh_vertices[np.asarray(item.mesh.faces)]
@@ -292,35 +388,41 @@ def _render_model(
     if view.show_bounds:
         corners = _bounds_corners(vertices.min(axis=0), vertices.max(axis=0))
         box = _project_points(
-            corners, center, right, camera_up, forward, projection=view.projection
+            corners,
+            frame.center,
+            frame.right,
+            frame.up,
+            frame.forward,
+            projection=view.projection,
+            perspective_radius=frame.radius,
         )
-        box[:, 0] = box[:, 0] * scale + offset[0]
-        box[:, 1] = -box[:, 1] * scale + offset[1]
+        box[:, 0] = box[:, 0] * frame.scale + frame.offset[0]
+        box[:, 1] = -box[:, 1] * frame.scale + frame.offset[1]
         _draw_bounds(draw, box)
     if view.show_joints:
         _draw_joints(
             draw,
             model,
             pose,
-            center,
-            right,
-            camera_up,
-            forward,
+            frame.center,
+            frame.right,
+            frame.up,
+            frame.forward,
             view.projection,
-            scale,
-            offset,
-            max(float(np.linalg.norm(np.ptp(fit, axis=0))), 1e-6),
+            frame.scale,
+            frame.offset,
+            frame.radius,
         )
     _draw_overlays(
         draw,
         view,
-        center,
-        right,
-        camera_up,
-        forward,
-        scale,
-        offset,
-        max(float(np.linalg.norm(np.ptp(fit, axis=0))), 1e-6),
+        frame.center,
+        frame.right,
+        frame.up,
+        frame.forward,
+        frame.scale,
+        frame.offset,
+        frame.radius,
     )
     return image
 
@@ -477,6 +579,101 @@ def _world_meshes(
     if not rendered:
         raise ValidationError("visual selection did not match any geometry")
     return rendered
+
+
+def _world_meshes_for_view(
+    model: ArticulatedObject,
+    view: ModelView,
+    pose: dict[str, float],
+    mesh_tolerance: float,
+) -> list[_RenderMesh]:
+    return _world_meshes(
+        model,
+        pose,
+        mesh_tolerance,
+        color_by=view.color_by,
+        selected_parts=view.selected_parts,
+        selected_shapes=view.selected_shapes,
+    )
+
+
+def _view_frame(
+    meshes: list[_RenderMesh],
+    view: ModelView,
+    *,
+    fit_vertices: np.ndarray | None = None,
+) -> _ViewFrame:
+    vertices = np.concatenate([np.asarray(item.mesh.vertices) for item in meshes], axis=0)
+    fit = vertices if fit_vertices is None else fit_vertices
+    center = (fit.min(axis=0) + fit.max(axis=0)) * 0.5
+    forward, right, camera_up = _camera_basis(view.direction, view.up)
+    radius = max(float(np.linalg.norm(np.ptp(fit, axis=0))), 1e-6)
+    fit_projection = _project_points(
+        fit,
+        center,
+        right,
+        camera_up,
+        forward,
+        projection=view.projection,
+        perspective_radius=radius,
+    )
+    scale, offset = _fit_projection(fit_projection[:, :2], view.width, view.height)
+    return _ViewFrame(
+        center,
+        right,
+        camera_up,
+        forward,
+        view.projection,
+        scale,
+        offset,
+        view.width,
+        view.height,
+        radius,
+    )
+
+
+def _nearest_hit(
+    meshes: list[_RenderMesh],
+    origin: np.ndarray,
+    direction: np.ndarray,
+) -> SurfaceHit | None:
+    nearest: tuple[float, _RenderMesh, int] | None = None
+    for item in meshes:
+        triangles = np.asarray(item.mesh.triangles, dtype=np.float64)
+        edge1 = triangles[:, 1] - triangles[:, 0]
+        edge2 = triangles[:, 2] - triangles[:, 0]
+        perpendicular = np.cross(np.broadcast_to(direction, edge2.shape), edge2)
+        determinant = np.einsum("ij,ij->i", edge1, perpendicular)
+        valid = np.abs(determinant) > 1e-12
+        inverse = np.zeros_like(determinant)
+        inverse[valid] = 1.0 / determinant[valid]
+        from_vertex = origin - triangles[:, 0]
+        u = np.einsum("ij,ij->i", from_vertex, perpendicular) * inverse
+        valid &= (u >= 0.0) & (u <= 1.0)
+        cross = np.cross(from_vertex, edge1)
+        v = np.einsum("j,ij->i", direction, cross) * inverse
+        valid &= (v >= 0.0) & (u + v <= 1.0)
+        distance = np.einsum("ij,ij->i", edge2, cross) * inverse
+        valid &= distance > 1e-9
+        indexes = np.flatnonzero(valid)
+        if indexes.size == 0:
+            continue
+        index = int(indexes[np.argmin(distance[indexes])])
+        candidate = float(distance[index])
+        if nearest is None or candidate < nearest[0]:
+            nearest = candidate, item, index
+    if nearest is None:
+        return None
+    distance, item, triangle = nearest
+    position = origin + direction * distance
+    normal = np.asarray(item.mesh.face_normals[triangle], dtype=np.float64)
+    return SurfaceHit(
+        item.part,
+        item.shape,
+        cast(Vec3, tuple(float(value) for value in position)),
+        cast(Vec3, tuple(float(value) for value in normal)),
+        distance,
+    )
 
 
 def _project_points(
@@ -763,9 +960,14 @@ __all__ = [
     "ModelView",
     "MotionStripView",
     "PointOverlay",
+    "ProjectedPoint",
     "Reticle",
     "SectionView",
+    "SurfaceHit",
+    "ViewProbe",
     "VisualSpec",
     "annotate_image",
+    "probe_view",
+    "project_model_points",
     "render_view",
 ]

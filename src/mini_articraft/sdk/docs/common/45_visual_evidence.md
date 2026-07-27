@@ -14,10 +14,13 @@ from mini_articraft.sdk import (
     ModelView,
     MotionStripView,
     PointOverlay,
+    ProjectedPoint,
     Reticle,
     SectionView,
     TestArtifact,
     annotate_image,
+    probe_view,
+    project_model_points,
     render_view,
 )
 ```
@@ -45,6 +48,30 @@ annotate_image(
 Open the annotated output with `view_image` to confirm each reticle is on the
 intended feature. Reticles record visible evidence; they do not infer depth from
 a single image.
+
+## Model projection and probing
+
+`project_model_points` maps known world points into the exact normalized
+coordinates used by a `ModelView` and returns `ProjectedPoint` values.
+`probe_view` performs the inverse visual query: it raycasts screen-space
+reticles and returns a `ViewProbe` containing the nearest `SurfaceHit` with its
+part, shape, world position, and surface normal.
+
+```python
+view = ModelView.three_quarter()
+tip = project_model_points(object_model, view, ((0.22, 0.0, 0.14),))[0]
+probes = probe_view(
+    object_model,
+    view,
+    (Reticle(ImagePoint(0.72, 0.41), "reference feature"),),
+)
+print(tip.u, tip.v, probes[0].hit)
+```
+
+Use the same `ModelView`, selections, and pose for rendering and queries. A
+probe returns `None` when the reticle misses the visible model. Projection does
+not claim that an off-screen or occluded point is visible;
+`ProjectedPoint.in_frame` only reports whether it lands inside the image bounds.
 
 ## Preview before compile
 

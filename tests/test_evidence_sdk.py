@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -22,11 +23,14 @@ from mini_articraft.sdk import (
     MotionStripView,
     Origin,
     PointOverlay,
+    ProjectedPoint,
     Reticle,
     SectionView,
     TestContext,
     ValidationError,
     annotate_image,
+    probe_view,
+    project_model_points,
     render_view,
 )
 from mini_articraft.sdk.export import export_object
@@ -223,3 +227,35 @@ def test_reference_reticles_use_normalized_coordinates(tmp_path: Path) -> None:
         ImagePoint(1.1, 0.5)
     with pytest.raises(ValidationError, match=r"\.png"):
         annotate_image(source, (), tmp_path / "marked.jpg")
+
+
+@pytest.mark.parametrize("projection", ["orthographic", "perspective"])
+def test_model_points_and_reticles_share_the_render_camera(
+    projection: Literal["orthographic", "perspective"],
+) -> None:
+    model = ArticulatedObject("probe")
+    model.part("body").add(BoxGeometry((1.0, 1.0, 1.0)), name="shell")
+    view = ModelView(
+        direction=(0.0, -1.0, 0.0),
+        projection=projection,
+        width=300,
+        height=200,
+    )
+
+    projected = project_model_points(model, view, ((0.0, -0.5, 0.0), (4.0, 0.0, 0.0)))
+    center = projected[0]
+    probes = probe_view(
+        model,
+        view,
+        (Reticle(ImagePoint(center.u, center.v), "front face"), Reticle(ImagePoint(0.0, 0.0))),
+    )
+
+    assert isinstance(center, ProjectedPoint)
+    assert (center.u, center.v) == pytest.approx((0.5, 0.5))
+    assert center.in_frame
+    assert not projected[1].in_frame
+    assert probes[0].hit is not None
+    assert (probes[0].hit.part, probes[0].hit.shape) == ("body", "shell")
+    assert probes[0].hit.position == pytest.approx((0.0, -0.5, 0.0))
+    assert probes[0].hit.normal == pytest.approx((0.0, -1.0, 0.0))
+    assert probes[1].hit is None
