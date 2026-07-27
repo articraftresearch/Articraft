@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+import trimesh
 import xatlas
 from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
     Gf,
@@ -27,13 +28,13 @@ from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
 
 from mini_articraft.sdk import ambientcg
 from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
-from mini_articraft.sdk._mesh_core import geometry_to_trimesh
+from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
 from mini_articraft.sdk.materials import Material, SurfaceKind
 from mini_articraft.sdk.object import ArticulatedObject, Geometry
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
-__all__ = ["ExportResult", "TextureExportReport", "export_object"]
+__all__ = ["ExportAudit", "ExportResult", "TextureExportReport", "export_object"]
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,18 @@ class ExportResult:
     manifest: Path
     usdz: Path
     textures: TextureExportReport
+    audit: ExportAudit
+
+
+@dataclass(frozen=True)
+class ExportAudit:
+    part_count: int
+    shape_count: int
+    articulation_count: int
+    triangle_count: int
+    bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
+    meshes_with_normals: int
+    material_bindings: int
 
 
 @dataclass
@@ -96,6 +109,7 @@ def export_object(
             mesh_tolerance,
             textured=textured,
         )
+        audit = _audit_usdz(obj, usdz, mesh_tolerance)
         manifest_temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         manifest_temp.replace(manifest)
     except BaseException:
@@ -103,7 +117,13 @@ def export_object(
         raise
     finally:
         manifest_temp.unlink(missing_ok=True)
-    return ExportResult(root=root, manifest=manifest, usdz=usdz, textures=texture_report)
+    return ExportResult(
+        root=root,
+        manifest=manifest,
+        usdz=usdz,
+        textures=texture_report,
+        audit=audit,
+    )
 
 
 def _next_usdz_path(usdz_dir: Path) -> Path:
@@ -219,13 +239,21 @@ def _write_parts(
                 textured_shapes += 1
                 continue
 
-            points, faces = _mesh(shape.geometry, mesh_tolerance)
+            trimesh_obj = geometry_to_trimesh(shape.geometry, mesh_tolerance)
+            points, faces = _mesh_arrays(trimesh_obj)
+            normals, normal_interpolation = _normal_data(
+                trimesh_obj,
+                _normal_crease_angle(shape.geometry),
+            )
             mesh = UsdGeom.Mesh.Define(stage, mesh_path)
             mesh.CreatePointsAttr(points)
             mesh.CreateFaceVertexCountsAttr([3] * len(faces))
             mesh.CreateFaceVertexIndicesAttr([index for face in faces for index in face])
             mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
             mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(points))
+            mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
+            mesh.SetNormalsInterpolation(normal_interpolation)
+            mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
             _attrs(mesh.GetPrim(), {"name": shape.name})
             if shape.material is not None:
                 # displayColor stays as a fallback for renderers that ignore
@@ -253,7 +281,10 @@ def _write_textured_shape(
     mesh_tolerance: float,
 ) -> None:
     trimesh_obj = geometry_to_trimesh(shape.geometry, mesh_tolerance)
-    points, faces, uvs, normals = _unwrap_mesh(trimesh_obj)
+    points, faces, uvs, normals = _unwrap_mesh(
+        trimesh_obj,
+        _normal_crease_angle(shape.geometry),
+    )
     gf_points = [Gf.Vec3f(*point) for point in points.tolist()]
 
     mesh = UsdGeom.Mesh.Define(stage, mesh_path)
@@ -264,6 +295,7 @@ def _write_textured_shape(
     mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(gf_points))
     mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
     mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+    mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
     primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(  # pyright: ignore[reportAttributeAccessIssue]
         "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex
     )
@@ -293,12 +325,20 @@ def _write_textured_shape(
     )
 
 
-def _unwrap_mesh(trimesh_obj) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _unwrap_mesh(
+    trimesh_obj,
+    crease_angle: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Generate a UV atlas while preserving source normals across seam vertices."""
 
     vertices = np.asarray(trimesh_obj.vertices)
-    source_normals = np.asarray(trimesh_obj.vertex_normals)
-    vertex_map, faces, uvs = xatlas.parametrize(vertices, np.asarray(trimesh_obj.faces))
+    faces = np.asarray(trimesh_obj.faces)
+    source_normals, interpolation = _normal_data(trimesh_obj, crease_angle)
+    if interpolation == UsdGeom.Tokens.faceVarying:
+        vertices = vertices[faces].reshape((-1, 3))
+        source_normals = source_normals.reshape((-1, 3))
+        faces = np.arange(len(vertices), dtype=np.int32).reshape((-1, 3))
+    vertex_map, faces, uvs = xatlas.parametrize(vertices, faces)
     return (
         vertices[vertex_map].astype(np.float32),
         np.asarray(faces, dtype=np.int32),
@@ -509,17 +549,46 @@ def _attrs(prim: Usd.Prim, values: dict[str, object]) -> None:
         prim.CreateAttribute(f"mini_articraft:{name}", types[type(value)], custom=True).Set(value)
 
 
-def _mesh(
-    geometry: Geometry,
-    tolerance: float,
+def _mesh_arrays(
+    mesh,
 ) -> tuple[list[Gf.Vec3f], list[tuple[int, int, int]]]:
-    mesh = geometry_to_trimesh(geometry, tolerance)
     if mesh.vertices.size == 0 or mesh.faces.size == 0:
         raise TypeError("shape produced no USD mesh triangles")
     return (
         [Gf.Vec3f(float(x), float(y), float(z)) for x, y, z in mesh.vertices],
         [(int(face[0]), int(face[1]), int(face[2])) for face in mesh.faces],
     )
+
+
+def _normal_crease_angle(geometry: Geometry) -> float:
+    if isinstance(geometry, MeshGeometry) and geometry.normal_crease_angle is not None:
+        return geometry.normal_crease_angle
+    return math.radians(45.0)
+
+
+def _normal_data(mesh, crease_angle: float) -> tuple[np.ndarray, str]:
+    if crease_angle >= math.pi - 1e-10:
+        return np.asarray(mesh.vertex_normals, dtype=np.float32), UsdGeom.Tokens.vertex
+    face_normals = np.asarray(mesh.face_normals, dtype=np.float64)
+    if crease_angle <= 1e-10:
+        return np.repeat(face_normals, 3, axis=0).astype(np.float32), UsdGeom.Tokens.faceVarying
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    vertex_faces = np.asarray(mesh.vertex_faces, dtype=np.int64)
+    face_areas = np.asarray(mesh.area_faces, dtype=np.float64)
+    cosine = math.cos(crease_angle)
+    corner_normals = np.empty((len(faces), 3, 3), dtype=np.float64)
+    for face_index, face in enumerate(faces):
+        reference = face_normals[face_index]
+        for corner_index, vertex_index in enumerate(face):
+            adjacent = vertex_faces[vertex_index]
+            adjacent = adjacent[adjacent >= 0]
+            aligned = adjacent[(face_normals[adjacent] @ reference) >= cosine]
+            weighted = (face_normals[aligned] * face_areas[aligned, None]).sum(axis=0)
+            length = float(np.linalg.norm(weighted))
+            corner_normals[face_index, corner_index] = (
+                reference if length <= 1e-14 else weighted / length
+            )
+    return corner_normals.reshape((-1, 3)).astype(np.float32), UsdGeom.Tokens.faceVarying
 
 
 def _object_to_payload(obj: ArticulatedObject) -> dict[str, object]:
@@ -651,3 +720,221 @@ def _validate_usdz(path: Path) -> None:
         raise RuntimeError(
             "OpenUSD USDZ validation failed: " + "; ".join(str(error) for error in errors)
         )
+
+
+def _audit_usdz(
+    obj: ArticulatedObject,
+    path: Path,
+    mesh_tolerance: float,
+) -> ExportAudit:
+    stage = Usd.Stage.Open(str(path))
+    if stage is None:
+        raise RuntimeError("OpenUSD could not reopen the generated USDZ package for audit")
+
+    expected_parts = {part.name for part in obj.parts}
+    expected_shapes = {
+        (part.name, shape.name) for part in obj.parts for shape in part._iter_shapes()
+    }
+    expected_joints = {joint.name: joint for joint in obj.articulations}
+    found_parts: set[str] = set()
+    found_shapes: set[tuple[str, str]] = set()
+    found_joints: dict[str, Usd.Prim] = {}
+    exported_points: list[np.ndarray] = []
+    triangle_count = 0
+    normal_meshes = 0
+    material_bindings = 0
+    source_meshes: dict[tuple[str, str], trimesh.Trimesh] = {}
+    xforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance).world_transforms({})
+    source_points: list[np.ndarray] = []
+
+    for part in obj.parts:
+        for shape in part._iter_shapes():
+            mesh = geometry_to_trimesh(shape.geometry, mesh_tolerance).copy()
+            mesh.apply_transform(xforms[part.name])
+            source_meshes[(part.name, shape.name)] = mesh
+            source_points.append(np.asarray(mesh.vertices, dtype=np.float64))
+
+    cache = UsdGeom.XformCache(  # pyright: ignore[reportAttributeAccessIssue]
+        Usd.TimeCode.Default()  # pyright: ignore[reportAttributeAccessIssue]
+    )
+    for prim in stage.Traverse():
+        path_text = str(prim.GetPath())
+        authored_name = _custom_string(prim, "name")
+        if "/parts/" in path_text and "/shapes/" not in path_text and authored_name:
+            found_parts.add(authored_name)
+        if "/joints/" in path_text and authored_name:
+            found_joints[authored_name] = prim
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        mesh = UsdGeom.Mesh(prim)  # pyright: ignore[reportCallIssue]
+        shape_name = authored_name
+        part_prim = prim.GetParent().GetParent()
+        part_name = _custom_string(part_prim, "name")
+        if not part_name or not shape_name:
+            raise RuntimeError(f"USDZ audit found an unnamed mesh at {prim.GetPath()}")
+        selector = (part_name, shape_name)
+        found_shapes.add(selector)
+        points = mesh.GetPointsAttr().Get()
+        faces = mesh.GetFaceVertexIndicesAttr().Get()
+        if points is None or faces is None:
+            raise RuntimeError(f"USDZ audit found an empty mesh at {prim.GetPath()}")
+        triangle_count += len(faces) // 3
+        matrix = cache.GetLocalToWorldTransform(prim)
+        exported_points.append(
+            np.asarray(
+                [
+                    tuple(
+                        matrix.Transform(
+                            Gf.Vec3d(float(point[0]), float(point[1]), float(point[2]))
+                        )
+                    )
+                    for point in points
+                ],
+                dtype=np.float64,
+            )
+        )
+        normals = mesh.GetNormalsAttr().Get()
+        if normals is None or len(normals) == 0:
+            raise RuntimeError(f"USDZ audit found a mesh without normals at {prim.GetPath()}")
+        normal_meshes += 1
+        orientation = mesh.GetOrientationAttr().Get()
+        if orientation != UsdGeom.Tokens.rightHanded:
+            raise RuntimeError(f"USDZ audit found non-right-handed winding at {prim.GetPath()}")
+        if UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel().GetTargets():
+            material_bindings += 1
+        source = source_meshes.get(selector)
+        if source is None:
+            raise RuntimeError(f"USDZ audit found an unexpected mesh {selector!r}")
+        if len(source.faces) != len(faces) // 3:
+            raise RuntimeError(
+                f"USDZ audit triangle mismatch for {selector!r}: "
+                f"source={len(source.faces)} package={len(faces) // 3}"
+            )
+        source_sign = math.copysign(1.0, _signed_volume(source))
+        exported_mesh = trimesh.Trimesh(
+            vertices=np.asarray([tuple(point) for point in points], dtype=np.float64),
+            faces=np.asarray(faces, dtype=np.int64).reshape((-1, 3)),
+            process=False,
+        )
+        exported_sign = math.copysign(1.0, _signed_volume(exported_mesh))
+        if source.is_watertight and source_sign != exported_sign:
+            raise RuntimeError(f"USDZ audit winding changed for {selector!r}")
+
+    if found_parts != expected_parts:
+        raise RuntimeError(
+            f"USDZ audit part mismatch: expected={sorted(expected_parts)!r} "
+            f"found={sorted(found_parts)!r}"
+        )
+    if found_shapes != expected_shapes:
+        raise RuntimeError(
+            f"USDZ audit shape mismatch: expected={sorted(expected_shapes)!r} "
+            f"found={sorted(found_shapes)!r}"
+        )
+    if set(found_joints) != set(expected_joints):
+        raise RuntimeError(
+            f"USDZ audit articulation mismatch: expected={sorted(expected_joints)!r} "
+            f"found={sorted(found_joints)!r}"
+        )
+    for name, joint in expected_joints.items():
+        prim = found_joints[name]
+        if (
+            _custom_string(prim, "articulationType")
+            != cast(ArticulationType, joint.articulation_type).value
+        ):
+            raise RuntimeError(f"USDZ audit joint type mismatch for {name!r}")
+        if _custom_string(prim, "parent") != joint.parent:
+            raise RuntimeError(f"USDZ audit joint parent mismatch for {name!r}")
+        if _custom_string(prim, "child") != joint.child:
+            raise RuntimeError(f"USDZ audit joint child mismatch for {name!r}")
+        _expect_vector_attr(prim, "axis", joint.axis, joint_name=name)
+        _expect_vector_attr(prim, "origin:xyz", joint.origin.xyz, joint_name=name)
+        _expect_vector_attr(prim, "origin:rpy", joint.origin.rpy, joint_name=name)
+        limits = joint.motion_limits
+        if limits is not None:
+            _expect_number_attr(prim, "limits:effort", limits.effort, joint_name=name)
+            _expect_number_attr(prim, "limits:velocity", limits.velocity, joint_name=name)
+            if limits.lower is not None:
+                _expect_number_attr(prim, "limits:lower", limits.lower, joint_name=name)
+            if limits.upper is not None:
+                _expect_number_attr(prim, "limits:upper", limits.upper, joint_name=name)
+
+    expected_materials = sum(
+        shape.material is not None for part in obj.parts for shape in part._iter_shapes()
+    )
+    if material_bindings != expected_materials:
+        raise RuntimeError(
+            f"USDZ audit material binding mismatch: "
+            f"expected={expected_materials} found={material_bindings}"
+        )
+    source_bounds = _point_bounds(np.concatenate(source_points, axis=0))
+    package_bounds = _point_bounds(np.concatenate(exported_points, axis=0))
+    tolerance = max(mesh_tolerance * 2.0, 1e-6)
+    if not np.allclose(source_bounds, package_bounds, rtol=1e-6, atol=tolerance):
+        raise RuntimeError(
+            f"USDZ audit bounds mismatch: source={source_bounds!r} package={package_bounds!r}"
+        )
+    return ExportAudit(
+        part_count=len(found_parts),
+        shape_count=len(found_shapes),
+        articulation_count=len(found_joints),
+        triangle_count=triangle_count,
+        bounds=package_bounds,
+        meshes_with_normals=normal_meshes,
+        material_bindings=material_bindings,
+    )
+
+
+def _custom_string(prim: Usd.Prim, name: str) -> str:
+    value = prim.GetAttribute(f"mini_articraft:{name}").Get()
+    return "" if value is None else str(value)
+
+
+def _expect_vector_attr(
+    prim: Usd.Prim,
+    name: str,
+    expected: tuple[float, float, float],
+    *,
+    joint_name: str,
+) -> None:
+    value = prim.GetAttribute(f"mini_articraft:{name}").Get()
+    if value is None or not np.allclose(tuple(value), expected, rtol=0.0, atol=1e-9):
+        raise RuntimeError(
+            f"USDZ audit joint {name} mismatch for {joint_name!r}: "
+            f"expected={expected!r} found={value!r}"
+        )
+
+
+def _expect_number_attr(
+    prim: Usd.Prim,
+    name: str,
+    expected: float,
+    *,
+    joint_name: str,
+) -> None:
+    value = prim.GetAttribute(f"mini_articraft:{name}").Get()
+    if value is None or not math.isclose(float(value), expected, rel_tol=0.0, abs_tol=1e-9):
+        raise RuntimeError(
+            f"USDZ audit joint {name} mismatch for {joint_name!r}: "
+            f"expected={expected!r} found={value!r}"
+        )
+
+
+def _signed_volume(mesh) -> float:
+    triangles = np.asarray(mesh.vertices, dtype=np.float64)[np.asarray(mesh.faces)]
+    return float(
+        np.einsum(
+            "ij,ij->i",
+            triangles[:, 0],
+            np.cross(triangles[:, 1], triangles[:, 2]),
+        ).sum()
+        / 6.0
+    )
+
+
+def _point_bounds(
+    points: np.ndarray,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    return (
+        tuple(float(value) for value in points.min(axis=0)),
+        tuple(float(value) for value in points.max(axis=0)),
+    )  # type: ignore[return-value]

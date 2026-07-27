@@ -20,6 +20,7 @@ class CompileResult:
     error: str = ""
     traceback: str = ""
     compile_stats: dict[str, Any] | None = None
+    qa_report: str = ""
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> CompileResult:
@@ -34,6 +35,7 @@ class CompileResult:
             error=str(payload.get("error") or ""),
             traceback=str(payload.get("traceback") or ""),
             compile_stats=dict(compile_stats) if isinstance(compile_stats, dict) else None,
+            qa_report=str(payload.get("qa_report") or ""),
         )
 
     def to_payload(

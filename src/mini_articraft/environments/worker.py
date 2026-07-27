@@ -14,8 +14,15 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from mini_articraft.compile_result import CompileResult
+from mini_articraft.qa import write_qa_report
 from mini_articraft.record import Record
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from mini_articraft.sdk import (
+    ArticulatedObject,
+    FailureKind,
+    TestContext,
+    TestMetric,
+    TestReport,
+)
 from mini_articraft.sdk.export import export_object
 
 T = TypeVar("T", bound=Hashable)
@@ -202,6 +209,39 @@ def _compile_workspace(
                 export_result = export_object(object_model, export_dir)
             result.manifest = str(export_result.manifest)
             result.usdz = str(export_result.usdz)
+            audit = export_result.audit
+            audit_metrics = (
+                TestMetric("export part count", float(audit.part_count), unit="count"),
+                TestMetric("export shape count", float(audit.shape_count), unit="count"),
+                TestMetric(
+                    "export articulation count",
+                    float(audit.articulation_count),
+                    unit="count",
+                ),
+                TestMetric("export triangle count", float(audit.triangle_count), unit="triangles"),
+                TestMetric(
+                    "export meshes with normals",
+                    float(audit.meshes_with_normals),
+                    unit="meshes",
+                ),
+            )
+            test_report = replace(
+                test_report,
+                metrics=(*test_report.metrics, *audit_metrics),
+            )
+            with tracker.phase("writing the QA report"):
+                test_report, qa_report = write_qa_report(
+                    workspace=workspace,
+                    result_dir=export_dir,
+                    model=object_model,
+                    test_report=test_report,
+                    export_audit=audit,
+                )
+            result.qa_report = str(qa_report)
+            result.test_report = _serialize_test_report(
+                test_report,
+                compiler_failure_names={failure.name for failure in baseline_report.failures},
+            )
             _raise_for_failed_test_report(test_report)
 
         result.status = "success"
@@ -276,7 +316,26 @@ def _run_baseline_tests(
         ctx.fail_if_parts_overlap_in_current_pose()
     with tracker.phase("checking articulation motion"):
         ctx.fail_if_articulation_separates_child()
-    return _without_allowance_notes(ctx.report())
+    report = _without_allowance_notes(ctx.report())
+    blocking = tuple(
+        failure
+        for failure in report.failures
+        if failure.kind in {FailureKind.MODEL_VALIDITY, FailureKind.SINGLE_ROOT}
+    )
+    diagnostics = tuple(
+        failure
+        for failure in report.failures
+        if failure.kind not in {FailureKind.MODEL_VALIDITY, FailureKind.SINGLE_ROOT}
+    )
+    diagnostic_warnings = tuple(
+        f"Compiler diagnostic {failure.name}: {failure.details}" for failure in diagnostics
+    )
+    return replace(
+        report,
+        passed=not blocking,
+        failures=blocking,
+        warnings=_ordered_unique([*report.warnings, *diagnostic_warnings]),
+    )
 
 
 def _without_allowance_notes(report: TestReport) -> TestReport:
@@ -314,6 +373,8 @@ def _merge_test_reports(authored_report: TestReport, baseline_report: TestReport
         allowances=allowances,
         allowed_isolated_parts=authored_report.allowed_isolated_parts,
         allowed_overlaps=authored_report.allowed_overlaps,
+        metrics=(*authored_report.metrics, *baseline_report.metrics),
+        artifacts=(*authored_report.artifacts, *baseline_report.artifacts),
     )
 
 

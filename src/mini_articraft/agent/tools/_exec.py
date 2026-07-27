@@ -8,6 +8,7 @@ import logging
 import os
 import secrets
 import signal
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -332,6 +333,7 @@ def _env(run_dir: Path, workspace: Path, shell: str) -> dict[str, str]:
     env["SHELL"] = shell
     env["MINI_ARTICRAFT_RUN_DIR"] = str(run_dir)
     env["MINI_ARTICRAFT_WORKSPACE_DIR"] = str(workspace)
+    env["MINI_ARTICRAFT_PYTHON"] = sys.executable
     return env
 
 

@@ -339,12 +339,19 @@ class MeshGeometry:
 
     vertices: list[Vec3] = field(default_factory=list)
     faces: list[Face] = field(default_factory=list)
+    normal_crease_angle: float | None = None
     _revision: ClassVar[int] = 0
     _array_cache: ClassVar[tuple[int, np.ndarray, np.ndarray] | None] = None
     _watertight_cache: ClassVar[tuple[int, bool] | None] = None
 
     def __post_init__(self) -> None:
         vertices, faces = _validated_mesh_arrays(self.vertices, self.faces)
+        crease = self.normal_crease_angle
+        if crease is not None:
+            crease = float(crease)
+            if not math.isfinite(crease) or not 0.0 <= crease <= math.pi:
+                raise ValidationError("normal_crease_angle must be between 0 and pi radians")
+        object.__setattr__(self, "normal_crease_angle", crease)
         object.__setattr__(self, "_revision", 0)
         object.__setattr__(self, "_array_cache", None)
         object.__setattr__(self, "_watertight_cache", None)
@@ -401,9 +408,18 @@ class MeshGeometry:
 
     def validate(self) -> None:
         self._mesh_arrays()
+        crease = self.normal_crease_angle
+        if crease is not None and (not math.isfinite(crease) or not 0.0 <= crease <= math.pi):
+            raise ValidationError("normal_crease_angle must be between 0 and pi radians")
 
     @classmethod
-    def from_trimesh(cls, mesh: trimesh.Trimesh, *, process: bool = False) -> MeshGeometry:
+    def from_trimesh(
+        cls,
+        mesh: trimesh.Trimesh,
+        *,
+        process: bool = False,
+        normal_crease_angle: float | None = None,
+    ) -> MeshGeometry:
         if not isinstance(mesh, trimesh.Trimesh):
             raise TypeError("mesh must be trimesh.Trimesh")
         if process:
@@ -414,6 +430,7 @@ class MeshGeometry:
                 (float(vertex[0]), float(vertex[1]), float(vertex[2])) for vertex in mesh.vertices
             ],
             faces=[(int(face[0]), int(face[1]), int(face[2])) for face in mesh.faces],
+            normal_crease_angle=normal_crease_angle,
         )
 
     def to_trimesh(self, *, process: bool = False) -> trimesh.Trimesh:
@@ -459,6 +476,7 @@ class MeshGeometry:
         object.__setattr__(copied, "_array_cache", None)
         watertight = None if self._watertight_cache is None else (0, self._watertight_cache[1])
         object.__setattr__(copied, "_watertight_cache", watertight)
+        object.__setattr__(copied, "normal_crease_angle", self.normal_crease_angle)
         object.__setattr__(
             copied,
             "vertices",
@@ -471,6 +489,24 @@ class MeshGeometry:
         )
         copied._store_array_cache(vertices.copy(), faces.copy())
         return copied
+
+    def set_normal_crease(self, angle: float) -> MeshGeometry:
+        """Use hard normals where adjacent faces differ by more than ``angle``."""
+        value = float(angle)
+        if not math.isfinite(value) or not 0.0 <= value <= math.pi:
+            raise ValueError("normal crease angle must be between 0 and pi radians")
+        self.normal_crease_angle = value
+        return self
+
+    def use_smooth_normals(self) -> MeshGeometry:
+        """Blend normals across every shared vertex."""
+        self.normal_crease_angle = math.pi
+        return self
+
+    def use_hard_normals(self) -> MeshGeometry:
+        """Keep a separate normal for every triangle corner."""
+        self.normal_crease_angle = 0.0
+        return self
 
     def add_vertex(self, x: float, y: float, z: float) -> int:
         vertex = _vec3((x, y, z), name="vertex")
@@ -848,19 +884,81 @@ class LatheGeometry(MeshGeometry):
         return cls(profile, segments=segments, closed=True)
 
     def __init__(
-        self, profile: Iterable[Sequence[float]], *, segments: int = 32, closed: bool = True
+        self,
+        profile: Iterable[Sequence[float]],
+        *,
+        segments: int = 32,
+        closed: bool = True,
+        angle: float = math.tau,
+        start_angle: float = 0.0,
+        axis: str = "z",
+        cap_ends: bool = True,
     ):
         points = _profile_2d(profile, minimum=3) if closed else _profile_2d(profile, minimum=2)
         if closed:
             points = _ensure_ccw(points)
         if any(radius < -_EPS for radius, _z in points):
             raise ValueError("lathe profile radii must be non-negative")
+        angle = float(angle)
+        start_angle = float(start_angle)
+        if not math.isfinite(angle) or not 0.0 < angle <= math.tau:
+            raise ValueError("lathe angle must be greater than 0 and at most 2*pi")
+        if not math.isfinite(start_angle):
+            raise ValueError("lathe start_angle must be finite")
+        axis = str(axis).lower()
+        if axis not in {"x", "y", "z"}:
+            raise ValueError("lathe axis must be 'x', 'y', or 'z'")
+        partial = not math.isclose(angle, math.tau, abs_tol=1e-10)
+        if cap_ends and partial and not closed:
+            raise ValueError("partial lathe end caps require a closed profile")
         revolve_points = [*points, points[0]] if closed else points
-        created = trimesh.creation.revolve(
-            np.asarray(revolve_points, dtype=np.float64),
-            sections=max(3, int(segments)),
-            cap=False,
-        )
+        if partial and closed:
+            section_count = max(3, int(segments)) + 1
+            theta = np.linspace(0.0, angle, section_count)
+            vertices = np.asarray(
+                [
+                    (radius * math.cos(value), radius * math.sin(value), height)
+                    for value in theta
+                    for radius, height in points
+                ],
+                dtype=np.float64,
+            )
+            per_section = len(points)
+            faces: list[Face] = []
+            for section in range(section_count - 1):
+                start = section * per_section
+                following = start + per_section
+                for index in range(per_section):
+                    next_index = (index + 1) % per_section
+                    faces.append((start + index, following + index, start + next_index))
+                    faces.append((start + next_index, following + index, following + next_index))
+            if cap_ends:
+                cap_faces = _triangulate_simple(points)
+                faces.extend(cap_faces)
+                end_offset = (section_count - 1) * per_section
+                faces.extend(
+                    (c + end_offset, b + end_offset, a + end_offset) for a, b, c in cap_faces
+                )
+            created = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        else:
+            created = trimesh.creation.revolve(
+                np.asarray(revolve_points, dtype=np.float64),
+                angle=angle,
+                sections=max(3, int(segments)),
+                cap=False,
+            )
+        if start_angle:
+            created.apply_transform(
+                trimesh.transformations.rotation_matrix(start_angle, (0.0, 0.0, 1.0))
+            )
+        if axis == "x":
+            created.apply_transform(
+                trimesh.transformations.rotation_matrix(math.pi / 2.0, (0.0, 1.0, 0.0))
+            )
+        elif axis == "y":
+            created.apply_transform(
+                trimesh.transformations.rotation_matrix(-math.pi / 2.0, (1.0, 0.0, 0.0))
+            )
         converted = _from_created(created) if closed else MeshGeometry.from_trimesh(created)
         super().__init__(converted.vertices, converted.faces)
 

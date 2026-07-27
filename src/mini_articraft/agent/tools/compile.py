@@ -72,7 +72,10 @@ TOOL = Tool(
     "compile",
     schema(
         "compile",
-        "Compile the current workspace. The result contains only status and one structured <compile_signals> block. Run this after changing files and before the final response.",
+        "Compile the current workspace. The result contains only status and one structured "
+        "<compile_signals> block. It does not render, copy, or attach images. Registered visual "
+        "signals contain workspace paths that must be opened with view_image. Run this after "
+        "changing files and before the final response.",
         {},
         [],
     ),

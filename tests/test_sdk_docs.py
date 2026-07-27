@@ -274,7 +274,7 @@ def test_prompts_encourage_research_and_mesh_without_a_usage_quota() -> None:
         "Research plausible approaches before you",
         "Do not stop at the first workable API",
         "geometry strategy for each major visible form",
-        "A successful compile does not finish the visual design review",
+        "A successful compile does not replace visual inspection",
         "Mesh usage is not a goal by itself",
     ]:
         assert required.lower() in normalized
@@ -289,3 +289,33 @@ def test_prompts_encourage_research_and_mesh_without_a_usage_quota() -> None:
         "desk lamp",
     ]:
         assert forbidden.lower() not in normalized
+
+
+def test_prompt_requires_agent_driven_visual_review() -> None:
+    system = (package_dir / "prompts" / "system.md").read_text(encoding="utf-8")
+    visual_docs = (package_dir / "sdk" / "docs" / "common" / "45_visual_evidence.md").read_text(
+        encoding="utf-8"
+    )
+    normalized = " ".join(system.split())
+    normalized_docs = " ".join(visual_docs.split())
+
+    for required in [
+        "Write `previews.py`",
+        '"$MINI_ARTICRAFT_PYTHON" previews.py',
+        "before the first compile",
+        "Calling the renderer is not visual inspection",
+        "silhouette, proportions, part transitions, repeated features",
+        "Every validation brief must include at least one overall model view",
+        "Register the final useful preview files",
+        "The compiler does not render or copy images",
+        "Run `compile` after an actual file change",
+    ]:
+        assert required.lower() in normalized.lower()
+
+    for required in [
+        "from main import object_model",
+        "qa/previews/assembly.png",
+        "Working previews can stay",
+        "does not render or copy images",
+    ]:
+        assert required.lower() in normalized_docs.lower()

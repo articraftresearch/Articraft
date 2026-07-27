@@ -8,7 +8,7 @@ from mini_articraft.compile_feedback import (
     compile_failure_signature,
     render_compile_report,
 )
-from mini_articraft.sdk import FailureKind, TestFailure, TestReport
+from mini_articraft.sdk import FailureKind, TestArtifact, TestFailure, TestReport
 
 
 def _serialized_report(
@@ -56,6 +56,56 @@ def test_compile_report_clean_success_uses_articraft_style_block() -> None:
         "</summary>\n"
         "</compile_signals>"
     )
+
+
+def test_compile_report_lists_visual_evidence_paths() -> None:
+    test_report = TestReport(
+        passed=True,
+        checks_run=0,
+        checks=(),
+        failures=(),
+        artifacts=(
+            TestArtifact(
+                name="body section",
+                path="qa/body_section.png",
+                kind="image",
+                caption="Internal support.",
+            ),
+        ),
+    )
+
+    report = build_compile_report(
+        status="success",
+        test_report=_serialized_report(test_report),
+    )
+
+    assert report["counts"]["notes"] == 1
+    assert "workspace_path=qa/body_section.png" in report["signals_text"]
+    assert "Open every relevant workspace image" in report["signals_text"]
+
+
+def test_compile_report_omits_unsafe_visual_evidence_paths() -> None:
+    test_report = TestReport(
+        passed=True,
+        checks_run=0,
+        checks=(),
+        failures=(),
+        artifacts=(
+            TestArtifact("safe", "qa/safe.png", "image"),
+            TestArtifact("parent escape", "../secret.png", "image"),
+            TestArtifact("absolute", "/tmp/secret.png", "image"),
+            TestArtifact("backslash", "qa\\secret.png", "image"),
+        ),
+    )
+
+    report = build_compile_report(
+        status="success",
+        test_report=_serialized_report(test_report),
+    )
+
+    assert report["counts"]["notes"] == 1
+    assert "workspace_path=qa/safe.png" in report["signals_text"]
+    assert "secret.png" not in report["signals_text"]
 
 
 def test_compile_report_classifies_runtime_errors() -> None:

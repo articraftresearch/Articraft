@@ -51,6 +51,7 @@ mesh workflows.
 MeshGeometry(
     vertices: list[tuple[float, float, float]] = [],
     faces: list[tuple[int, int, int]] = [],
+    normal_crease_angle: float | None = None,
 )
 ```
 
@@ -86,6 +87,9 @@ MeshGeometry.from_trimesh(
 
 geometry.to_trimesh(*, process: bool = False) -> trimesh.Trimesh
 geometry.to_obj() -> str
+geometry.set_normal_crease(angle: float) -> MeshGeometry
+geometry.use_smooth_normals() -> MeshGeometry
+geometry.use_hard_normals() -> MeshGeometry
 ```
 
 `bounds` returns `(minimum, maximum)` in mesh coordinates. It raises
@@ -100,6 +104,15 @@ copy. `to_trimesh(...)` creates a new trimesh value. With `process=False`, it
 does not merge or repair the mesh.
 
 `to_obj()` returns OBJ text. It does not write a file or create a managed asset.
+
+`normal_crease_angle` controls how the USDZ exporter blends normals across a
+shared vertex. The angle uses radians and must be from zero through pi. Faces
+whose angle is larger than this value keep separate corner normals. The
+exporter uses 45 degrees when the value is `None`.
+
+`set_normal_crease(...)` sets an explicit threshold. `use_smooth_normals()`
+blends every shared vertex. `use_hard_normals()` keeps a separate normal for
+every triangle corner. These methods change shading, not vertices or faces.
 
 ### Direct editing
 
@@ -376,11 +389,21 @@ LatheGeometry(
     *,
     segments: int = 32,
     closed: bool = True,
+    angle: float = 2 * pi,
+    start_angle: float = 0.0,
+    axis: str = "z",
+    cap_ends: bool = True,
 )
 ```
 
 Each profile point is `(radius, z)`. The helper revolves the profile around the
-Z axis. Radius values must be nonnegative. Segments are clamped to at least 3.
+selected axis. `axis` can be `"x"`, `"y"`, or `"z"`. Radius values must be
+nonnegative. Segments are clamped to at least 3.
+
+`angle` must be greater than zero and at most a full turn. `start_angle`
+rotates the first section around the selected axis. A partial revolution of a
+closed profile gets flat end caps when `cap_ends=True`. Partial end caps require
+a closed profile.
 
 With `closed=True`, the profile must contain at least three distinct points and
 must enclose a nonzero area in the radius and Z plane. The helper closes the

@@ -27,6 +27,10 @@ A successful export writes:
 ```text
 result/
   model.json
+  qa/
+    report.html
+    report.json
+    artifacts/  # present only when file evidence is attached
   usdz/
     0000.usdz
 ```
@@ -79,6 +83,7 @@ Both build123d shapes and `MeshGeometry` values are exported as triangle meshes.
 - The mesh has triangle face counts and indices.
 - The mesh has authored point data and an extent.
 - The mesh uses `none` as its subdivision setting.
+- The mesh has authored normals and right handed winding.
 - The mesh has the custom `mini_articraft:name` attribute.
 
 The exporter uses `mesh_tolerance` when it tessellates a build123d shape. A `MeshGeometry` uses its
@@ -180,6 +185,17 @@ Before packaging, the exporter runs these OpenUSD stage checks:
 
 After packaging, it opens the USDZ and runs the OpenUSD package validator. The exporter publishes
 the final numbered path only after these checks pass.
+
+The exporter then reads the package again. This audit compares part, shape, and
+articulation names with the source object. It compares triangle counts and
+bounds. It also checks joint values, material bindings, mesh normals, and face
+winding. `ExportResult.audit` contains the resulting `ExportAudit` counts and
+bounds.
+
+The compile worker writes `report.json` and `report.html` after the audit. The
+report contains authored checks, metrics, compiler diagnostics, the export
+audit, and copied artifacts. The compiler also makes front, side, and three
+quarter part color views.
 
 The package and manifest use temporary files while they are being written. If export or validation
 fails, the exporter removes the new USDZ and does not replace the manifest. Earlier successful

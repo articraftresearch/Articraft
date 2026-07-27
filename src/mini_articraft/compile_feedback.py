@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from mini_articraft.compile_result import CompileResult
@@ -152,6 +153,7 @@ def render_compile_signals(
     rules = _rules(
         failures,
         has_warnings=bool(warnings),
+        has_visuals=any(signal.kind == "qa_image" for signal in bundle.signals),
         repeated=repeated,
         failure_streak=failure_streak,
     )
@@ -189,7 +191,40 @@ def _signals_from_report(report: dict[str, Any]) -> list[CompileSignal]:
     ]
     signals += [_allowance_signal(str(a)) for a in report.get("allowances", []) if str(a).strip()]
     signals += [_failure_signal(f) for f in report.get("failures", [])]
+    signals += [
+        _artifact_signal(artifact)
+        for artifact in report.get("artifacts", [])
+        if isinstance(artifact, dict)
+        and artifact.get("kind") == "image"
+        and _safe_workspace_artifact_path(str(artifact.get("path") or ""))
+    ]
     return signals
+
+
+def _safe_workspace_artifact_path(value: str) -> bool:
+    value = value.strip()
+    if not value or "\\" in value:
+        return False
+    path = PurePosixPath(value)
+    return not path.is_absolute() and ".." not in path.parts
+
+
+def _artifact_signal(artifact: dict[str, Any]) -> CompileSignal:
+    name = str(artifact.get("name") or "visual evidence")
+    path = str(artifact.get("path") or "")
+    caption = str(artifact.get("caption") or "")
+    details = f"workspace_path={path}"
+    if caption:
+        details += f"\n{caption}"
+    return CompileSignal(
+        "note",
+        "qa_image",
+        "QA_IMAGE",
+        f"Visual evidence is ready: {name}",
+        details,
+        source="tests",
+        group="design",
+    )
 
 
 def _warning_signal(text: str) -> CompileSignal:
@@ -574,17 +609,22 @@ def _rules(
     failures: list[CompileSignal],
     *,
     has_warnings: bool,
+    has_visuals: bool,
     repeated: bool,
     failure_streak: int,
 ) -> list[str]:
     if not failures:
-        return (
-            [
-                "- Warnings are design evidence. Do not remove or simplify prompt-critical geometry just to clear them."
-            ]
-            if has_warnings
-            else []
-        )
+        rules: list[str] = []
+        if has_visuals:
+            rules.append(
+                "- Open every relevant workspace image with `view_image` before you finish."
+            )
+        if has_warnings:
+            rules.append(
+                "- Warnings are design evidence. Do not remove or simplify required geometry "
+                "only to clear them."
+            )
+        return rules
     kind = failures[0].kind
     rules = list(_RULES_BY_KIND.get(kind, _DEFAULT_FAILURE_RULES))
     if failure_streak >= 3:
