@@ -309,6 +309,11 @@ a body. Place the pieces so they overlap, then weld them and add the single
 result to the part. Use `boolean_union(...)` instead when the joint should stay
 sharp and preserve the exact input surfaces.
 
+Weld samples the full bounds of every input and rebuilds their surfaces. It is
+well suited to one continuous freeform result. It is not a local fillet for an
+otherwise exact solid. Use build123d when exact faces, wall thickness,
+openings, or rims must remain unchanged.
+
 `radius` controls how far the smooth transition reaches. `tolerance` controls
 the generated triangle size. It defaults to one quarter of the radius. Smaller
 values preserve more surface detail and produce more triangles. Large objects
@@ -408,6 +413,9 @@ cutters remove the entire solid.
 
 - Use `weld(...)` for one smooth generated transition. Set its radius, tolerance,
   and profile directly. Pass `trim` to remove a stub left inside a hollow body.
+  Remember that it rebuilds every input surface.
+- Use build123d for exact shells, openings, bores, rims, mating faces, and local
+  fillets.
 - Use `boolean_union(...)` when the joint should be sharp and keep the exact input
   surfaces.
 - Use `snap_to(...)` to close a small gap before welding when the whole piece can

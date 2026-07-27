@@ -14,14 +14,16 @@ Four requirements guide every design choice.
 
 1. REALISTIC GEOMETRY. Use real world dimensions and believable proportions.
    Treat build123d and the public mesh helpers as complementary authoring
-   choices. Build123d is strong for precise solids and topology work. The mesh
-   library is strong for procedural profiles, lathes, lofts, sweeps, shells,
-   curved forms, and direct mesh work. Research plausible approaches before you
-   choose or combine them. Familiarity and implementation speed are not reasons
-   to use primitive solids when another public helper would capture the visible
-   form better. Mesh usage is not a goal by itself. Use simple or exact
-   build123d geometry when it is the best fit. Model hollow bodies, openings,
-   frames, rails, brackets, hinge barrels, shafts, controls, and other visible
+   choices. Prefer build123d when exact boundaries, constant wall thickness,
+   openings, bores, rims, mating faces, or local fillets matter. Use the mesh
+   library for freeform surfaces whose form is best described by profiles,
+   lathes, lofts, or sweeps. A field based weld rebuilds every input surface on
+   its sampling grid, so do not use it across a precise surface only to soften
+   one local joint. Research plausible approaches before you choose or combine
+   them. Familiarity and implementation speed are not reasons to use primitive
+   solids when another public helper would capture the visible form better.
+   Mesh usage is not a goal by itself. Model hollow bodies, openings, frames,
+   rails, brackets, hinge barrels, shafts, controls, and other visible
    construction when the real object needs them. Tessellate curved surfaces
    finely enough to read smooth rather than faceted.
 2. PRIMARY MECHANISMS. Model the main motion a person expects from the object.
@@ -68,7 +70,8 @@ should stay valid. Choose the broad views and close views that will show the
 result clearly. Name any selected part, section, or motion view needed to judge
 internal construction or movement. Every validation brief must include at least
 one overall model view. An articulated object must also include a view that shows
-its important motion.
+its important motion. Add a close view for every opening, rim, joint, or curved
+transition whose quality cannot be judged in the overall view.
 
 Build a complete first version, then write `previews.py`. Import `object_model`
 from `main` and use the public `render_view(...)` function. Render every view
@@ -110,6 +113,12 @@ it lacks an operation, create a small local module such as
 the public SDK, build123d, NumPy, trimesh, Pillow, and the Python standard
 library. Keep one-off object logic local. Do not modify the installed SDK during
 a run.
+
+Keep exact and freeform work separate when that preserves quality. A part may
+contain both build123d shapes and mesh shapes. For a mesh shell, derive matching
+inner and outer sections from the same frames so their boundaries and wall
+thickness stay aligned. Make through cutters cross their target surface
+cleanly. Do not rely on nearly tangent or coincident booleans.
 
 Create geometry through parts. The exact API is:
 
@@ -153,15 +162,19 @@ custom JSON, CSV, or text file. Write custom numeric checks when a public helper
 cannot express an important property. Working previews may remain unregistered
 in the workspace.
 
-Compile owns only model validity, the single root rule, USDZ validation, and
-USDZ readback. Its overlap, isolation, disconnected geometry, scale, and motion
-findings are nonblocking diagnostics. Decide which findings matter for the
-requested object and add precise authored checks for them.
+Compile owns model validity, the single root rule, mesh health, USDZ validation,
+and USDZ readback. Mesh health covers bad triangles, invalid edges, disconnected
+solid debris, winding, and orientation. Its overlap, isolation, disconnected
+geometry, scale, and motion findings are nonblocking diagnostics. Decide which
+findings matter for the requested object and add precise authored checks for
+them.
 
 Do not weaken a check only because it reports a real defect. First decide whether
 the representation, geometry, articulation, pose, or named check is wrong. Scope
 intentional overlap and isolation allowances to the exact reported relationship
-and give a concrete reason.
+and give a concrete reason. Use `allow_mesh_issues(...)` only when the exact
+issue on the exact named shape is intentional. Never use it to hide accidental
+holes, bad triangles, or debris.
 </testing>
 
 <tools>

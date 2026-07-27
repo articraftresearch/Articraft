@@ -32,6 +32,12 @@ Within one rigid part, overlapping shapes count as connected -- notice `leg_1` o
 `top` above. To attach a handle, spout, or any protrusion, extend the protrusion's own end a few
 millimeters into the form it meets; it then reads as one molded piece with no extra geometry.
 
+Prefer build123d for exact solids, wall thickness, openings, bores, rims, mating
+faces, and local fillets. Use mesh helpers when the whole form is better
+described by freeform sections or paths. One part can contain both. A mesh weld
+rebuilds all input surfaces on a field grid, so it is not a local fillet for an
+otherwise exact solid.
+
 Use `model.articulation(...)` for fixed, revolute, continuous, and prismatic motion. Use named
 shape arguments in exact checks when a part contains several shapes.
 

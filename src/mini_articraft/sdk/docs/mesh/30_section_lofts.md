@@ -169,10 +169,11 @@ The helper creates a closed side loop between every pair of sections. It caps
 the result when `cap=True`. With `close_path=True`, it also creates the final
 span back to the first section and omits caps.
 
-For `symmetry="mirror_yz"`, the helper mirrors the mesh across X. If the first
-half is watertight, Manifold unions the two halves. If it is open, the helper
-merges the triangle lists without a boolean union. Author a half form that
-meets the YZ plane when you want one connected symmetric result.
+For `symmetry="mirror_yz"`, each section describes the positive X half of the
+form. The helper mirrors and resamples each section, then builds one loft from
+the full profiles. This avoids a doubled seam or a boolean along the symmetry
+plane. Each section needs at least two points with positive X and no points with
+negative X.
 
 ### Raw section example
 
