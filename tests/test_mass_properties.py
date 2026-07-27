@@ -194,12 +194,6 @@ def test_open_shapes_fail_instead_of_being_dropped() -> None:
         resolve_mass(MassProperties(density=1000.0), [solid, open_shell], part_name="mixed")
 
 
-def test_settings_flag_reaches_the_compile_worker() -> None:
-    from mini_articraft._child_process import child_environment
-
-    assert child_environment().get("MINI_ARTICRAFT_PHYSICS") in {"0", "1"}
-
-
 def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -> None:
     # The gate is only useful if it stops the compile; most baseline checks report as
     # non-blocking diagnostics, so this guards that missing mass is not one of them.
@@ -228,12 +222,3 @@ def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -
 
     assert statuses[False] == "success"
     assert statuses[True] == "error"
-
-
-def test_physics_flag_reaches_the_compile_worker_environment() -> None:
-    from mini_articraft._child_process import child_environment
-
-    # The --physics flag resolves in the parent and travels to the worker as
-    # environment; an explicit value must win over whatever Settings says.
-    assert child_environment(physics_enabled=True)["MINI_ARTICRAFT_PHYSICS"] == "1"
-    assert child_environment(physics_enabled=False)["MINI_ARTICRAFT_PHYSICS"] == "0"

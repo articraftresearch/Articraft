@@ -24,8 +24,7 @@ _COMPILE_PROGRESS_FILE = ".compile-progress.json"
 class LocalEnvironmentConfig(BaseModel):
     output_dir: Path = DEFAULT_OUTPUT_DIR
     timeout_seconds: float = Field(default=DEFAULT_COMPILE_TIMEOUT_SECONDS, gt=0.0)
-    # None defers to Settings; the --physics flag sets it explicitly.
-    physics_enabled: bool | None = None
+    physics_enabled: bool = False
 
 
 DEFAULT_MAIN_PY = """from build123d import Box
@@ -88,11 +87,12 @@ class LocalEnvironment:
             "--raw",
             str(run_dir.resolve()),
         ]
+        if self.config.physics_enabled:
+            args.append("--physics")
         completed = _run_isolated_process(
             args,
             cwd=run_dir.resolve(),
             timeout_seconds=self.config.timeout_seconds,
-            physics_enabled=self.config.physics_enabled,
         )
         compile_stats = _read_compile_progress(run_dir)
         if completed.timed_out:
@@ -173,12 +173,11 @@ def _run_isolated_process(
     *,
     cwd: Path,
     timeout_seconds: float,
-    physics_enabled: bool | None = None,
 ) -> _ProcessResult:
     proc = subprocess.Popen(
         args,
         cwd=cwd,
-        env=child_environment(physics_enabled=physics_enabled),
+        env=child_environment(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
