@@ -23,6 +23,7 @@ from mini_articraft.sdk._collision import (
     _pair_key,
 )
 from mini_articraft.sdk._mesh_core import geometry_to_trimesh
+from mini_articraft.sdk._mesh_health import analyze_mesh_health
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType
 from mini_articraft.sdk.object import ArticulatedObject, Part, PartRef
@@ -359,8 +360,11 @@ class TestContext:
         dimensions = bounds_array[1] - bounds_array[0]
         area = sum(float(mesh.area) for mesh in meshes)
         signed_volume = sum(_signed_mesh_volume(mesh) for mesh in meshes)
-        components = sum(len(_split_components(mesh)) for mesh in meshes)
-        watertight = all(bool(mesh.is_watertight) for mesh in meshes)
+        health_reports = [
+            analyze_mesh_health(mesh, tolerance=self.mesh_tolerance) for mesh in meshes
+        ]
+        components = sum(report.component_count for report in health_reports)
+        watertight = all(report.watertight for report in health_reports)
         if not watertight:
             orientation = "open"
         elif signed_volume > 0.0:
@@ -1353,14 +1357,6 @@ def _signed_mesh_volume(mesh: trimesh.Trimesh) -> float:
         ).sum()
         / 6.0
     )
-
-
-def _split_components(mesh: trimesh.Trimesh) -> list[trimesh.Trimesh]:
-    try:
-        found = list(mesh.split(only_watertight=False))
-    except Exception:
-        found = []
-    return found or [mesh]
 
 
 def _pose_dicts(

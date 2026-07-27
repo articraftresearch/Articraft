@@ -29,6 +29,12 @@ from mini_articraft.sdk._mesh_core import (
     SuperellipsoidGeometry,
     TorusGeometry,
 )
+from mini_articraft.sdk._mesh_health import (
+    MeshHealthFinding,
+    MeshHealthIssue,
+    MeshHealthReport,
+    analyze_mesh_health,
+)
 from mini_articraft.sdk._mesh_sweeps import (
     ArcPipeGeometry,
     PipeGeometry,
@@ -88,6 +94,9 @@ __all__ = [
     "Material",
     "MeridionalSectionView",
     "MeshGeometry",
+    "MeshHealthFinding",
+    "MeshHealthIssue",
+    "MeshHealthReport",
     "ModelView",
     "MotionLimits",
     "MotionStripView",
@@ -111,5 +120,6 @@ __all__ = [
     "TorusGeometry",
     "ValidationError",
     "WirePolylineGeometry",
+    "analyze_mesh_health",
     "render_view",
 ]
