@@ -22,10 +22,12 @@ from mini_articraft.sdk._collision import (
     Vec3,
     _pair_key,
 )
+from mini_articraft.sdk._mass_solver import resolve_mass
 from mini_articraft.sdk._mesh_core import geometry_to_trimesh
 from mini_articraft.sdk._mesh_health import MeshHealthIssue, analyze_mesh_health
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType
+from mini_articraft.sdk.mass import MaterialDensity
 from mini_articraft.sdk.object import ArticulatedObject, Part, PartRef
 
 DEFAULT_MESH_TOLERANCE = 0.001
@@ -1022,10 +1024,6 @@ class TestContext:
 
     def fail_if_parts_have_no_mass(self) -> bool:
         """Every part must declare what it is made of when physics is enabled."""
-
-        from mini_articraft.sdk._mass_solver import resolve_mass
-        from mini_articraft.sdk._mesh_core import geometry_to_trimesh
-        from mini_articraft.sdk.mass import MaterialDensity
 
         missing = [part.name for part in self.model.parts if part.mass_properties is None]
         unresolved: list[str] = []
