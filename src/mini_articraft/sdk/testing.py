@@ -48,6 +48,7 @@ class FailureKind(StrEnum):
     MODEL_VALIDITY = "model_validity"
     SINGLE_ROOT = "single_root"
     MESH_HEALTH = "mesh_health"
+    NO_COLLIDER = "no_collider"
     ISOLATED_PART = "isolated_part"
     DISCONNECTED_GEOMETRY = "disconnected_geometry"
     OVERLAP = "overlap"
@@ -1062,6 +1063,31 @@ class TestContext:
                 kind=FailureKind.MISSING_MASS,
             )
         return self._record("fail_if_parts_have_no_mass", True)
+
+    def fail_if_parts_have_no_collider(self) -> bool:
+        """Every part must have something to collide with.
+
+        A part is a rigid body, so a part whose shapes are all visual-only is
+        invisible to the simulator: it renders, falls through everything, and
+        nothing ever touches it.
+        """
+
+        missing = [
+            part.name
+            for part in self.model.parts
+            if not any(shape.role.is_collider for shape in part._iter_shapes())
+        ]
+        if missing:
+            return self._record(
+                "fail_if_parts_have_no_collider",
+                False,
+                f"Parts with no collision geometry: {missing!r}. Every part is a rigid "
+                "body, so at least one of its shapes must have a collider role. Give the "
+                "part a shape with the default role, or add a collision-only stand-in "
+                "with role=ShapeRole.COLLISION.",
+                kind=FailureKind.NO_COLLIDER,
+            )
+        return self._record("fail_if_parts_have_no_collider", True)
 
     def fail_if_isolated_parts(
         self,

@@ -7,6 +7,13 @@ from typing import TypeAlias
 from build123d.topology import Shape
 
 from mini_articraft.sdk._mesh_core import MeshGeometry
+from mini_articraft.sdk.collision import (
+    DEFAULT_COLLISION_APPROXIMATION,
+    CollisionApproximation,
+    ShapeRole,
+    _as_approximation,
+    _as_shape_role,
+)
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import (
     Articulation,
@@ -30,6 +37,8 @@ class _ShapeData:
     name: str
     geometry: Geometry
     material: Material | None
+    role: ShapeRole = ShapeRole.VISUAL_AND_COLLISION
+    collision_approximation: CollisionApproximation = DEFAULT_COLLISION_APPROXIMATION
 
     @property
     def color(self) -> Color | None:
@@ -57,26 +66,30 @@ class Part:
         name: str,
         color: Sequence[float] | None = None,
         material: Material | None = None,
+        role: ShapeRole = ShapeRole.VISUAL_AND_COLLISION,
+        collision_approximation: CollisionApproximation = DEFAULT_COLLISION_APPROXIMATION,
     ) -> Geometry:
         """Add named geometry in this part's local frame.
 
         Pass ``material`` for a physically based surface (metal, plastic, glass),
         or ``color`` for a plain colored surface. ``color`` is shorthand for a
         matte dielectric ``Material`` and cannot be combined with ``material``.
+
+        ``role`` says whether the shape is drawn, collided against, or both;
+        ``collision_approximation`` says how a simulator may simplify it.
         """
 
         shape_name = _as_name(name, field_name=f"shape name on part {self.name!r}")
         if shape_name in self._shapes:
             raise ValidationError(f"duplicate shape name {shape_name!r} on part {self.name!r}")
         _validate_geometry(shape, context=f"part {self.name!r} shape {shape_name!r}")
+        context = f"part {self.name!r} shape {shape_name!r}"
         self._shapes[shape_name] = _ShapeData(
             name=shape_name,
             geometry=shape,
-            material=_resolve_material(
-                color=color,
-                material=material,
-                context=f"part {self.name!r} shape {shape_name!r}",
-            ),
+            material=_resolve_material(color=color, material=material, context=context),
+            role=_as_shape_role(role, context=context),
+            collision_approximation=_as_approximation(collision_approximation, context=context),
         )
         return shape
 

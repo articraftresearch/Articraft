@@ -48,6 +48,7 @@ Read only the reference that applies to the next piece of geometry:
 - Named shapes and parts: `docs/sdk/common/30_articulated_object.md`.
 - Articulations: `docs/sdk/common/35_joints.md`.
 - Mass properties: `docs/sdk/common/37_mass.md`.
+- Collision shapes: `docs/sdk/common/38_collision.md`.
 - Checks and geometry inspection: `docs/sdk/common/40_testing.md`.
 - Visual views and report artifacts: `docs/sdk/common/45_visual_evidence.md`.
 - USDZ output: `docs/sdk/common/50_usdz_export.md`.

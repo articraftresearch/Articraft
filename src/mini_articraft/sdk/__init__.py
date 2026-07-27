@@ -41,6 +41,7 @@ from mini_articraft.sdk._mesh_sweeps import (
     SweepGeometry,
     WirePolylineGeometry,
 )
+from mini_articraft.sdk.collision import CollisionApproximation, ShapeRole
 from mini_articraft.sdk.errors import SDKError, ValidationError
 from mini_articraft.sdk.joints import (
     Articulation,
@@ -83,6 +84,7 @@ __all__ = [
     "ArticulationType",
     "BoxGeometry",
     "CapsuleGeometry",
+    "CollisionApproximation",
     "ConeGeometry",
     "CylinderGeometry",
     "DistanceFinding",
@@ -113,6 +115,7 @@ __all__ = [
     "RoundedBoxGeometry",
     "SDKError",
     "SectionView",
+    "ShapeRole",
     "SphereGeometry",
     "SuperellipsoidGeometry",
     "SurfaceKind",
