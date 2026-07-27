@@ -28,6 +28,7 @@ from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
 
 from mini_articraft.sdk import ambientcg
 from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
+from mini_articraft.sdk._mass_solver import ResolvedMass, resolve_mass
 from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
 from mini_articraft.sdk.materials import Material, SurfaceKind
@@ -100,16 +101,18 @@ def export_object(
 
     usdz = _next_usdz_path(root / "usdz")
     manifest = root / "model.json"
-    payload = _object_to_payload(obj) | {"files": {"usdz": usdz.relative_to(root).as_posix()}}
     manifest_temp = manifest.with_name(f".{manifest.name}.tmp")
     try:
-        texture_report = _write_usdz(
+        texture_report, masses = _write_usdz(
             obj,
             usdz,
             mesh_tolerance,
             textured=textured,
         )
         audit = _audit_usdz(obj, usdz, mesh_tolerance)
+        payload = _object_to_payload(obj, masses) | {
+            "files": {"usdz": usdz.relative_to(root).as_posix()}
+        }
         manifest_temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         manifest_temp.replace(manifest)
     except BaseException:
@@ -137,7 +140,7 @@ def _write_usdz(
     mesh_tolerance: float,
     *,
     textured: bool = False,
-) -> TextureExportReport:
+) -> tuple[TextureExportReport, dict[str, dict[str, object]]]:
     if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
         raise ValueError("mesh_tolerance must be a positive finite number")
 
@@ -145,6 +148,7 @@ def _write_usdz(
         stage_path = Path(temp_dir) / "model.usdc"
         stage = Usd.Stage.CreateNew(str(stage_path))
         UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+        UsdPhysics.SetStageKilogramsPerUnit(stage, 1.0)  # pyright: ignore[reportAttributeAccessIssue]
         UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
 
         world = UsdGeom.Xform.Define(stage, "/World")
@@ -157,7 +161,7 @@ def _write_usdz(
 
         # Textured shapes copy their maps next to the layer (in temp_dir) so
         # CreateNewUsdzPackage bundles them into the .usdz.
-        part_paths, texture_report = _write_parts(
+        part_paths, texture_report, masses = _write_parts(
             stage,
             f"{object_path}/parts",
             obj,
@@ -180,7 +184,7 @@ def _write_usdz(
             temp_path.replace(path)
         finally:
             temp_path.unlink(missing_ok=True)
-    return texture_report
+    return texture_report, masses
 
 
 def _write_parts(
@@ -191,11 +195,12 @@ def _write_parts(
     *,
     textured: bool = False,
     asset_dir: Path | None = None,
-) -> tuple[dict[str, str], TextureExportReport]:
+) -> tuple[dict[str, str], TextureExportReport, dict[str, dict[str, object]]]:
     UsdGeom.Scope.Define(stage, scope_path)
     transforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance).world_transforms({})
     safe_part_names = _safe_name_map(part.name for part in obj.parts)
     paths: dict[str, str] = {}
+    masses: dict[str, dict[str, object]] = {}
     resolver = _TextureResolver() if textured else None
     requested_shapes = 0
     textured_shapes = 0
@@ -206,6 +211,10 @@ def _write_parts(
         part_prim = UsdGeom.Xform.Define(stage, part_path).GetPrim()
         _attrs(part_prim, {"name": part.name})
         UsdPhysics.RigidBodyAPI.Apply(part_prim)
+        resolved_mass = _resolve_part_mass(part, mesh_tolerance)
+        if resolved_mass is not None:
+            _write_mass(part_prim, resolved_mass)
+            masses[part.name] = _mass_entry(part, resolved_mass)
         UsdGeom.Xformable(part_prim).AddTransformOp().Set(_gf_matrix(transforms[part.name]))
 
         shapes_path = f"{part_path}/shapes"
@@ -263,10 +272,14 @@ def _write_parts(
                 _bind_material(stage, mesh, material_path, shape.material)
                 _attrs(mesh.GetPrim(), _material_attrs(shape.material))
     errors = tuple(resolver.errors.values()) if resolver is not None else ()
-    return paths, TextureExportReport(
-        requested_shapes=requested_shapes,
-        textured_shapes=textured_shapes,
-        errors=errors,
+    return (
+        paths,
+        TextureExportReport(
+            requested_shapes=requested_shapes,
+            textured_shapes=textured_shapes,
+            errors=errors,
+        ),
+        masses,
     )
 
 
@@ -462,6 +475,41 @@ def _material_attrs(material: Material) -> dict[str, object]:
     return values
 
 
+def _resolve_part_mass(part, mesh_tolerance: float) -> ResolvedMass | None:
+    """Measure the part's mass once, for both the USD prim and the manifest."""
+
+    if part.mass_properties is None:
+        return None
+    meshes = [geometry_to_trimesh(shape.geometry, mesh_tolerance) for shape in part._iter_shapes()]
+    return resolve_mass(part.mass_properties, meshes, part_name=part.name)
+
+
+def _mass_entry(part, resolved: ResolvedMass) -> dict[str, object]:
+    """The manifest view of a resolved mass, for the viewer."""
+
+    return {
+        "kilograms": round(resolved.mass, 6),
+        "material": (
+            part.mass_properties.material.value
+            if part.mass_properties.material is not None
+            else None
+        ),
+        "density": part.mass_properties.resolved_density,
+        "center_of_mass": [round(value, 6) for value in resolved.center_of_mass],
+        "diagonal_inertia": [round(value, 9) for value in resolved.diagonal_inertia],
+    }
+
+
+def _write_mass(part_prim: Usd.Prim, resolved: ResolvedMass) -> None:
+    """Author UsdPhysics.MassAPI from already-resolved mass values."""
+
+    mass_api = UsdPhysics.MassAPI.Apply(part_prim)  # pyright: ignore[reportAttributeAccessIssue]
+    mass_api.CreateMassAttr(float(resolved.mass))
+    mass_api.CreateCenterOfMassAttr(Gf.Vec3f(*resolved.center_of_mass))
+    mass_api.CreateDiagonalInertiaAttr(Gf.Vec3f(*resolved.diagonal_inertia))
+    mass_api.CreatePrincipalAxesAttr(Gf.Quatf(*resolved.principal_axes))
+
+
 def _write_articulations(
     stage: Usd.Stage,
     scope_path: str,
@@ -591,7 +639,10 @@ def _normal_data(mesh, crease_angle: float) -> tuple[np.ndarray, str]:
     return corner_normals.reshape((-1, 3)).astype(np.float32), UsdGeom.Tokens.faceVarying
 
 
-def _object_to_payload(obj: ArticulatedObject) -> dict[str, object]:
+def _object_to_payload(
+    obj: ArticulatedObject, masses: dict[str, dict[str, object]] | None = None
+) -> dict[str, object]:
+    masses = masses or {}
     return {
         "name": obj.name,
         "units": "meters",
@@ -600,6 +651,7 @@ def _object_to_payload(obj: ArticulatedObject) -> dict[str, object]:
         "parts": [
             {
                 "name": part.name,
+                "mass": masses.get(part.name),
                 "shapes": [
                     {
                         "name": shape.name,

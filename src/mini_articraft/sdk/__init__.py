@@ -48,6 +48,7 @@ from mini_articraft.sdk.joints import (
     MotionLimits,
     Origin,
 )
+from mini_articraft.sdk.mass import MassProperties, MaterialDensity
 from mini_articraft.sdk.materials import Material, SurfaceKind
 from mini_articraft.sdk.object import ArticulatedObject, Part
 from mini_articraft.sdk.testing import (
@@ -93,7 +94,9 @@ __all__ = [
     "LatheGeometry",
     "LineOverlay",
     "LoftGeometry",
+    "MassProperties",
     "Material",
+    "MaterialDensity",
     "MeridionalSectionView",
     "MeshGeometry",
     "MeshHealthFinding",

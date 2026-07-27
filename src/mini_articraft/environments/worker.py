@@ -81,11 +81,15 @@ class _CompileTracker:
         self.path.write_text(json.dumps(self.snapshot()), encoding="utf-8")
 
 
-def compile_run(run_dir: Path, *, include_report: bool = True) -> dict[str, Any]:
+def compile_run(
+    run_dir: Path, *, include_report: bool = True, physics_enabled: bool = False
+) -> dict[str, Any]:
     workspace = run_dir / "workspace"
     result_dir = run_dir / "result"
     tracker = _CompileTracker(result_dir / _COMPILE_PROGRESS_FILE)
-    result = _compile_workspace(workspace, result_dir, tracker=tracker)
+    result = _compile_workspace(
+        workspace, result_dir, tracker=tracker, physics_enabled=physics_enabled
+    )
     result.compile_stats = tracker.finish()
     tracker.remove()
     return result.to_payload(include_report=include_report)
@@ -175,6 +179,7 @@ def _compile_workspace(
     export_dir: Path,
     *,
     tracker: _CompileTracker,
+    physics_enabled: bool = False,
 ) -> CompileResult:
     export_dir.mkdir(parents=True, exist_ok=True)
 
@@ -198,7 +203,12 @@ def _compile_workspace(
             tracker.set_model(object_model)
             with tracker.phase("running authored tests"):
                 authored_report = _run_required_tests(globals_dict)
-            baseline_report = _run_baseline_tests(object_model, authored_report, tracker=tracker)
+            baseline_report = _run_baseline_tests(
+                object_model,
+                authored_report,
+                tracker=tracker,
+                physics_enabled=physics_enabled,
+            )
             test_report = _merge_test_reports(authored_report, baseline_report)
             result.test_report = _serialize_test_report(
                 test_report,
@@ -273,6 +283,7 @@ def _run_baseline_tests(
     authored_report: TestReport,
     *,
     tracker: _CompileTracker,
+    physics_enabled: bool = False,
 ) -> TestReport:
     ctx = TestContext(obj)
     for part_name in authored_report.allowed_isolated_parts:
@@ -305,6 +316,9 @@ def _run_baseline_tests(
 
     with tracker.phase("checking mesh health"):
         ctx.fail_if_mesh_unhealthy()
+    if physics_enabled:
+        with tracker.phase("checking part mass properties"):
+            ctx.fail_if_parts_have_no_mass()
     with tracker.phase("checking for isolated parts"):
         ctx.fail_if_isolated_parts()
     with tracker.phase("checking for disconnected geometry"):
@@ -316,25 +330,18 @@ def _run_baseline_tests(
     with tracker.phase("checking articulation motion"):
         ctx.fail_if_articulation_separates_child()
     report = _without_allowance_notes(ctx.report())
-    blocking = tuple(
-        failure
-        for failure in report.failures
-        if failure.kind
-        in {
-            FailureKind.MODEL_VALIDITY,
-            FailureKind.SINGLE_ROOT,
-            FailureKind.MESH_HEALTH,
-        }
-    )
+    # Most baseline checks report as diagnostics so a run still produces a model.
+    # Missing mass is different: with the physics lane on, a part without mass has
+    # nothing to export, so it blocks the compile.
+    blocking_kinds = {
+        FailureKind.MODEL_VALIDITY,
+        FailureKind.SINGLE_ROOT,
+        FailureKind.MESH_HEALTH,
+        FailureKind.MISSING_MASS,
+    }
+    blocking = tuple(failure for failure in report.failures if failure.kind in blocking_kinds)
     diagnostics = tuple(
-        failure
-        for failure in report.failures
-        if failure.kind
-        not in {
-            FailureKind.MODEL_VALIDITY,
-            FailureKind.SINGLE_ROOT,
-            FailureKind.MESH_HEALTH,
-        }
+        failure for failure in report.failures if failure.kind not in blocking_kinds
     )
     diagnostic_warnings = tuple(
         f"Compiler diagnostic {failure.name}: {failure.details}" for failure in diagnostics
@@ -431,9 +438,9 @@ def _serialize_test_report(
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    raw = bool(args and args[0] == "--raw")
-    if raw:
-        args.pop(0)
+    raw = "--raw" in args
+    physics = "--physics" in args
+    args = [arg for arg in args if arg not in {"--raw", "--physics"}]
     if len(args) != 1:
         payload = CompileResult(error="Usage: mini-articraft-compile-run <run_dir>").to_payload(
             include_report=not raw
@@ -441,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload))
         return 2
 
-    payload = compile_run(Path(args[0]).resolve(), include_report=not raw)
+    payload = compile_run(Path(args[0]).resolve(), include_report=not raw, physics_enabled=physics)
     print(json.dumps(payload))
     return 0 if payload["status"] == "success" else 1
 

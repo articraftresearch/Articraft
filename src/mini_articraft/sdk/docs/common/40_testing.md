@@ -442,15 +442,16 @@ health allowances into a new context and runs these baseline checks before expor
 1. `check_model_valid()`
 2. `check_single_root_part()`
 3. `fail_if_mesh_unhealthy()`
-4. `fail_if_isolated_parts()`
-5. `warn_if_part_contains_disconnected_geometry_islands()`
-6. `warn_if_absurd_dimensions()`
-7. `fail_if_parts_overlap_in_current_pose()`
-8. `fail_if_articulation_separates_child()`
+4. `fail_if_parts_have_no_mass()` (only while the physics lane is enabled)
+5. `fail_if_isolated_parts()`
+6. `warn_if_part_contains_disconnected_geometry_islands()`
+7. `warn_if_absurd_dimensions()`
+8. `fail_if_parts_overlap_in_current_pose()`
+9. `fail_if_articulation_separates_child()`
 
 If model validity or the root check fails, the worker stops the rest of the baseline pass. When the
-object is valid enough to inspect, model validity, the single root rule, mesh health, and USDZ
-validation can block the compiler. The other baseline methods appear as nonblocking diagnostics.
+object is valid enough to inspect, model validity, the single root rule, mesh health, missing mass
+properties, and USDZ validation can block the compiler. The other baseline methods appear as nonblocking diagnostics.
 Add an authored check when one of those findings is important to the requested object.
 The failed check still makes the compile fail and prevents final publication.
 

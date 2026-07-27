@@ -329,6 +329,12 @@ _FAILURE_SPECS: dict[FailureKind, _FailureSpec] = {
         "Unhealthy mesh geometry was found.",
         compiler_summary="Compiler mesh health validation failed.",
     ),
+    FailureKind.MISSING_MASS: _FailureSpec(
+        "missing_mass",
+        "MISSING_MASS",
+        "A part has no mass properties while physics is enabled.",
+        compiler_group="build",
+    ),
     FailureKind.ISOLATED_PART: _FailureSpec(
         "isolated_part",
         "ISOLATED_PART",
@@ -582,6 +588,12 @@ _RUNTIME_RULES = (
 )
 _STRUCTURE_RULES = ("- Fix the model structure first. Local geometry tuning comes after that.",)
 _RULES_BY_KIND = {
+    "missing_mass": (
+        "- Give every part a mass: pass `mass_properties=MassProperties(material=MaterialDensity.STEEL)` "
+        "to `model.part()`, choosing the material the part is actually made of.",
+        "- Use `density=` for a material that is not in the library, or `mass=` in kilograms "
+        "when you know the weight. Center of mass and inertia are measured from the geometry.",
+    ),
     "compile_timeout": (
         "- Inspect the phase named in the timeout before editing.",
         "- If model construction timed out, simplify the slow operation or use a coarser "

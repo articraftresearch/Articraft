@@ -71,9 +71,14 @@ def generate(
         "--textures",
         help="Apply texture maps to the generated result.",
     ),
+    physics: bool = typer.Option(
+        False,
+        "--physics",
+        help="Require every part to declare mass properties, and export them.",
+    ),
 ) -> None:
     """Generate an object from a prompt."""
-    settings = _settings(provider, model, output_dir, effort, compile_timeout)
+    settings = _settings(provider, model, output_dir, effort, compile_timeout, physics)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     try:
         result = _run_generation(
@@ -167,6 +172,7 @@ async def _generate(
         env = LocalEnvironment(
             output_dir=settings.output_dir,
             timeout_seconds=settings.compile_timeout_seconds,
+            physics_enabled=settings.physics_enabled,
         )
         agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
         if on_event is not None:
@@ -250,6 +256,7 @@ def _settings(
     output_dir: Path | None,
     effort: str | None,
     compile_timeout: float | None,
+    physics: bool = False,
 ) -> Settings:
     updates = {
         key: value
@@ -258,6 +265,9 @@ def _settings(
             ("output_dir", output_dir),
             ("openai_reasoning_effort", effort),
             ("compile_timeout_seconds", compile_timeout),
+            # The flag only turns the lane on; leaving it off keeps whatever the
+            # environment or .env already said.
+            ("physics_enabled", True if physics else None),
         )
         if value is not None
     }

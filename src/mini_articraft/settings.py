@@ -94,6 +94,10 @@ class Settings(BaseSettings):
         validation_alias="MINI_ARTICRAFT_GEMINI_REQUEST_TIMEOUT_SECONDS",
     )
     max_turns: int = Field(default=DEFAULT_MAX_TURNS, validation_alias="MINI_ARTICRAFT_MAX_TURNS")
+    physics_enabled: bool = Field(
+        default=False,
+        validation_alias="MINI_ARTICRAFT_PHYSICS",
+    )
     compile_timeout_seconds: float = Field(
         default=DEFAULT_COMPILE_TIMEOUT_SECONDS,
         gt=0.0,

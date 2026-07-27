@@ -24,6 +24,7 @@ _COMPILE_PROGRESS_FILE = ".compile-progress.json"
 class LocalEnvironmentConfig(BaseModel):
     output_dir: Path = DEFAULT_OUTPUT_DIR
     timeout_seconds: float = Field(default=DEFAULT_COMPILE_TIMEOUT_SECONDS, gt=0.0)
+    physics_enabled: bool = False
 
 
 DEFAULT_MAIN_PY = """from build123d import Box
@@ -86,6 +87,8 @@ class LocalEnvironment:
             "--raw",
             str(run_dir.resolve()),
         ]
+        if self.config.physics_enabled:
+            args.append("--physics")
         completed = _run_isolated_process(
             args,
             cwd=run_dir.resolve(),
