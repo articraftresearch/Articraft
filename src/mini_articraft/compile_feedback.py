@@ -329,12 +329,6 @@ _FAILURE_SPECS: dict[FailureKind, _FailureSpec] = {
         "Unhealthy mesh geometry was found.",
         compiler_summary="Compiler mesh health validation failed.",
     ),
-    FailureKind.NO_COLLIDER: _FailureSpec(
-        "no_collider",
-        "NO_COLLIDER",
-        "A part has no collision geometry.",
-        compiler_group="build",
-    ),
     FailureKind.MISSING_MASS: _FailureSpec(
         "missing_mass",
         "MISSING_MASS",
@@ -594,12 +588,6 @@ _RUNTIME_RULES = (
 )
 _STRUCTURE_RULES = ("- Fix the model structure first. Local geometry tuning comes after that.",)
 _RULES_BY_KIND = {
-    "no_collider": (
-        "- Every part is a rigid body and needs a collider. Shapes are colliders by "
-        "default, so this means every shape on the part was set to `role=ShapeRole.VISUAL`.",
-        "- Give the part one collidable shape: drop the `role=` override, or add a simple "
-        "collision-only stand-in with `role=ShapeRole.COLLISION`.",
-    ),
     "missing_mass": (
         "- Give every part a mass: pass `mass_properties=MassProperties(material=MaterialDensity.STEEL)` "
         "to `model.part()`, choosing the material the part is actually made of.",

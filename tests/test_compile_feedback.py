@@ -380,7 +380,6 @@ def test_every_failure_kind_maps_to_a_specific_signal() -> None:
         FailureKind.OVERLAP: "real_overlap",
         FailureKind.CONTACT: "exact_contact_gap",
         FailureKind.ARTICULATION_SEPARATION: "articulation_separation",
-        FailureKind.NO_COLLIDER: "no_collider",
         FailureKind.MISSING_MASS: "missing_mass",
         FailureKind.AUTHORED: "test_failure",
     }

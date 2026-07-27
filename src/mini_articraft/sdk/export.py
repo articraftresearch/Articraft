@@ -229,7 +229,7 @@ def _write_parts(
             mesh_path = f"{shapes_path}/{safe_shape}"
             material_path = f"{materials_path}/{safe_shape}"
 
-            material = shape.material if shape.role.is_visual else None
+            material = shape.material
             surface = material.surface if material is not None else None
             selection = resolver.resolve(surface) if resolver and surface else None
             if resolver is not None and surface is not None:
@@ -244,10 +244,6 @@ def _write_parts(
                     material,
                     asset_dir,
                     mesh_tolerance,
-                )
-                _write_collision(
-                    UsdGeom.Mesh.Get(stage, mesh_path),  # pyright: ignore[reportAttributeAccessIssue]
-                    shape,
                 )
                 textured_shapes += 1
                 continue
@@ -268,8 +264,8 @@ def _write_parts(
             mesh.SetNormalsInterpolation(normal_interpolation)
             mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
             _attrs(mesh.GetPrim(), {"name": shape.name})
-            _write_collision(mesh, shape)
-            if shape.material is not None and shape.role.is_visual:
+            _write_collision(mesh, trimesh_obj)
+            if shape.material is not None:
                 # displayColor stays as a fallback for renderers that ignore
                 # UsdShade; the bound UsdPreviewSurface carries the full material.
                 mesh.CreateDisplayColorAttr([Gf.Vec3f(*shape.material.base_color[:3])])
@@ -313,6 +309,7 @@ def _write_textured_shape(
     mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(gf_points))
     mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
     mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+    _write_collision(mesh, trimesh_obj)
     mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
     primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(  # pyright: ignore[reportAttributeAccessIssue]
         "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex
@@ -515,23 +512,30 @@ def _write_mass(part_prim: Usd.Prim, resolved: ResolvedMass) -> None:
     mass_api.CreatePrincipalAxesAttr(Gf.Quatf(*resolved.principal_axes))
 
 
-def _write_collision(mesh: UsdGeom.Mesh, shape) -> None:
-    """Author the shape's collision role on its mesh prim.
+def _write_collision(mesh: UsdGeom.Mesh, source: trimesh.Trimesh) -> None:
+    """Make the shape's visible geometry its collider.
 
-    A collider gets ``CollisionAPI`` plus the mesh approximation a simulator may
-    use in place of the raw triangles. A shape that only exists to be collided
-    against is made invisible rather than dropped, so the collider still resolves
-    on the stage while nothing draws it.
+    Collision geometry is one-to-one with display geometry: what you see is what
+    the simulator touches. Generating a separate, cheaper collider (a convex
+    decomposition, a fitted proxy) is a job for a dedicated backend, not for the
+    author of the model.
+
+    The approximation is chosen from the mesh rather than declared. Engines
+    generally cannot simulate a moving body against raw triangles, and a convex
+    shape is both cheaper and exact as a hull, so only genuinely concave geometry
+    pays for a decomposition.
     """
 
     prim = mesh.GetPrim()
-    if shape.role.is_collider:
-        UsdPhysics.CollisionAPI.Apply(prim)  # pyright: ignore[reportAttributeAccessIssue]
-        mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)  # pyright: ignore[reportAttributeAccessIssue]
-        mesh_collision.CreateApproximationAttr(shape.collision_approximation.value)
-    if not shape.role.is_visual:
-        UsdGeom.Imageable(prim).MakeInvisible()  # pyright: ignore[reportAttributeAccessIssue]
-    _attrs(prim, {"role": shape.role.value})
+    UsdPhysics.CollisionAPI.Apply(prim)  # pyright: ignore[reportAttributeAccessIssue]
+    mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)  # pyright: ignore[reportAttributeAccessIssue]
+    mesh_collision.CreateApproximationAttr(_collision_approximation(source))
+
+
+def _collision_approximation(mesh: trimesh.Trimesh) -> str:
+    """The USD approximation token that matches this mesh's shape."""
+
+    return "convexHull" if mesh.is_convex else "convexDecomposition"
 
 
 def _write_articulations(
@@ -682,10 +686,6 @@ def _object_to_payload(
                         "geometry_type": type(shape.geometry).__name__,
                         "color": shape.color,
                         "material": _material_payload(shape.material),
-                        "role": shape.role.value,
-                        "collision_approximation": (
-                            shape.collision_approximation.value if shape.role.is_collider else None
-                        ),
                     }
                     for shape in part._iter_shapes()
                 ],

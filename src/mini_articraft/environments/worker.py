@@ -319,8 +319,6 @@ def _run_baseline_tests(
     if physics_enabled:
         with tracker.phase("checking part mass properties"):
             ctx.fail_if_parts_have_no_mass()
-    with tracker.phase("checking collision geometry"):
-        ctx.fail_if_parts_have_no_collider()
     with tracker.phase("checking for isolated parts"):
         ctx.fail_if_isolated_parts()
     with tracker.phase("checking for disconnected geometry"):
@@ -340,7 +338,6 @@ def _run_baseline_tests(
         FailureKind.SINGLE_ROOT,
         FailureKind.MESH_HEALTH,
         FailureKind.MISSING_MASS,
-        FailureKind.NO_COLLIDER,
     }
     blocking = tuple(failure for failure in report.failures if failure.kind in blocking_kinds)
     diagnostics = tuple(
