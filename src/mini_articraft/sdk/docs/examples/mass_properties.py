@@ -54,24 +54,26 @@ def build_object_model() -> ArticulatedObject:
     # Hollow steel body: the cavity is cut away, so the measured volume is the
     # wall rather than a solid cylinder, and the mass follows automatically.
     body_part = model.part("body", mass_properties=MassProperties(material=MaterialDensity.STEEL))
-    shell = boolean_difference(
+    # Weld the hinge lug onto the solid cylinder first, then cut the cavity. Welding
+    # into an already-hollow shell makes the bead negotiate the thin wall and the
+    # curved inner surface at once, which is where slivers and degenerate faces come
+    # from. Build up on clean geometry, subtract last.
+    lug = RoundedBoxGeometry((0.020, 0.010, 0.012), 0.004).translate(
+        0.0, HINGE_Y - 0.003, HEIGHT - 0.004
+    )
+    molded = weld(
         CylinderGeometry(RADIUS, HEIGHT, radial_segments=64).translate(0.0, 0.0, HEIGHT / 2),
+        lug,
+        radius=0.004,
+        tolerance=0.0012,
+    )
+    shell = boolean_difference(
+        molded,
         CylinderGeometry(RADIUS - WALL, HEIGHT, radial_segments=64).translate(
             0.0, 0.0, HEIGHT / 2 + WALL
         ),
     )
-    # The hinge lug is welded into the wall, so the part stays one molded piece. It is
-    # seated far enough out that it bites into the wall without breaking through into
-    # the cavity: a face that lands just inside the curved inner wall meets it in a
-    # sliver, and slivers are what turn into degenerate faces.
-    lug = RoundedBoxGeometry((0.020, 0.010, 0.012), 0.004).translate(
-        0.0, HINGE_Y - 0.003, HEIGHT - 0.004
-    )
-    body_part.add(
-        weld(shell, lug, radius=0.004, tolerance=0.0012),
-        name="body_shell",
-        color=(0.72, 0.73, 0.76),
-    )
+    body_part.add(shell, name="body_shell", color=(0.72, 0.73, 0.76))
 
     # A hardwood lid, authored in the hinge frame: the disc reaches forward from
     # the pivot so it covers the mouth, and the barrel sits on the pivot itself.
