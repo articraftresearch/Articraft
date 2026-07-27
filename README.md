@@ -6,8 +6,7 @@ mini-articraft is a small agent that turns a prompt into an articulated 3D objec
 > mini-articraft is under active development. Expect changes before version 1.0.
 
 <p align="center">
-  <img src="assets/readme/stand_mixer.gif" width="44%" alt="Stand mixer with a tilting head">
-  <img src="assets/readme/desk_fan.gif" width="44%" alt="Desk fan with a rotating fan">
+<img width="500" height="490" alt="Screen Recording 2026-07-27 at 1 57 32 AM" src="https://github.com/user-attachments/assets/683b8c3f-32c7-4b95-98ee-0cec2300ddbd" />
 </p>
 
 The agent writes a Python model. It compiles and checks the geometry. It exports a posable USDZ
