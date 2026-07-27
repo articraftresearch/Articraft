@@ -84,6 +84,33 @@ compiler asks you to state what each part is made of instead of guessing.
 
 With physics off, parts without mass properties simply export without them.
 
+## Solid or hollow changes the answer by 10x
+
+Mass is measured from the geometry you built, so a part modelled as a solid block is
+weighed as a solid block. Most real objects are not solid, and dense materials punish
+the mistake hard: a 0.35 x 0.30 m steel panel weighs **0.8 kg at 1 mm** and **8 kg at
+1 cm**. Model the wall, not the envelope:
+
+```python
+shell = boolean_difference(outer, inner)  # measured volume is the wall
+```
+
+Real thicknesses, when you have no better reference:
+
+| Thing | Typical wall |
+| --- | --- |
+| Sheet-metal panel, appliance body, toolbox lid | 0.5-1.5 mm |
+| Cast metal housing, cookware | 2-4 mm |
+| Injection-moulded plastic shell | 1.5-3 mm |
+| Wooden board, plank, panel | 10-20 mm |
+| Glass bottle, jar, window | 2-5 mm |
+
+Sanity-check the result: a cordless drill is about 1.5 kg, a kettle 1 kg, a laptop 2 kg,
+a cast-iron pan 2 kg, a toolbox 5 kg. If a hand-held object comes out at 20 kg, the
+geometry is solid where it should be a shell. Genuinely solid parts (a steel bolt, a
+hardwood block) are fine as-is -- this is about parts that only look solid because the
+cavity was never cut.
+
 ## Export
 
 Parts with mass properties export standard `UsdPhysics.MassAPI` attributes on the part
