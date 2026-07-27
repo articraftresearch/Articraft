@@ -91,7 +91,7 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
             "gpt-test",
             "--output-dir",
             str(output_dir),
-            "--reasoning-effort",
+            "--effort",
             "low",
             "--compile-timeout",
             "45",

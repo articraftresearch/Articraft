@@ -50,9 +50,9 @@ def generate(
     ),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use."),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
-    reasoning_effort: str | None = typer.Option(
+    effort: str | None = typer.Option(
         None,
-        "--reasoning-effort",
+        "--effort",
         help="OpenAI reasoning effort.",
     ),
     compile_timeout: float | None = typer.Option(
@@ -73,7 +73,7 @@ def generate(
     ),
 ) -> None:
     """Generate an object from a prompt."""
-    settings = _settings(provider, model, output_dir, reasoning_effort, compile_timeout)
+    settings = _settings(provider, model, output_dir, effort, compile_timeout)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     try:
         result = _run_generation(
@@ -248,7 +248,7 @@ def _settings(
     provider: Literal["openai", "gemini", "anthropic"] | None,
     model: str | None,
     output_dir: Path | None,
-    reasoning_effort: str | None,
+    effort: str | None,
     compile_timeout: float | None,
 ) -> Settings:
     updates = {
@@ -256,7 +256,7 @@ def _settings(
         for key, value in (
             ("provider", provider),
             ("output_dir", output_dir),
-            ("openai_reasoning_effort", reasoning_effort),
+            ("openai_reasoning_effort", effort),
             ("compile_timeout_seconds", compile_timeout),
         )
         if value is not None
