@@ -407,6 +407,60 @@ def run_tests() -> TestReport:
     assert result["test_report"]["allowed_overlaps"][0]["shape_b"] == "steel"
 
 
+def test_compile_blocks_unhealthy_mesh_and_honors_exact_issue_allowance(tmp_path) -> None:
+    env = LocalEnvironment(output_dir=tmp_path)
+    blocked_run = env.create_run("unhealthy-mesh")
+    source = """from mini_articraft.sdk import (
+    ArticulatedObject,
+    BoxGeometry,
+    MeshGeometry,
+    MeshHealthIssue,
+    TestContext,
+    TestReport,
+)
+
+object_model = ArticulatedObject("unhealthy-mesh")
+base = object_model.part("base")
+box = BoxGeometry((1, 1, 1))
+base.add(MeshGeometry(box.vertices, box.faces[:-1]), name="open-sheet")
+
+def run_tests() -> TestReport:
+    return TestContext(object_model).report()
+"""
+    write_main(blocked_run, source)
+
+    blocked = env.compile_path(blocked_run)
+
+    assert blocked["status"] == "error"
+    failure = blocked["test_report"]["failures"][0]
+    assert failure["kind"] == "mesh_health"
+    assert failure["source"] == "compiler"
+    assert "boundary_edges" in failure["details"]
+    assert blocked["compile_report"]["signal_bundle"]["signals"][0]["kind"] == "mesh_health"
+
+    allowed_run = env.create_run("allowed-unhealthy-mesh")
+    write_main(
+        allowed_run,
+        source.replace(
+            "return TestContext(object_model).report()",
+            """ctx = TestContext(object_model)
+    ctx.allow_mesh_issues(
+        "base",
+        shape="open-sheet",
+        issues=(MeshHealthIssue.BOUNDARY_EDGES,),
+        reason="This exact named shape is an intentional open sheet.",
+    )
+    return ctx.report()""",
+        ),
+    )
+
+    allowed = env.compile_path(allowed_run)
+
+    assert allowed["status"] == "success"
+    assert allowed["test_report"]["allowed_mesh_issues"][0]["issues"] == ["boundary_edges"]
+    assert "Mesh health allowance declared" in allowed["compile_report"]["signals_text"]
+
+
 def test_compile_path_reports_timeout(tmp_path) -> None:
     env = LocalEnvironment(output_dir=tmp_path, timeout_seconds=0.2)
     run_dir = env.create_run("slow")

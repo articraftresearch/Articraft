@@ -81,6 +81,20 @@ AllowedOverlap(
 The report uses this record for each overlap allowance. The context sorts the two part names so
 the same pair has one stable representation. It swaps the shape names at the same time.
 
+### `AllowedMeshIssues`
+
+```python
+AllowedMeshIssues(
+    part: str,
+    shape: str,
+    issues: tuple[MeshHealthIssue, ...],
+    reason: str,
+)
+```
+
+The report uses this record for a mesh health allowance. It always names one part, one shape, and
+one or more exact issue types.
+
 ### `DistanceFinding`
 
 ```python
@@ -114,6 +128,7 @@ TestReport(
     allowances: tuple[str, ...] = (),
     allowed_isolated_parts: tuple[str, ...] = (),
     allowed_overlaps: tuple[AllowedOverlap, ...] = (),
+    allowed_mesh_issues: tuple[AllowedMeshIssues, ...] = (),
     metrics: tuple[TestMetric, ...] = (),
     artifacts: tuple[TestArtifact, ...] = (),
 )
@@ -122,6 +137,19 @@ TestReport(
 `passed` is true when there are no blocking failures. Warnings and allowances do not make a
 report fail. `checks_run` counts recorded checks. Calling `warn()` or an allowance method does
 not increase that count.
+
+### `MeshHealthIssue`, `MeshHealthFinding`, and `MeshHealthReport`
+
+Use `analyze_mesh_health` to inspect a `MeshGeometry`, a build123d shape, or a
+`trimesh.Trimesh`. It returns a `MeshHealthReport`.
+
+The report includes triangle and vertex counts, disconnected component count, watertight and
+winding status, signed volume, and a tuple of `MeshHealthFinding` records. Each finding has a
+`MeshHealthIssue`, a count, details, and the bounds of the affected region when available.
+
+The issue types cover degenerate and sliver faces, duplicate faces and vertices, unused vertices,
+boundary and nonmanifold edges, disconnected components, inconsistent winding, and inward
+orientation.
 
 ### `TestMetric`, `TestArtifact`, and `GeometryMetrics`
 
@@ -389,23 +417,41 @@ warning that the group was allowed.
 
 An isolation allowance does not affect disconnected shapes inside one rigid part.
 
+### `allow_mesh_issues(part, *, shape, issues, reason)`
+
+Allows exact mesh health issue types on one named shape. It does not hide other issue types on the
+same shape or any issue on another shape.
+
+```python
+ctx.allow_mesh_issues(
+    "shade",
+    shape="fabric_panel",
+    issues=(MeshHealthIssue.BOUNDARY_EDGES,),
+    reason="This named fabric panel is an intentional open surface.",
+)
+```
+
+Use this only for a shape that is meant to have the reported property. Repair accidental holes,
+bad triangles, disconnected debris, and invalid topology.
+
 ## Compiler owned checks
 
-The compile worker runs `run_tests()` first. It then copies authored overlap and isolation
-allowances into a new context and runs these baseline checks before export:
+The compile worker runs `run_tests()` first. It then copies authored overlap, isolation, and mesh
+health allowances into a new context and runs these baseline checks before export:
 
 1. `check_model_valid()`
 2. `check_single_root_part()`
-3. `fail_if_isolated_parts()`
-4. `warn_if_part_contains_disconnected_geometry_islands()`
-5. `warn_if_absurd_dimensions()`
-6. `fail_if_parts_overlap_in_current_pose()`
-7. `fail_if_articulation_separates_child()`
+3. `fail_if_mesh_unhealthy()`
+4. `fail_if_isolated_parts()`
+5. `warn_if_part_contains_disconnected_geometry_islands()`
+6. `warn_if_absurd_dimensions()`
+7. `fail_if_parts_overlap_in_current_pose()`
+8. `fail_if_articulation_separates_child()`
 
 If model validity or the root check fails, the worker stops the rest of the baseline pass. When the
-object is valid enough to export, only model validity, the single root rule, and USDZ validation
-can block the compiler. The other baseline methods appear as nonblocking diagnostics. Add an
-authored check when one of those findings is important to the requested object.
+object is valid enough to inspect, model validity, the single root rule, mesh health, and USDZ
+validation can block the compiler. The other baseline methods appear as nonblocking diagnostics.
+Add an authored check when one of those findings is important to the requested object.
 The failed check still makes the compile fail and prevents final publication.
 
 The merged report keeps one copy of each check name. A compiler failure replaces an authored

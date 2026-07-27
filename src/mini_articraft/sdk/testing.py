@@ -23,7 +23,7 @@ from mini_articraft.sdk._collision import (
     _pair_key,
 )
 from mini_articraft.sdk._mesh_core import geometry_to_trimesh
-from mini_articraft.sdk._mesh_health import analyze_mesh_health
+from mini_articraft.sdk._mesh_health import MeshHealthIssue, analyze_mesh_health
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType
 from mini_articraft.sdk.object import ArticulatedObject, Part, PartRef
@@ -45,6 +45,7 @@ class FailureKind(StrEnum):
 
     MODEL_VALIDITY = "model_validity"
     SINGLE_ROOT = "single_root"
+    MESH_HEALTH = "mesh_health"
     ISOLATED_PART = "isolated_part"
     DISCONNECTED_GEOMETRY = "disconnected_geometry"
     OVERLAP = "overlap"
@@ -69,6 +70,14 @@ class AllowedOverlap:
     reason: str
     shape_a: str
     shape_b: str
+
+
+@dataclass(frozen=True)
+class AllowedMeshIssues:
+    part: str
+    shape: str
+    issues: tuple[MeshHealthIssue, ...]
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -128,6 +137,7 @@ class TestReport:
     allowances: tuple[str, ...] = ()
     allowed_isolated_parts: tuple[str, ...] = ()
     allowed_overlaps: tuple[AllowedOverlap, ...] = ()
+    allowed_mesh_issues: tuple[AllowedMeshIssues, ...] = ()
     metrics: tuple[TestMetric, ...] = ()
     artifacts: tuple[TestArtifact, ...] = ()
 
@@ -146,6 +156,7 @@ class TestContext:
     _allowances: list[str] = field(default_factory=list)
     _allowed_isolated_parts: dict[str, str] = field(default_factory=dict)
     _allowed_overlaps: list[AllowedOverlap] = field(default_factory=list)
+    _allowed_mesh_issues: list[AllowedMeshIssues] = field(default_factory=list)
     _pose: dict[str, float] = field(default_factory=dict)
     _metrics: list[TestMetric] = field(default_factory=list)
     _artifacts: list[TestArtifact] = field(default_factory=list)
@@ -169,6 +180,7 @@ class TestContext:
             allowances=tuple(self._allowances),
             allowed_isolated_parts=tuple(self._allowed_isolated_parts),
             allowed_overlaps=tuple(self._allowed_overlaps),
+            allowed_mesh_issues=tuple(self._allowed_mesh_issues),
             metrics=tuple(self._metrics),
             artifacts=tuple(self._artifacts),
         )
@@ -301,6 +313,39 @@ class TestContext:
             raise ValueError("allow_isolated_part requires a non-empty reason")
         self._allowed_isolated_parts[part_name] = reason
         self._allowances.append(f"allow_isolated_part({part_name!r}): {reason}")
+
+    def allow_mesh_issues(
+        self,
+        part: PartRef,
+        *,
+        shape: str,
+        issues: Sequence[MeshHealthIssue | str],
+        reason: str,
+    ) -> None:
+        part_name = _part_name(part, field_name="part")
+        model_part = self.model.get_part(part_name)
+        shape_name = str(shape).strip()
+        model_part.get_shape(shape_name)
+        if isinstance(issues, (str, MeshHealthIssue)):
+            issue_values = (MeshHealthIssue(issues),)
+        else:
+            try:
+                issue_values = tuple(MeshHealthIssue(issue) for issue in issues)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("issues must contain MeshHealthIssue values") from exc
+        issue_values = tuple(dict.fromkeys(issue_values))
+        if not issue_values:
+            raise ValueError("allow_mesh_issues requires at least one issue")
+        reason = str(reason or "").strip()
+        if not reason:
+            raise ValueError("allow_mesh_issues requires a non-empty reason")
+        allowed = AllowedMeshIssues(part_name, shape_name, issue_values, reason)
+        self._allowed_mesh_issues.append(allowed)
+        issue_text = ", ".join(repr(issue.value) for issue in issue_values)
+        self._allowances.append(
+            f"allow_mesh_issues({part_name!r}, shape={shape_name!r}, "
+            f"issues=({issue_text})): {reason}"
+        )
 
     @contextmanager
     def pose(
@@ -937,6 +982,43 @@ class TestContext:
             )
         return self._record("check_single_root_part", True)
 
+    def fail_if_mesh_unhealthy(
+        self,
+        part: PartRef | None = None,
+        *,
+        shape: str | None = None,
+        name: str | None = None,
+    ) -> bool:
+        check_name = name or f"fail_if_mesh_unhealthy({_geometry_selector(part, shape)})"
+        findings: list[str] = []
+        allowed_findings: list[str] = []
+        for part_name, shape_name, geometry in self._selected_geometries(part, shape):
+            report = analyze_mesh_health(geometry, tolerance=self.mesh_tolerance)
+            for finding in report.findings:
+                line = (
+                    f"part={part_name!r} shape={shape_name!r} "
+                    f"issue={finding.issue.value!r} count={finding.count}"
+                )
+                if finding.bounds is not None:
+                    line += f" bounds={finding.bounds!r}"
+                if finding.details:
+                    line += f" details={finding.details}"
+                if self._mesh_issue_is_allowed(part_name, shape_name, finding.issue):
+                    allowed_findings.append(line)
+                else:
+                    findings.append(line)
+        if allowed_findings:
+            self.warn(
+                "Mesh health findings detected but allowed by justification:\n"
+                + "\n".join(allowed_findings)
+            )
+        return self._record(
+            check_name,
+            not findings,
+            "" if not findings else "Unhealthy mesh geometry detected:\n" + "\n".join(findings),
+            kind=FailureKind.MESH_HEALTH,
+        )
+
     def fail_if_isolated_parts(
         self,
         *,
@@ -1254,6 +1336,31 @@ class TestContext:
             raise ValidationError("geometry selector did not match any shapes")
         return meshes
 
+    def _selected_geometries(
+        self,
+        part: PartRef | None,
+        shape: str | None,
+    ) -> list[tuple[str, str, object]]:
+        if shape is not None and part is None:
+            raise ValidationError("shape requires a part selector")
+        selected_part = None if part is None else _part_name(part, field_name="part")
+        geometries: list[tuple[str, str, object]] = []
+        for model_part in self.model.parts:
+            if selected_part is not None and model_part.name != selected_part:
+                continue
+            geometries.extend(
+                (model_part.name, entry.name, entry.geometry)
+                for entry in model_part._iter_shapes()
+                if shape is None or entry.name == shape
+            )
+        if selected_part is not None:
+            self.model.get_part(selected_part)
+            if shape is not None:
+                self.model.get_part(selected_part).get_shape(shape)
+        if not geometries:
+            raise ValidationError("geometry selector did not match any shapes")
+        return geometries
+
     def _selected_world_vertices(
         self,
         part: PartRef | None,
@@ -1276,6 +1383,19 @@ class TestContext:
             if allowance.shape_a == shape_a and allowance.shape_b == shape_b:
                 return True
         return False
+
+    def _mesh_issue_is_allowed(
+        self,
+        part_name: str,
+        shape_name: str,
+        issue: MeshHealthIssue,
+    ) -> bool:
+        return any(
+            allowance.part == part_name
+            and allowance.shape == shape_name
+            and issue in allowance.issues
+            for allowance in self._allowed_mesh_issues
+        )
 
     def _record(
         self,
@@ -1527,6 +1647,7 @@ def _overlap_rank(query: CollisionQuery) -> tuple[float, float]:
 
 
 __all__ = [
+    "AllowedMeshIssues",
     "AllowedOverlap",
     "DistanceFinding",
     "FailureKind",

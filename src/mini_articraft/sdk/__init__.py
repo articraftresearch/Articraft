@@ -51,6 +51,7 @@ from mini_articraft.sdk.joints import (
 from mini_articraft.sdk.materials import Material, SurfaceKind
 from mini_articraft.sdk.object import ArticulatedObject, Part
 from mini_articraft.sdk.testing import (
+    AllowedMeshIssues,
     AllowedOverlap,
     DistanceFinding,
     FailureKind,
@@ -73,6 +74,7 @@ from mini_articraft.sdk.visual import (
 )
 
 __all__ = [
+    "AllowedMeshIssues",
     "AllowedOverlap",
     "ArcPipeGeometry",
     "ArticulatedObject",

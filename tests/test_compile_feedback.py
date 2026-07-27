@@ -374,6 +374,7 @@ def test_every_failure_kind_maps_to_a_specific_signal() -> None:
     expected_kinds = {
         FailureKind.MODEL_VALIDITY: "model_validity",
         FailureKind.SINGLE_ROOT: "single_root_policy",
+        FailureKind.MESH_HEALTH: "mesh_health",
         FailureKind.ISOLATED_PART: "isolated_part",
         FailureKind.DISCONNECTED_GEOMETRY: "disconnected_geometry",
         FailureKind.OVERLAP: "real_overlap",

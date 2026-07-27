@@ -323,6 +323,12 @@ _FAILURE_SPECS: dict[FailureKind, _FailureSpec] = {
         "The model must have exactly one root part.",
         compiler_group="build",
     ),
+    FailureKind.MESH_HEALTH: _FailureSpec(
+        "mesh_health",
+        "MESH_HEALTH",
+        "Unhealthy mesh geometry was found.",
+        compiler_summary="Compiler mesh health validation failed.",
+    ),
     FailureKind.ISOLATED_PART: _FailureSpec(
         "isolated_part",
         "ISOLATED_PART",
@@ -412,7 +418,13 @@ def _failure(
 
 
 def _allowance_signal(text: str) -> CompileSignal:
-    if text.startswith("allow_overlap("):
+    if text.startswith("allow_mesh_issues("):
+        kind, code, summary = (
+            "allowed_mesh_issues",
+            "NOTE_ALLOWED_MESH_ISSUES",
+            "Mesh health allowance declared.",
+        )
+    elif text.startswith("allow_overlap("):
         kind, code, summary = (
             "allowed_overlap",
             "NOTE_ALLOWED_OVERLAP",
@@ -539,6 +551,7 @@ def _primary_issue(signal: CompileSignal) -> str:
         "invalid_run_tests_report": "run_tests() returned the wrong type.",
         "single_root_policy": "compiler-owned root policy failed.",
         "model_validity": "compiler-owned model validation failed.",
+        "mesh_health": "compiler-owned mesh health validation failed.",
         "isolated_part": (
             "compiler-owned connectivity checks found isolated parts."
             if signal.source == "compiler"
@@ -574,6 +587,11 @@ _RULES_BY_KIND = {
         _RUNTIME_RULES,
     ),
     **dict.fromkeys(("single_root_policy", "model_validity"), _STRUCTURE_RULES),
+    "mesh_health": (
+        "- Repair the named mesh issue at its source and compile again.",
+        "- Use `allow_mesh_issues(...)` only when the exact issue on the exact named shape "
+        "is intentional.",
+    ),
     "isolated_part": (
         "- Repair the reported support path, or add a precise allowance when the separation "
         "is intentional.",
@@ -685,6 +703,7 @@ def _signal_sort_key(signal: CompileSignal) -> tuple[int, int, str, str, str, st
         "invalid_run_tests_report": 0,
         "model_validity": 1,
         "single_root_policy": 1,
+        "mesh_health": 2,
         "isolated_part": 2 if signal.source == "compiler" else 6,
         "disconnected_geometry": 2 if signal.source == "compiler" else 6,
         "articulation_separation": 2 if signal.source == "compiler" else 6,

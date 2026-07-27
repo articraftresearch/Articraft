@@ -288,6 +288,13 @@ def _run_baseline_tests(
             shape_a=overlap.shape_a,
             shape_b=overlap.shape_b,
         )
+    for allowance in authored_report.allowed_mesh_issues:
+        ctx.allow_mesh_issues(
+            allowance.part,
+            shape=allowance.shape,
+            issues=allowance.issues,
+            reason=allowance.reason,
+        )
 
     with tracker.phase("checking the model structure"):
         ctx.check_model_valid()
@@ -296,6 +303,8 @@ def _run_baseline_tests(
     if not preliminary.passed:
         return _without_allowance_notes(preliminary)
 
+    with tracker.phase("checking mesh health"):
+        ctx.fail_if_mesh_unhealthy()
     with tracker.phase("checking for isolated parts"):
         ctx.fail_if_isolated_parts()
     with tracker.phase("checking for disconnected geometry"):
@@ -310,12 +319,22 @@ def _run_baseline_tests(
     blocking = tuple(
         failure
         for failure in report.failures
-        if failure.kind in {FailureKind.MODEL_VALIDITY, FailureKind.SINGLE_ROOT}
+        if failure.kind
+        in {
+            FailureKind.MODEL_VALIDITY,
+            FailureKind.SINGLE_ROOT,
+            FailureKind.MESH_HEALTH,
+        }
     )
     diagnostics = tuple(
         failure
         for failure in report.failures
-        if failure.kind not in {FailureKind.MODEL_VALIDITY, FailureKind.SINGLE_ROOT}
+        if failure.kind
+        not in {
+            FailureKind.MODEL_VALIDITY,
+            FailureKind.SINGLE_ROOT,
+            FailureKind.MESH_HEALTH,
+        }
     )
     diagnostic_warnings = tuple(
         f"Compiler diagnostic {failure.name}: {failure.details}" for failure in diagnostics
@@ -335,6 +354,7 @@ def _without_allowance_notes(report: TestReport) -> TestReport:
         allowances=(),
         allowed_isolated_parts=(),
         allowed_overlaps=(),
+        allowed_mesh_issues=(),
     )
 
 
@@ -363,6 +383,7 @@ def _merge_test_reports(authored_report: TestReport, baseline_report: TestReport
         allowances=allowances,
         allowed_isolated_parts=authored_report.allowed_isolated_parts,
         allowed_overlaps=authored_report.allowed_overlaps,
+        allowed_mesh_issues=authored_report.allowed_mesh_issues,
         metrics=(*authored_report.metrics, *baseline_report.metrics),
         artifacts=(*authored_report.artifacts, *baseline_report.artifacts),
     )
