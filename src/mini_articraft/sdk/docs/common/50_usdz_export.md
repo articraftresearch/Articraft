@@ -27,10 +27,6 @@ A successful export writes:
 ```text
 result/
   model.json
-  qa/
-    report.html
-    report.json
-    artifacts/  # present only when file evidence is attached
   usdz/
     0000.usdz
 ```
@@ -192,10 +188,8 @@ bounds. It also checks joint values, material bindings, mesh normals, and face
 winding. `ExportResult.audit` contains the resulting `ExportAudit` counts and
 bounds.
 
-The compile worker writes `report.json` and `report.html` after the audit. The
-report contains authored checks, metrics, compiler diagnostics, the export
-audit, and copied artifacts. The compiler also makes front, side, and three
-quarter part color views.
+The compile result includes the authored checks, metrics, compiler diagnostics,
+and export audit. Registered artifacts stay in the run workspace.
 
 The package and manifest use temporary files while they are being written. If export or validation
 fails, the exporter removes the new USDZ and does not replace the manifest. Earlier successful

@@ -122,6 +122,8 @@ def test_metrics_and_artifacts_are_recorded(monkeypatch, tmp_path: Path) -> None
     assert report.artifacts == (artifact,)
     with pytest.raises(ValidationError):
         ctx.attach_artifact("../escape.json")
+    with pytest.raises(ValidationError):
+        ctx.attach_artifact("qa/missing.json")
 
 
 def _slider_model() -> ArticulatedObject:

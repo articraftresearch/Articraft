@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from mini_articraft.compile_result import CompileResult
-from mini_articraft.qa import write_qa_report
 from mini_articraft.record import Record
 from mini_articraft.sdk import (
     ArticulatedObject,
@@ -229,15 +228,6 @@ def _compile_workspace(
                 test_report,
                 metrics=(*test_report.metrics, *audit_metrics),
             )
-            with tracker.phase("writing the QA report"):
-                test_report, qa_report = write_qa_report(
-                    workspace=workspace,
-                    result_dir=export_dir,
-                    model=object_model,
-                    test_report=test_report,
-                    export_audit=audit,
-                )
-            result.qa_report = str(qa_report)
             result.test_report = _serialize_test_report(
                 test_report,
                 compiler_failure_names={failure.name for failure in baseline_report.failures},

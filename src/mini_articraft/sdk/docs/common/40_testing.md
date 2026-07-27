@@ -129,7 +129,7 @@ not increase that count.
 An expected metric also records a blocking authored check.
 
 `attach_artifact(...)` adds a `TestArtifact` for a file that already exists.
-Read [visual evidence and QA artifacts](45_visual_evidence.md) for the preview
+Read [visual evidence and artifacts](45_visual_evidence.md) for the preview
 workflow and supported file types.
 
 `measure_geometry(...)` returns `GeometryMetrics`.

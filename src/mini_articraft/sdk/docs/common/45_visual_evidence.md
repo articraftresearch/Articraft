@@ -1,4 +1,4 @@
-# Visual evidence and QA artifacts
+# Visual evidence and artifacts
 
 Use visual evidence after the model builds. The renderer works without a
 window or graphics processor. It writes PNG files that the agent can inspect
@@ -86,11 +86,10 @@ WebP, JSON, CSV, Markdown, and plain text.
 
 ## Compile behavior
 
-The compiler does not render or copy images. It checks registered artifact paths
-and writes their metadata into the JSON and HTML QA reports. The HTML report
-links back to the workspace image. The `compile` tool returns text signals with
-safe workspace paths and does not attach image content. Open each useful path
-with `view_image`.
+The compiler does not render or copy images. Registered files stay in the
+workspace. The `compile` tool returns text signals with safe workspace paths for
+registered images and does not attach image content. Open each useful path with
+`view_image`.
 
 ## General model views
 

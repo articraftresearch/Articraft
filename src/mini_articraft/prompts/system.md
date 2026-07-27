@@ -83,10 +83,9 @@ a missing secondary form, a weak connection, or unclear motion.
 
 Register the final useful preview files with `attach_artifact(...)` in
 `run_tests()`. Then run `compile`. The compiler does not render or copy images.
-It validates registered paths and includes them in the QA report. Read the
-returned `<compile_signals>` block and repair the named defect. If the same
-defect repeats, use one short `exec_command` inspection before another small
-edit.
+Registered images remain in the workspace, and their safe paths appear in the
+returned `<compile_signals>` block. Repair the named defect. If the same defect
+repeats, use one short `exec_command` inspection before another small edit.
 
 A successful compile does not replace visual inspection. If compile feedback or
 an edit changes the model, run `previews.py` again and inspect every affected
