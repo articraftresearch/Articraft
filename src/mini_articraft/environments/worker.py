@@ -330,25 +330,18 @@ def _run_baseline_tests(
     with tracker.phase("checking articulation motion"):
         ctx.fail_if_articulation_separates_child()
     report = _without_allowance_notes(ctx.report())
-    blocking = tuple(
-        failure
-        for failure in report.failures
-        if failure.kind
-        in {
-            FailureKind.MODEL_VALIDITY,
-            FailureKind.SINGLE_ROOT,
-            FailureKind.MESH_HEALTH,
-        }
-    )
+    # Most baseline checks report as diagnostics so a run still produces a model.
+    # Missing mass is different: with the physics lane on, a part without mass has
+    # nothing to export, so it blocks the compile.
+    blocking_kinds = {
+        FailureKind.MODEL_VALIDITY,
+        FailureKind.SINGLE_ROOT,
+        FailureKind.MESH_HEALTH,
+        FailureKind.MISSING_MASS,
+    }
+    blocking = tuple(failure for failure in report.failures if failure.kind in blocking_kinds)
     diagnostics = tuple(
-        failure
-        for failure in report.failures
-        if failure.kind
-        not in {
-            FailureKind.MODEL_VALIDITY,
-            FailureKind.SINGLE_ROOT,
-            FailureKind.MESH_HEALTH,
-        }
+        failure for failure in report.failures if failure.kind not in blocking_kinds
     )
     diagnostic_warnings = tuple(
         f"Compiler diagnostic {failure.name}: {failure.details}" for failure in diagnostics

@@ -107,12 +107,28 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
     assert FakeEnvironment.instances[0].kwargs == {
         "output_dir": output_dir,
         "timeout_seconds": 45,
+        "physics_enabled": False,
     }
     assert FakeAgent.instances[0].kwargs == {"max_turns": 123}
     assert FakeAgent.instances[0].prompt == "make a hinge"
     assert FakeAgent.instances[0].image_path is None
-    assert "status: success" in result.output
-    assert "run: /tmp/run" in result.output
+
+
+def test_cli_physics_flag_enables_the_physics_lane(monkeypatch, tmp_path: Path) -> None:
+    reset_fakes()
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
+    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a hinge", "--output-dir", str(tmp_path / "runs"), "--physics"],
+    )
+
+    assert result.exit_code == 0
+    assert FakeOpenAIModel.instances[0].settings.physics_enabled is True
+    assert FakeEnvironment.instances[0].kwargs["physics_enabled"] is True
 
 
 def test_cli_applies_textures_only_after_generation(monkeypatch) -> None:

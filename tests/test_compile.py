@@ -221,7 +221,7 @@ def test_local_environment_starts_worker_from_run_dir(monkeypatch, tmp_path) -> 
     run_dir = env.create_run("worker-cwd")
     captured: dict[str, Path] = {}
 
-    def run_worker(args, *, cwd, timeout_seconds):
+    def run_worker(args, *, cwd, timeout_seconds, physics_enabled=None):
         captured["cwd"] = cwd
         return local_module._ProcessResult(
             stdout=json.dumps({"status": "success"}),

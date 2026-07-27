@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 import trimesh
@@ -197,3 +198,42 @@ def test_settings_flag_reaches_the_compile_worker() -> None:
     from mini_articraft._child_process import child_environment
 
     assert child_environment().get("MINI_ARTICRAFT_PHYSICS") in {"0", "1"}
+
+
+def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -> None:
+    # The gate is only useful if it stops the compile; most baseline checks report as
+    # non-blocking diagnostics, so this guards that missing mass is not one of them.
+    from mini_articraft.environments.local import LocalEnvironment
+
+    source = (
+        "from mini_articraft.sdk import ArticulatedObject, BoxGeometry, TestContext, TestReport\n"
+        "\n"
+        "def build_object_model() -> ArticulatedObject:\n"
+        "    model = ArticulatedObject('plain')\n"
+        "    model.part('body').add(BoxGeometry((0.1, 0.1, 0.1)), name='cube')\n"
+        "    return model\n"
+        "\n"
+        "object_model = build_object_model()\n"
+        "\n"
+        "def run_tests() -> TestReport:\n"
+        "    return TestContext(object_model).report()\n"
+    )
+
+    statuses = {}
+    for physics in (False, True):
+        env = LocalEnvironment(output_dir=tmp_path / str(physics), physics_enabled=physics)
+        run_dir = env.create_run(f"run_{physics}")
+        (run_dir / "workspace" / "main.py").write_text(source)
+        statuses[physics] = env.compile_path(run_dir)["status"]
+
+    assert statuses[False] == "success"
+    assert statuses[True] == "error"
+
+
+def test_physics_flag_reaches_the_compile_worker_environment() -> None:
+    from mini_articraft._child_process import child_environment
+
+    # The --physics flag resolves in the parent and travels to the worker as
+    # environment; an explicit value must win over whatever Settings says.
+    assert child_environment(physics_enabled=True)["MINI_ARTICRAFT_PHYSICS"] == "1"
+    assert child_environment(physics_enabled=False)["MINI_ARTICRAFT_PHYSICS"] == "0"

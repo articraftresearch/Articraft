@@ -77,7 +77,7 @@ physically consistent. Overriding `diagonal_inertia` takes your tensor as given.
 
 ## Physics mode
 
-When the physics lane is enabled (`MINI_ARTICRAFT_PHYSICS=1`), **every part must declare
+When the physics lane is enabled (`mini-articraft generate --physics ...`), **every part must declare
 mass properties** and the compile fails otherwise, listing the parts that are missing
 them. This is deliberate: a silently assumed density is an invisible wrong answer, so the
 compiler asks you to state what each part is made of instead of guessing.
