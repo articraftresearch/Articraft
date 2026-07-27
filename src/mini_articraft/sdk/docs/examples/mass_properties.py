@@ -60,8 +60,13 @@ def build_object_model() -> ArticulatedObject:
             0.0, 0.0, HEIGHT / 2 + WALL
         ),
     )
-    # The hinge lug is welded into the wall, so the part stays one molded piece.
-    lug = RoundedBoxGeometry((0.020, 0.010, 0.012), 0.004).translate(0.0, HINGE_Y, HEIGHT - 0.004)
+    # The hinge lug is welded into the wall, so the part stays one molded piece. It is
+    # seated far enough out that it bites into the wall without breaking through into
+    # the cavity: a face that lands just inside the curved inner wall meets it in a
+    # sliver, and slivers are what turn into degenerate faces.
+    lug = RoundedBoxGeometry((0.020, 0.010, 0.012), 0.004).translate(
+        0.0, HINGE_Y - 0.003, HEIGHT - 0.004
+    )
     body_part.add(
         weld(shell, lug, radius=0.004, tolerance=0.0012),
         name="body_shell",
