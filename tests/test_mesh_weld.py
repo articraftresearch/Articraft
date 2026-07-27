@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mini_articraft.sdk import BoxGeometry, CylinderGeometry, SphereGeometry
+from mini_articraft.sdk import (
+    BoxGeometry,
+    CylinderGeometry,
+    SphereGeometry,
+    analyze_mesh_health,
+)
 from mini_articraft.sdk.mesh import (
     SnapRefused,
     boolean_difference,
@@ -65,6 +70,7 @@ def test_weld_trim_removes_stub_in_hollow_cavity() -> None:
     with_trim = weld(shell, prot, tolerance=0.0025, trim=cavity)
     assert with_trim.to_trimesh().volume < without_trim.to_trimesh().volume
     assert with_trim.is_watertight
+    assert analyze_mesh_health(with_trim).healthy
 
 
 def test_weld_requires_two_solids() -> None:

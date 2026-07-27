@@ -8,11 +8,15 @@ import numpy as np
 from trimesh import Trimesh
 
 from mini_articraft.sdk._mesh_boolean import (
+    _as_manifold,
     _from_manifold,
-    boolean_difference,
-    boolean_union,
 )
 from mini_articraft.sdk._mesh_core import MeshGeometry
+from mini_articraft.sdk._mesh_health import (
+    MeshHealthIssue,
+    _require_healthy_mesh,
+    analyze_mesh_health,
+)
 
 _AXES = {"x": 0, "y": 1, "z": 2}
 _FAR = 1.0e6
@@ -139,6 +143,7 @@ def _extract_level_set(
     )
     if solid.status() != manifold3d.Error.NoError or solid.is_empty():
         raise ValueError(f"weld level set produced an invalid solid (status={solid.status()})")
+    solid = solid.simplify(float(np.min(spacing)) * 0.05)
     return _from_manifold(solid)
 
 
@@ -149,6 +154,10 @@ def _validate_weld_inputs(geometries: tuple[MeshGeometry, ...]) -> list[Trimesh]
         geometry.validate()
         if not geometry.vertices or not geometry.faces or not geometry.is_watertight:
             raise ValueError(f"geometries[{index}] must be a non-empty closed manifold solid")
+        health = analyze_mesh_health(geometry)
+        if not health.healthy:
+            issues = ", ".join(finding.issue.value for finding in health.findings)
+            raise ValueError(f"geometries[{index}] has unhealthy mesh geometry: {issues}")
         mesh = geometry.to_trimesh()
         if _positive_body_count(mesh) != 1:
             raise ValueError(f"geometries[{index}] must contain one connected solid")
@@ -165,7 +174,10 @@ def _connection_gaps(geometries: tuple[MeshGeometry, ...]) -> list[tuple[int, in
     for first_index, first in enumerate(geometries):
         for second_index in range(first_index + 1, len(geometries)):
             second = geometries[second_index]
-            exact = boolean_union(first, second)
+            exact = _from_manifold(
+                _as_manifold(first, name=f"geometries[{first_index}]")
+                + _as_manifold(second, name=f"geometries[{second_index}]")
+            )
             gap = (
                 0.0
                 if _positive_body_count(exact.to_trimesh()) == 1
@@ -225,6 +237,7 @@ def _smooth_operation(
     tolerance: float,
     profile: str,
     operation: str,
+    trim: Trimesh | None = None,
 ) -> MeshGeometry:
     if operation == "union":
         minimum = np.min([mesh.bounds[0] for mesh in meshes], axis=0)
@@ -258,6 +271,12 @@ def _smooth_operation(
                 field[start:stop] = -_smooth_max(-field[start:stop], values, radius, profile)
             else:
                 field[start:stop] = _smooth_max(field[start:stop], values, radius, profile)
+    if trim is not None:
+        for start in range(0, point_count, _FIELD_CHUNK):
+            stop = min(start + _FIELD_CHUNK, point_count)
+            points = _grid_points(start, stop, dimensions, lower, spacing)
+            trim_values = _mesh_field(trim, points, band)
+            field[start:stop] = np.minimum(field[start:stop], -trim_values)
     return _extract_level_set(field, dimensions, lower, spacing)
 
 
@@ -345,12 +364,17 @@ def weld(
 
     meshes = _validate_weld_inputs(geometries)
     _require_connected_inputs(geometries, max_gap=max_gap)
+    trim_mesh = None
+    if trim is not None:
+        trim_geometry = _require_mesh(trim, "trim")
+        trim_mesh = _validate_weld_inputs((trim_geometry,))[0]
     result = _smooth_operation(
         meshes,
         radius=radius,
         tolerance=tolerance,
         profile=profile,
         operation="union",
+        trim=trim_mesh,
     )
     if not result.vertices:
         raise ValueError("weld produced an empty solid")
@@ -358,9 +382,7 @@ def weld(
         raise ValueError(
             "weld could not form one connected solid; increase radius or overlap the inputs"
         )
-    if trim is not None:
-        result = boolean_difference(result, _require_mesh(trim, "trim"))
-    return result
+    return _require_healthy_mesh(result, operation="weld")
 
 
 def smooth_difference(
@@ -401,7 +423,11 @@ def smooth_difference(
     )
     if not result.vertices:
         raise ValueError("smooth_difference removed the entire solid")
-    return result
+    return _require_healthy_mesh(
+        result,
+        operation="smooth_difference",
+        allowed_issues=(MeshHealthIssue.MULTIPLE_COMPONENTS,),
+    )
 
 
 __all__ = ["SnapRefused", "smooth_difference", "snap_to", "weld"]

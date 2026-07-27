@@ -445,6 +445,22 @@ def test_invalid_run_tests_return_type_is_a_build_signal() -> None:
     assert signal["group"] == "build"
 
 
+def test_mesh_authoring_error_is_a_mesh_health_signal() -> None:
+    report = build_compile_report(
+        status="failure",
+        error=(
+            "ValueError: weld produced unhealthy mesh geometry: "
+            "sliver_faces=3 near ((0, 0, 0), (1, 1, 1))"
+        ),
+    )
+
+    signal = report["signal_bundle"]["signals"][0]
+    assert signal["kind"] == "mesh_health"
+    assert signal["code"] == "COMPILE_MESH_HEALTH"
+    assert "reported bounds" in report["signals_text"]
+    assert "allow_mesh_issues" not in report["signals_text"]
+
+
 def test_repeat_and_streak_guidance_escalates() -> None:
     report = build_compile_report(
         status="failure",

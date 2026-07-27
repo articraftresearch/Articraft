@@ -127,6 +127,14 @@ def analyze_mesh_health(
     topology = _topology(unique_faces)
     component_ids = _face_components(len(unique_faces), topology.edge_face_indices)
     component_count = int(component_ids.max()) + 1 if len(component_ids) else 0
+    component_volumes = np.asarray(
+        [
+            _signed_volume(canonical_vertices, unique_faces[component_ids == component])
+            for component in range(component_count)
+        ]
+    )
+    volume_epsilon = max(scale**3 * 1e-12, np.finfo(np.float64).tiny)
+    positive_components = np.flatnonzero(component_volumes > volume_epsilon)
 
     boundary_edges = topology.edges[topology.edge_counts == 1]
     nonmanifold_edges = topology.edges[topology.edge_counts > 2]
@@ -197,16 +205,20 @@ def analyze_mesh_health(
         nonmanifold_edges,
         details="edges belong to more than two faces",
     )
-    if component_count > 1:
-        extra_faces = _faces_outside_largest_component(unique_faces, component_ids)
+    if len(positive_components) > 1:
+        extra_faces = _faces_outside_largest_positive_component(
+            unique_faces,
+            component_ids,
+            component_volumes,
+        )
         findings.append(
             MeshHealthFinding(
                 issue=MeshHealthIssue.MULTIPLE_COMPONENTS,
-                count=component_count,
+                count=len(positive_components),
                 bounds=_bounds(canonical_vertices[np.unique(extra_faces)])
                 if len(extra_faces)
                 else None,
-                details="mesh contains disconnected face components",
+                details="mesh contains separate positive-volume solids",
             )
         )
     _add_index_finding(
@@ -234,6 +246,28 @@ def analyze_mesh_health(
         winding_consistent=winding_consistent,
         signed_volume=signed_volume,
         findings=tuple(findings),
+    )
+
+
+def _require_healthy_mesh(
+    geometry: MeshGeometry,
+    *,
+    operation: str,
+    allowed_issues: tuple[MeshHealthIssue, ...] = (),
+) -> MeshGeometry:
+    report = analyze_mesh_health(geometry)
+    findings = [finding for finding in report.findings if finding.issue not in allowed_issues]
+    if not findings:
+        return geometry
+    details = []
+    for finding in findings:
+        text = f"{finding.issue.value}={finding.count}"
+        if finding.bounds is not None:
+            text += f" near {finding.bounds!r}"
+        details.append(text)
+    raise ValueError(
+        f"{operation} produced unhealthy mesh geometry: {'; '.join(details)}. "
+        "Adjust the source geometry or operation so it creates clean topology."
     )
 
 
@@ -346,12 +380,17 @@ def _face_components(face_count: int, edge_face_indices: np.ndarray) -> np.ndarr
     return component_ids
 
 
-def _faces_outside_largest_component(faces: np.ndarray, component_ids: np.ndarray) -> np.ndarray:
-    if not len(component_ids):
+def _faces_outside_largest_positive_component(
+    faces: np.ndarray,
+    component_ids: np.ndarray,
+    component_volumes: np.ndarray,
+) -> np.ndarray:
+    positive = np.flatnonzero(component_volumes > 0.0)
+    if not len(positive):
         return np.empty((0, 3), dtype=np.int64)
-    counts = np.bincount(component_ids)
-    largest = int(np.argmax(counts))
-    return faces[component_ids != largest]
+    largest = int(positive[np.argmax(component_volumes[positive])])
+    extra = np.isin(component_ids, positive) & (component_ids != largest)
+    return faces[extra]
 
 
 def _signed_volume(vertices: np.ndarray, faces: np.ndarray) -> float:

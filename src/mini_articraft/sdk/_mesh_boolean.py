@@ -13,6 +13,9 @@ from mini_articraft.sdk._mesh_core import (
     _ensure_ccw,
     _profile_2d,
 )
+from mini_articraft.sdk._mesh_health import MeshHealthIssue, _require_healthy_mesh
+
+_BOOLEAN_ALLOWED_ISSUES = (MeshHealthIssue.MULTIPLE_COMPONENTS,)
 
 
 def _as_manifold(geometry: MeshGeometry, *, name: str) -> manifold3d.Manifold:
@@ -47,7 +50,12 @@ def _from_manifold(manifold: manifold3d.Manifold) -> MeshGeometry:
 
 
 def boolean_union(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
-    return _from_manifold(_as_manifold(a, name="a") + _as_manifold(b, name="b"))
+    result = _from_manifold(_as_manifold(a, name="a") + _as_manifold(b, name="b"))
+    return _require_healthy_mesh(
+        result,
+        operation="boolean_union",
+        allowed_issues=_BOOLEAN_ALLOWED_ISSUES,
+    )
 
 
 def boolean_difference(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
@@ -58,7 +66,7 @@ def boolean_difference(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
             "nothing is left. Check the two shapes' sizes and positions — a conforming "
             "cut needs 'a' to poke through 'b', not sit fully inside it."
         )
-    return result
+    return _require_healthy_mesh(result, operation="boolean_difference")
 
 
 def boolean_intersection(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
@@ -68,7 +76,7 @@ def boolean_intersection(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
             "boolean_intersection produced an empty solid: the inputs do not overlap. "
             "Position them so they intersect before intersecting."
         )
-    return result
+    return _require_healthy_mesh(result, operation="boolean_intersection")
 
 
 def _boolean_union_many(geometries: Iterable[MeshGeometry]) -> MeshGeometry:
@@ -78,7 +86,7 @@ def _boolean_union_many(geometries: Iterable[MeshGeometry]) -> MeshGeometry:
     result = _as_manifold(values[0], name="geometries[0]")
     for index, geometry in enumerate(values[1:], start=1):
         result += _as_manifold(geometry, name=f"geometries[{index}]")
-    return _from_manifold(result)
+    return _require_healthy_mesh(_from_manifold(result), operation="boolean_union")
 
 
 def cut_opening_on_face(

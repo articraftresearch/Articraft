@@ -464,6 +464,16 @@ def _runtime_signal(error: str, *, traceback_text: str = "") -> CompileSignal:
             blocking=True,
             group="build",
         )
+    if "unhealthy mesh geometry" in lower:
+        return CompileSignal(
+            "failure",
+            "mesh_health",
+            "COMPILE_MESH_HEALTH",
+            "A mesh authoring operation produced unhealthy geometry.",
+            details,
+            blocking=True,
+            group="qc",
+        )
     if any(
         marker in lower
         for marker in ("unknown shape", "missing named geometry", "missing exact geometry")
@@ -644,7 +654,15 @@ def _rules(
             )
         return rules
     kind = failures[0].kind
-    rules = list(_RULES_BY_KIND.get(kind, _DEFAULT_FAILURE_RULES))
+    if kind == "mesh_health" and failures[0].code == "COMPILE_MESH_HEALTH":
+        rules = [
+            "- Repair the source operation named in the error. Use the reported bounds to "
+            "inspect the bad region.",
+            "- Change the inputs or use a finer surface tolerance instead of accepting the "
+            "broken result.",
+        ]
+    else:
+        rules = list(_RULES_BY_KIND.get(kind, _DEFAULT_FAILURE_RULES))
     if failure_streak >= 3:
         rules.append(f"- The repair loop has continued. {_inspection_advice(kind)}")
     elif repeated:

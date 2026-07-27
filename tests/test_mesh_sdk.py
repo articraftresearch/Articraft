@@ -27,6 +27,7 @@ from mini_articraft.sdk import (
     SweepGeometry,
     TorusGeometry,
     WirePolylineGeometry,
+    analyze_mesh_health,
 )
 from mini_articraft.sdk.mesh import (
     LoftSection,
@@ -492,6 +493,14 @@ def test_degenerate_boolean_results_raise_actionable_errors() -> None:
         boolean_intersection(small, apart)
 
 
+def test_boolean_difference_rejects_disconnected_output() -> None:
+    solid = BoxGeometry((1.0, 0.2, 0.2))
+    splitter = BoxGeometry((0.1, 0.4, 0.4))
+
+    with pytest.raises(ValueError, match=r"multiple_components=2.*near"):
+        boolean_difference(solid, splitter)
+
+
 def test_build123d_conversion_keeps_shape_location() -> None:
     geometry = build123d_to_mesh(Pos(2.0, 3.0, 4.0) * Box(1.0, 2.0, 3.0))
 
@@ -541,6 +550,7 @@ def test_section_loft_supports_path_symmetry_and_repair() -> None:
 
     assert geometry.bounds[0][0] < -0.04
     assert geometry.bounds[1][0] > 0.04
+    assert analyze_mesh_health(geometry).healthy
     assert repaired.is_watertight
     assert len(repaired.vertices) < len(dirty.vertices)
     assert repair_loft(dirty, repair="off").faces == dirty.faces

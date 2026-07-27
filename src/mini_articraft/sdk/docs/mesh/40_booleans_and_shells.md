@@ -32,11 +32,17 @@ separate open triangles is not a valid boolean input.
 The helpers validate both inputs and return a new `MeshGeometry`. They do not
 mutate either input.
 
-A valid boolean can return an empty mesh. For example, the intersection of two
-separated boxes is empty.
+A valid boolean can have no shared or remaining volume. The helpers raise an
+error for an empty result.
 
-The output can contain more than one closed body. A union of separated solids
-does not invent a bridge between them.
+A union of separated solids does not invent a bridge between them. Difference
+and intersection reject an output with more than one positive volume body.
+Keep intended separate pieces as separate named shapes. This also catches small
+fragments left by a bad cut.
+
+The helpers inspect every output for bad triangles and invalid topology. An
+unhealthy result raises an error that includes the issue count and affected
+bounds. Repair the source geometry or operation before using that result.
 
 ## boolean_union
 
@@ -107,8 +113,10 @@ region box.
 The helpers raise `TypeError` when an input is not `MeshGeometry`.
 `MeshGeometry.validate()` can raise `ValidationError` for invalid vertices or
 faces. The helpers raise `ValueError` when an input is empty, open, nonmanifold,
-or rejected by Manifold. The error names input `a` or `b` so you
-can inspect the failing mesh.
+or rejected by Manifold. They also raise when an output has bad triangles,
+invalid edges, bad winding, inward orientation, or unintended separate solids.
+The error names the operation and the affected bounds so you can inspect the
+failing region.
 
 Check these properties before retrying a failed boolean.
 
@@ -328,8 +336,10 @@ molded = weld(
 kettle.add(molded, name="body_with_molded_spout", color=(0.80, 0.82, 0.83))
 ```
 
-When the body is a hollow shell and the protrusion pokes through the wall into the
-cavity, pass `trim` (the solid that fills the cavity) to difference that stub away:
+When the body is a hollow shell and the protrusion pokes through the wall into
+the cavity, pass `trim`, which is the solid that fills the cavity. The trim
+field is applied during the same surface extraction as the weld. This avoids a
+second near coincident boolean against the rebuilt surface.
 
 ```python
 molded = weld(shell, spout, trim=cavity_solid)

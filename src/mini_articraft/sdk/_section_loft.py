@@ -8,7 +8,6 @@ from typing import Literal, cast
 import numpy as np
 import trimesh
 
-from mini_articraft.sdk._mesh_boolean import boolean_union
 from mini_articraft.sdk._mesh_core import LoftGeometry, MeshGeometry
 from mini_articraft.sdk._mesh_sweeps import (
     _initial_frame,
@@ -323,6 +322,20 @@ def _repair_mesh(geometry: MeshGeometry) -> MeshGeometry:
     return MeshGeometry.from_trimesh(mesh)
 
 
+def _mirror_yz_profiles(profiles: list[list[Vec3]]) -> list[list[Vec3]]:
+    mirrored_profiles: list[list[Vec3]] = []
+    for index, profile in enumerate(profiles):
+        positive = [point for point in profile if point[0] > 1e-12]
+        if len(positive) < 2 or any(point[0] < -1e-12 for point in profile):
+            raise ValidationError(
+                f"sections[{index}] must describe one positive-x half for mirror_yz symmetry"
+            )
+        mirrored = [(-point[0], point[1], point[2]) for point in reversed(positive)]
+        mirrored_profiles.append([*positive, *mirrored])
+    count = max(len(profile) for profile in mirrored_profiles)
+    return [_resample_loop(profile, count) for profile in mirrored_profiles]
+
+
 def section_loft(
     spec: SectionLoftSpec | Sequence[LoftSection | Sequence[Sequence[float]]],
     /,
@@ -333,6 +346,8 @@ def section_loft(
         value = replace(value, **overrides)
     count = max(len(section.points) for section in value.sections)
     profiles = _path_adjusted_sections(value, count)
+    if value.symmetry == "mirror_yz":
+        profiles = _mirror_yz_profiles(profiles)
     geometry = LoftGeometry(
         profiles,
         cap=value.cap,
@@ -346,12 +361,6 @@ def section_loft(
         cap_segments=value.cap_segments,
         cap_length=value.cap_length,
     )
-    if value.symmetry == "mirror_yz":
-        mirrored = geometry.copy().scale(-1.0, 1.0, 1.0)
-        if geometry.is_watertight:
-            geometry = boolean_union(geometry, mirrored)
-        else:
-            geometry.merge(mirrored)
     if value.repair == "mesh":
         geometry = _repair_mesh(geometry)
     return geometry
