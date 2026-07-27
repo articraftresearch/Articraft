@@ -71,33 +71,36 @@ Use the viewer to examine each generated version and move its joints.
 
 ### Use it from Python
 
-The same generation loop is available as a small immutable spec:
+Call the same generation loop directly from Python:
 
 ```python
 import mini_articraft
 
-gen = mini_articraft.Generation(
+result = mini_articraft.generate(
     "reconstruct this desk lamp",
+    image="reference.png",
     provider="anthropic",
     model="claude-sonnet-5",
+    on_event=print,
 )
 
-run = gen.with_image("reference.png").start()
-
-for event in run.watch():
-    print(event)
-
-result = run.wait()
-print(result["status"], result["run"], result["result"])
+print(result.status, result.run_dir, result.artifact)
 ```
 
-Each `with_*` method returns a new spec, so one configured spec can start many
-runs. Call `.run()` instead of `.start()` to block without watching events.
-Inside an async application, use `await generation.run_async()`.
+`generate()` blocks until the run finishes. Pass `on_event` to receive progress
+events as they happen.
 
-`run.cancel()` stops a generation early. A run also works as a context
-manager: leaving the `with` block waits for the run, and an exception inside
-the block cancels it.
+Async applications use the native coroutine:
+
+```python
+result = await mini_articraft.generate_async(
+    "reconstruct this desk lamp",
+    image="reference.png",
+    on_event=print,
+)
+```
+
+`generate_async()` works with normal asyncio tasks, cancellation, and timeouts.
 
 ### Run the checks
 

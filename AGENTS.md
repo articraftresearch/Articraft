@@ -25,7 +25,7 @@ The Python package lives in `src/mini_articraft/`.
 
 Use these areas as the main boundaries:
 
-- `api.py` owns the public `Generation` builder and shared provider routing.
+- `api.py` owns the public sync/async generation functions and shared provider routing.
 - `agent/` owns the generate and compile loop.
 - `models/` owns model adapters.
 - `environments/` owns local run creation and compile execution.

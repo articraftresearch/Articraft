@@ -1,28 +1,23 @@
-"""Public Python facade for generating articulated objects.
+"""Public Python API for generating articulated objects.
 
-A small immutable spec around the same plumbing the command line interface
-uses: resolve settings, create a model adapter and a local environment, and
-run the agent loop.
+Use :func:`generate` from synchronous code and :func:`generate_async` from
+asyncio applications. Both functions run the same async agent core and return
+a typed :class:`GenerationResult`.
 
 >>> import mini_articraft
->>> gen = mini_articraft.Generation("a desk fan", provider="anthropic")
->>> run = gen.with_image("reference.png").start()
->>> for event in run.watch():
-...     print(event)
->>> result = run.wait()
+>>> result = mini_articraft.generate("a desk fan", on_event=print)
+>>> result.artifact
+PosixPath('runs/20260727-120000-a-desk-fan/result/model.usdz')
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import queue
-import threading
-from collections.abc import Callable, Iterator
-from dataclasses import KW_ONLY, dataclass, replace
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Literal, get_args
+from typing import Any, Literal, cast, get_args
 
 from mini_articraft.agent import Agent, events
 from mini_articraft.environments import LocalEnvironment
@@ -39,14 +34,125 @@ from mini_articraft.models.gemini import (
 from mini_articraft.settings import Settings, get_settings
 
 Provider = Literal["openai", "gemini", "anthropic"]
+GenerationStatus = Literal["success", "error"]
+Event = events.Event
+EventHandler = Callable[[Event], None]
 _PROVIDERS: tuple[str, ...] = get_args(Provider)
 
 
-class RunCancelledError(RuntimeError):
-    """The generation was cancelled before it finished."""
+@dataclass(slots=True)
+class GenerationResult:
+    """The completed run and its generated artifact, if successful."""
+
+    status: GenerationStatus
+    run_dir: Path
+    artifact: Path | None
+    run_id: str = ""
+    message: str = ""
+    error: str = ""
+    attempts: int = 0
+    cost: float = 0.0
+    token_usage: dict[str, int] = field(default_factory=dict)
+    compile_report: dict[str, Any] | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        """Whether the agent produced an artifact."""
+        return self.status == "success"
 
 
-def resolved_settings(
+def generate(
+    prompt: str,
+    *,
+    provider: Provider | None = None,
+    model: str | None = None,
+    image: Path | str | None = None,
+    output_dir: Path | str | None = None,
+    on_event: EventHandler | None = None,
+) -> GenerationResult:
+    """Generate an object and block until the run finishes.
+
+    ``on_event`` is called synchronously as the agent reports progress. Asyncio
+    applications must use :func:`generate_async` instead.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            "generate() cannot run inside an active event loop; await generate_async() instead"
+        )
+
+    return asyncio.run(
+        generate_async(
+            prompt,
+            provider=provider,
+            model=model,
+            image=image,
+            output_dir=output_dir,
+            on_event=on_event,
+        )
+    )
+
+
+async def generate_async(
+    prompt: str,
+    *,
+    provider: Provider | None = None,
+    model: str | None = None,
+    image: Path | str | None = None,
+    output_dir: Path | str | None = None,
+    on_event: EventHandler | None = None,
+) -> GenerationResult:
+    """Generate an object on the current event loop.
+
+    The coroutine supports normal asyncio cancellation and timeout handling.
+    ``on_event`` runs on the current event loop and must not block it.
+    """
+    settings, image_path = _resolve_request(
+        prompt,
+        provider=provider,
+        model=model,
+        image=image,
+        output_dir=output_dir,
+    )
+    payload = await _run_generation(
+        settings,
+        prompt,
+        image_path=image_path,
+        on_event=on_event,
+    )
+    return _result_from_payload(payload)
+
+
+def _resolve_request(
+    prompt: str,
+    *,
+    provider: Provider | None,
+    model: str | None,
+    image: Path | str | None,
+    output_dir: Path | str | None,
+) -> tuple[Settings, Path | None]:
+    if not prompt.strip():
+        raise ValueError("prompt must not be empty")
+
+    settings = _resolved_settings(
+        get_settings(),
+        provider=provider,
+        model=model,
+        output_dir=Path(output_dir) if output_dir is not None else None,
+    )
+    if missing := _missing_provider_settings(settings):
+        raise ValueError(f"missing required environment variables: {', '.join(missing)}")
+
+    image_path = Path(image) if image is not None else None
+    if image_path is not None and not image_path.is_file():
+        raise FileNotFoundError(f"reference image not found: {image_path}")
+    return settings, image_path
+
+
+def _resolved_settings(
     base: Settings,
     *,
     provider: str | None = None,
@@ -56,15 +162,13 @@ def resolved_settings(
     compile_timeout: float | None = None,
     physics: bool = False,
 ) -> Settings:
-    """Apply overrides to ``base`` and route ``model`` to the selected provider.
-
-    Raises ``ValueError`` for an unknown provider or an unsupported Anthropic
-    or Gemini model.
-    """
+    """Apply validated CLI or API overrides to ``base``."""
     if provider is not None and provider not in _PROVIDERS:
         raise ValueError(
             f"unsupported provider: {provider}. Supported providers: {', '.join(_PROVIDERS)}"
         )
+
+    selected_provider = provider or base.provider
     updates: dict[str, Any] = {
         key: value
         for key, value in (
@@ -78,15 +182,17 @@ def resolved_settings(
         )
         if value is not None
     }
-    settings = base.model_copy(update=updates)
-
     if model is not None:
         model_key = {
             "anthropic": "anthropic_model",
             "gemini": "gemini_model",
             "openai": "openai_model",
-        }[settings.provider]
-        settings = settings.model_copy(update={model_key: model})
+        }[selected_provider]
+        updates[model_key] = model
+
+    values = base.model_dump()
+    values.update(updates)
+    settings = Settings.model_validate(values)
 
     if (
         settings.provider == "anthropic"
@@ -109,20 +215,20 @@ def resolved_settings(
     return settings
 
 
-def missing_provider_settings(settings: Settings) -> list[str]:
+def _missing_provider_settings(settings: Settings) -> list[str]:
     if settings.provider == "anthropic":
         return [] if anthropic_api_key_value(settings) else ["ANTHROPIC_API_KEY"]
     if settings.provider == "gemini":
         return [] if (settings.gemini_api_key or "").strip() else ["GEMINI_API_KEY"]
-    return [] if settings.openai_api_key else ["OPENAI_API_KEY"]
+    return [] if (settings.openai_api_key or "").strip() else ["OPENAI_API_KEY"]
 
 
-async def run_generation(
+async def _run_generation(
     settings: Settings,
     prompt: str,
     *,
     image_path: Path | None = None,
-    on_event: Callable[[events.Event], None] | None = None,
+    on_event: EventHandler | None = None,
 ) -> dict[str, Any]:
     """Run one agent generation against fully resolved settings."""
     model_client = create_model(settings)
@@ -138,201 +244,55 @@ async def run_generation(
         return await Agent(model_client, env, **agent_kwargs).run(prompt, image_path=image_path)
     finally:
         # Agent.run closes the model too; close() is idempotent, and this
-        # finally covers failures before the agent loop starts.
-        await model_client.close()
+        # finally covers failures before the agent loop starts. Teardown must
+        # not replace the generation outcome with a close error.
+        with contextlib.suppress(Exception):
+            await model_client.close()
 
 
-@dataclass(frozen=True)
-class Generation:
-    """An immutable generation spec: pick a provider, model, and image, then run.
+def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:
+    status = str(payload.get("status") or "")
+    if status not in get_args(GenerationStatus):
+        raise ValueError(f"unexpected generation status: {status or '<empty>'}")
 
-    ``with_*`` methods return a new spec, so a configured spec is a safe
-    template and one spec can start any number of runs. ``run()`` blocks and
-    returns the result dict. ``start()`` returns a :class:`Run` handle for
-    watching events while the generation works. Inside a running event loop,
-    use ``await generation.run_async()`` instead.
+    run_dir = Path(str(payload.get("run") or ""))
+    if not str(run_dir) or str(run_dir) == ".":
+        raise ValueError("generation result is missing its run directory")
 
-    Settings not covered by a field come from the environment, for example
-    ``MINI_ARTICRAFT_MAX_TURNS``. Run ids have second resolution, so two
-    runs of the same prompt started in the same second collide.
-    """
+    result = str(payload.get("result") or "")
+    artifact = Path(result) if result else None
+    if artifact is not None and not artifact.is_absolute():
+        artifact = run_dir / artifact
 
-    prompt: str
-    _: KW_ONLY
-    provider: str | None = None
-    model: str | None = None
-    image: Path | str | None = None
-    output_dir: Path | str | None = None
+    raw_usage = payload.get("token_usage")
+    token_usage = (
+        {str(key): int(value) for key, value in raw_usage.items()}
+        if isinstance(raw_usage, dict)
+        else {}
+    )
+    raw_report = payload.get("compile_report")
+    compile_report = dict(raw_report) if isinstance(raw_report, dict) else None
 
-    def with_provider(self, provider: str) -> Generation:
-        """A copy using this model provider: ``openai``, ``gemini``, or ``anthropic``."""
-        return replace(self, provider=provider)
-
-    def with_model(self, model: str) -> Generation:
-        """A copy using this model for the selected provider."""
-        return replace(self, model=model)
-
-    def with_image(self, path: Path | str) -> Generation:
-        """A copy using this local reference image."""
-        return replace(self, image=path)
-
-    def with_output_dir(self, path: Path | str) -> Generation:
-        """A copy writing runs under this directory instead of ``runs/``."""
-        return replace(self, output_dir=path)
-
-    def run(self) -> dict[str, Any]:
-        """Run the generation to completion and return the result dict.
-
-        The dict matches the run record: ``status``, ``run`` (the run
-        directory), ``result`` (the USDZ path relative to ``run``),
-        ``message``, ``error``, ``cost``, and ``token_usage``.
-        """
-        return self.start().wait()
-
-    def start(self) -> Run:
-        """Validate the spec and start a generation in a background thread."""
-        settings, image_path = self._resolved()
-        return Run(settings, self.prompt, image_path)
-
-    async def run_async(
-        self,
-        *,
-        on_event: Callable[[events.Event], None] | None = None,
-    ) -> dict[str, Any]:
-        """Run the generation on the current event loop."""
-        settings, image_path = self._resolved()
-        return await run_generation(
-            settings,
-            self.prompt,
-            image_path=image_path,
-            on_event=on_event,
-        )
-
-    def _resolved(self) -> tuple[Settings, Path | None]:
-        settings = resolved_settings(
-            get_settings(),
-            provider=self.provider,
-            model=self.model,
-            output_dir=Path(self.output_dir) if self.output_dir is not None else None,
-        )
-        if missing := missing_provider_settings(settings):
-            raise ValueError(f"missing required environment variables: {', '.join(missing)}")
-        image_path = Path(self.image) if self.image is not None else None
-        if image_path is not None and not image_path.is_file():
-            raise FileNotFoundError(f"reference image not found: {image_path}")
-        return settings, image_path
-
-
-class Run:
-    """A running generation: watch its events and wait for its result.
-
-    A run is also a context manager: leaving the ``with`` block waits for the
-    run to finish, and an exception inside the block cancels it first.
-    """
-
-    def __init__(self, settings: Settings, prompt: str, image_path: Path | None):
-        self._events: queue.SimpleQueue[events.Event | None] = queue.SimpleQueue()
-        self._result: dict[str, Any] | None = None
-        self._error: BaseException | None = None
-        self._drained = False
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._task: asyncio.Task[dict[str, Any]] | None = None
-        self._cancel_requested = False
-        self._thread = threading.Thread(
-            target=self._work,
-            args=(settings, prompt, image_path),
-            daemon=True,
-        )
-        self._thread.start()
-
-    def __enter__(self) -> Run:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        if exc_type is not None:
-            self.cancel()
-        self._thread.join()
-
-    def _work(self, settings: Settings, prompt: str, image_path: Path | None) -> None:
-        try:
-            self._result = asyncio.run(self._main(settings, prompt, image_path))
-        except asyncio.CancelledError:
-            self._error = RunCancelledError("generation cancelled")
-        except BaseException as exc:  # re-raised by wait()
-            self._error = exc
-        finally:
-            self._events.put(None)
-
-    async def _main(
-        self, settings: Settings, prompt: str, image_path: Path | None
-    ) -> dict[str, Any]:
-        self._loop = asyncio.get_running_loop()
-        self._task = asyncio.current_task()
-        if self._cancel_requested:
-            raise asyncio.CancelledError
-        return await run_generation(
-            settings, prompt, image_path=image_path, on_event=self._events.put
-        )
-
-    def cancel(self) -> None:
-        """Ask the run to stop; ``wait()`` then raises :class:`RunCancelledError`.
-
-        Cancellation lands at the next await point, so a compile already in
-        progress finishes or times out first. Safe to call more than once or
-        after the run has finished.
-        """
-        self._cancel_requested = True
-        loop, task = self._loop, self._task
-        if loop is None or task is None:
-            return
-        # The loop closes when the run finishes; a late cancel is a no-op.
-        with contextlib.suppress(RuntimeError):
-            loop.call_soon_threadsafe(task.cancel)
-
-    @property
-    def done(self) -> bool:
-        """Whether the generation has finished."""
-        return not self._thread.is_alive()
-
-    def watch(self) -> Iterator[events.Event]:
-        """Yield run events until the generation finishes.
-
-        Events are buffered, so a watcher that starts late still sees every
-        event. Use one watcher per run: each event goes to one consumer.
-        """
-        while not self._drained:
-            event = self._events.get()
-            if event is None:
-                self._drained = True
-                break
-            yield event
-
-    def wait(self, timeout: float | None = None) -> dict[str, Any]:
-        """Block until the generation finishes and return the result dict.
-
-        Raises ``TimeoutError`` when ``timeout`` seconds pass first, and
-        re-raises the generation's exception when it failed to run.
-        """
-        self._thread.join(timeout)
-        if self._thread.is_alive():
-            raise TimeoutError(f"generation still running after {timeout:g}s")
-        if self._error is not None:
-            raise self._error
-        assert self._result is not None
-        return self._result
+    return GenerationResult(
+        status=cast(GenerationStatus, status),
+        run_dir=run_dir,
+        artifact=artifact,
+        run_id=str(payload.get("run_id") or run_dir.name),
+        message=str(payload.get("message") or ""),
+        error=str(payload.get("error") or ""),
+        attempts=int(payload.get("attempts") or 0),
+        cost=float(payload.get("cost") or 0.0),
+        token_usage=token_usage,
+        compile_report=compile_report,
+    )
 
 
 __all__ = [
-    "Generation",
+    "Event",
+    "EventHandler",
+    "GenerationResult",
+    "GenerationStatus",
     "Provider",
-    "Run",
-    "RunCancelledError",
-    "missing_provider_settings",
-    "resolved_settings",
-    "run_generation",
+    "generate",
+    "generate_async",
 ]

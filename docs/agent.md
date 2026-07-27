@@ -11,7 +11,7 @@ process. The agent adds each model response and tool result to the conversation 
 
 ## Run sequence
 
-The command line interface and the `mini_articraft.Generation` builder create a model adapter and
+The command line interface and the `mini_articraft.generate` functions create a model adapter and
 a local environment. They give both items to `Agent`. This separation keeps the loop independent
 of one model or compiler.
 
@@ -91,8 +91,8 @@ contains the numbered export files.
 
 ## Main parts of the code
 
-- [`api.py`](../src/mini_articraft/api.py) contains the public `Generation` builder and the
-  provider routing it shares with the command line interface.
+- [`api.py`](../src/mini_articraft/api.py) contains the public synchronous and asynchronous
+  generation functions and the provider routing they share with the command line interface.
 - [`agent/`](../src/mini_articraft/agent) contains the turn loop and tools.
 - [`models/`](../src/mini_articraft/models) contains model adapters.
 - [`environments/`](../src/mini_articraft/environments) creates runs and compiles workspaces.

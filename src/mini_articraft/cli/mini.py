@@ -158,13 +158,13 @@ def _run_generation(
 ) -> dict[str, Any]:
     if use_tui:
         return _generate_with_tui(settings, prompt, image_path)
-    return asyncio.run(api.run_generation(settings, prompt, image_path=image_path))
+    return asyncio.run(api._run_generation(settings, prompt, image_path=image_path))
 
 
 def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> dict[str, Any]:
     try:
         result = run_live(
-            lambda on_event: api.run_generation(
+            lambda on_event: api._run_generation(
                 settings,
                 prompt,
                 image_path=image_path,
@@ -230,7 +230,7 @@ def _settings(
         raise typer.Exit(1) from None
 
     try:
-        settings = api.resolved_settings(
+        settings = api._resolved_settings(
             settings,
             provider=provider,
             model=model,
@@ -243,7 +243,7 @@ def _settings(
         print_settings_error(detail=str(exc))
         raise typer.Exit(1) from None
 
-    if missing := api.missing_provider_settings(settings):
+    if missing := api._missing_provider_settings(settings):
         print_settings_error(missing=missing)
         raise typer.Exit(1)
     return settings
