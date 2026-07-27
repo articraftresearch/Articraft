@@ -23,6 +23,30 @@ Projection: TypeAlias = Literal["orthographic", "perspective"]
 
 
 @dataclass(frozen=True)
+class ImagePoint:
+    """A normalized image position, with ``u`` right and ``v`` down."""
+
+    u: float
+    v: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.u) or not math.isfinite(self.v):
+            raise ValidationError("image coordinates must be finite")
+        if not 0.0 <= self.u <= 1.0 or not 0.0 <= self.v <= 1.0:
+            raise ValidationError("image coordinates must be between 0 and 1")
+
+    def pixel(self, width: int, height: int) -> tuple[float, float]:
+        return self.u * width, self.v * height
+
+
+@dataclass(frozen=True)
+class Reticle:
+    point: ImagePoint
+    label: str = ""
+    color: tuple[int, int, int] = (235, 55, 170)
+
+
+@dataclass(frozen=True)
 class PointOverlay:
     position: Vec3
     label: str = ""
@@ -145,6 +169,29 @@ class _RenderMesh:
     shape: str
     mesh: trimesh.Trimesh
     color: tuple[int, int, int]
+
+
+def annotate_image(
+    source: str | Path,
+    reticles: tuple[Reticle, ...],
+    output: str | Path,
+) -> Path:
+    """Copy an image to PNG and draw normalized, named reticles on it."""
+    source_path = Path(source)
+    output_path = Path(output)
+    if output_path.suffix.lower() != ".png":
+        raise ValidationError("annotated image output must use a .png suffix")
+    try:
+        with Image.open(source_path) as opened:
+            image = opened.convert("RGB")
+    except (OSError, ValueError) as exc:
+        raise ValidationError(f"could not open image: {source_path}") from exc
+    draw = ImageDraw.Draw(image)
+    for reticle in reticles:
+        _draw_reticle(draw, image.width, image.height, reticle)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path, format="PNG", optimize=False)
+    return output_path
 
 
 def render_view(
@@ -646,6 +693,37 @@ def _draw_overlays(
             draw.text((x + radius + 3, y - radius), point.label, fill=point.color)
 
 
+def _draw_reticle(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    height: int,
+    reticle: Reticle,
+) -> None:
+    x, y = reticle.point.pixel(width, height)
+    radius = max(7, round(min(width, height) * 0.012))
+    line = max(2, round(radius / 5))
+    draw.ellipse(
+        (x - radius, y - radius, x + radius, y + radius), outline=reticle.color, width=line
+    )
+    draw.line((x - radius * 1.5, y, x - radius * 0.45, y), fill=reticle.color, width=line)
+    draw.line((x + radius * 0.45, y, x + radius * 1.5, y), fill=reticle.color, width=line)
+    draw.line((x, y - radius * 1.5, x, y - radius * 0.45), fill=reticle.color, width=line)
+    draw.line((x, y + radius * 0.45, x, y + radius * 1.5), fill=reticle.color, width=line)
+    if reticle.label:
+        box = draw.textbbox((0, 0), reticle.label)
+        text_width = box[2] - box[0]
+        text_height = box[3] - box[1]
+        text_x = min(max(2.0, x + radius + 5), max(2.0, width - text_width - 8.0))
+        text_y = min(max(2.0, y + radius + 3), max(2.0, height - text_height - 8.0))
+        draw.rectangle(
+            (text_x - 3, text_y - 3, text_x + text_width + 3, text_y + text_height + 3),
+            fill=(255, 255, 255),
+            outline=reticle.color,
+            width=1,
+        )
+        draw.text((text_x, text_y), reticle.label, fill=(20, 20, 20))
+
+
 def _bounds_corners(minimum: np.ndarray, maximum: np.ndarray) -> np.ndarray:
     return np.asarray(
         [
@@ -679,12 +757,15 @@ def _validate_size(width: int, height: int) -> None:
 
 
 __all__ = [
+    "ImagePoint",
     "LineOverlay",
     "MeridionalSectionView",
     "ModelView",
     "MotionStripView",
     "PointOverlay",
+    "Reticle",
     "SectionView",
     "VisualSpec",
+    "annotate_image",
     "render_view",
 ]
