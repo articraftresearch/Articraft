@@ -30,6 +30,7 @@ _MODELS = {
         long_context_prices=(4.00, 0.40, 18.00),
     ),
 }
+SUPPORTED_MODELS = tuple(sorted(_MODELS))
 
 
 class GeminiModel:
@@ -354,7 +355,7 @@ def context_window_tokens_for(model: str) -> int | None:
 
 def _raise_for_unsupported_model(model: str) -> None:
     if model not in _MODELS:
-        supported = ", ".join(sorted(_MODELS))
+        supported = ", ".join(SUPPORTED_MODELS)
         raise ModelError(f"Unsupported Gemini model: {model}. Supported models: {supported}")
 
 
@@ -370,4 +371,4 @@ def _format_exception(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message or repr(exc)}"
 
 
-__all__ = ["DEFAULT_GEMINI_MODEL", "GeminiModel", "context_window_tokens_for"]
+__all__ = ["DEFAULT_GEMINI_MODEL", "SUPPORTED_MODELS", "GeminiModel", "context_window_tokens_for"]

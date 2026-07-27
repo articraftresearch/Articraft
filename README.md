@@ -69,6 +69,36 @@ uv run mini-articraft view runs/<run-id>
 
 Use the viewer to examine each generated version and move its joints.
 
+### Use it from Python
+
+The same generation loop is available as a small immutable spec:
+
+```python
+import mini_articraft
+
+gen = mini_articraft.Generation(
+    "reconstruct this desk lamp",
+    provider="anthropic",
+    model="claude-sonnet-5",
+)
+
+run = gen.with_image("reference.png").start()
+
+for event in run.watch():
+    print(event)
+
+result = run.wait()
+print(result["status"], result["run"], result["result"])
+```
+
+Each `with_*` method returns a new spec, so one configured spec can start many
+runs. Call `.run()` instead of `.start()` to block without watching events.
+Inside an async application, use `await generation.run_async()`.
+
+`run.cancel()` stops a generation early. A run also works as a context
+manager: leaving the `with` block waits for the run, and an exception inside
+the block cancels it.
+
 ### Run the checks
 
 ```shell
