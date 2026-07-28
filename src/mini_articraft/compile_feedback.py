@@ -589,14 +589,9 @@ _RUNTIME_RULES = (
 _STRUCTURE_RULES = ("- Fix the model structure first. Local geometry tuning comes after that.",)
 _RULES_BY_KIND = {
     "missing_mass": (
-        "- Say what each shape is made of: pass `material=Material.STEEL` to `part.add()`, "
-        "choosing the material the shape actually is. Mass, contact behavior, and its "
-        "appearance all follow from that one word.",
-        "- A part may mix materials -- a steel shell with a hardwood handle weighs both, "
-        "shape by shape.",
-        "- For a substance the library does not cover, or geometry that stands in for "
-        "something whose real weight you know, pass `mass_properties=MassProperties("
-        "density=...)` or `MassProperties(mass=...)` to `model.part()`.",
+        "- Say what each shape is made of: `material=Material.STEEL` on `part.add()`.",
+        "- If the library has nothing close, build one: "
+        '`Material(name="ceramic", density=2400.0)`.',
     ),
     "compile_timeout": (
         "- Inspect the phase named in the timeout before editing.",

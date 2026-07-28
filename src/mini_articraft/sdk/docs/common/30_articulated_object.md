@@ -98,85 +98,19 @@ create two rigid bodies.
 
 ### Materials
 
-`material` says what the shape is made of. One word settles three things: how
-heavy the shape is, how it behaves on contact, and how it looks. It is usually
-the only one you need.
+`material` says what a shape is made of, which settles its mass, how it behaves
+on contact, and how it looks. `coating` covers it in a different material, and
+`color` tints one shape without changing anything physical.
 
 ```python
-from mini_articraft.sdk import Material
-
 body.add(shell, name="shell", material=Material.ALUMINUM)
-body.add(trim, name="lens", material=Material.GLASS)
-```
-
-| Material | Density kg/m^3 | Looks like |
-| --- | --- | --- |
-| `Material.STEEL` | 7850 | light grey metal |
-| `Material.ALUMINUM` | 2700 | pale metal |
-| `Material.ABS_PLASTIC` | 1050 | off-white dielectric |
-| `Material.GLASS` | 2500 | pale, translucent |
-| `Material.HARDWOOD` | 700 | mid brown, diffuse |
-| `Material.RUBBER` | 1200 | near-black, matte |
-
-Different shapes on one part may be different materials. A steel shell with a
-hardwood handle weighs both, shape by shape.
-
-### Coating a shape in something else
-
-Density belongs to the bulk; friction and looks belong to the surface. `coating`
-covers a shape in a different material, so the two can differ:
-
-```python
-# heavy like steel, grippy like rubber
-bar.add(shape, name="bar", material=Material.STEEL, coating=Material.RUBBER)
-
-# chrome-plated plastic: light, but slides and looks like metal
-knob.add(shell, name="knob", material=Material.ABS_PLASTIC, coating=Material.STEEL)
-```
-
-| | Comes from |
-| --- | --- |
-| mass | `material` -- the bulk |
-| friction, restitution | `coating` if given, else `material` |
-| appearance, textures | `coating` if given, else `material` |
-
-### Varying a material
-
-`Material.but(...)` derives a variant, keeping everything you do not change.
-Give it a name and reuse it across shapes and parts:
-
-```python
-BRUSHED = Material.STEEL.but(roughness=0.75)
-GRIPPY  = Material.RUBBER.but(name="tacky_rubber", friction=(1.1, 0.95))
-
-panel.add(face, name="face", material=BRUSHED)
-lid.add(top, name="top", material=BRUSHED)
-```
-
-A derived material keeps its origin's texture, so brushed steel still looks like
-steel when textures are enabled.
-
-`color=` on `part.add()` tints a single shape without naming a variant. It
-changes nothing physical.
-
-```python
+bar.add(rail, name="rail", material=Material.STEEL, coating=Material.RUBBER)
 foot.add(pad, name="foot", material=Material.RUBBER, color=(0.8, 0.1, 0.1))
 ```
 
-### Inventing a material
-
-When the library has nothing close, build one. `density` is required, because
-mass cannot be measured without it. `friction` is optional -- a material without
-it authors no contact behavior at all, which is honest, rather than inventing a
-coefficient.
-
-```python
-CERAMIC = Material(name="ceramic", density=2400.0, friction=(0.45, 0.40))
-CONCRETE = Material(name="concrete", density=2350.0)   # no friction claimed
-```
-
-Prefer the library. Its numbers were checked; an invented one is only as good as
-the guess behind it, and the manifest records which is which.
+Shapes on one part may be different materials; the part weighs each in turn. See
+`docs/sdk/common/37_materials.md` for the library, deriving variants, and what
+gets measured.
 
 ### Build123d placement
 

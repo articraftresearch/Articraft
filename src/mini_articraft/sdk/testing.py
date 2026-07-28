@@ -1042,7 +1042,7 @@ class TestContext:
                     part_name=part.name,
                 )
             except Exception as exc:
-                unresolved.append(f"{part.name}: {exc}")
+                unresolved.append(str(exc))
         if unresolved:
             materials = ", ".join(f"{item.name} ({item.density:g})" for item in LIBRARY)
             return self._record(

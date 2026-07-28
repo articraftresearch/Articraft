@@ -1,4 +1,4 @@
-# Mass and physical properties
+# Materials and mass
 
 `Material` says what a shape is made of. Everything physical follows from it:
 mass, contact behavior, and appearance.
@@ -27,6 +27,28 @@ base.add(shell, name="shell", material=Material.STEEL)
 | `Material.HARDWOOD` | 700 | 0.50 / 0.40 | 0.35 |
 | `Material.RUBBER` | 1200 | 0.95 / 0.85 | 0.75 |
 
+## Deriving and inventing
+
+`Material.but(...)` derives a variant, keeping everything you do not change.
+Name it to reuse it across shapes and parts; it keeps its origin's texture, so
+brushed steel still looks like steel.
+
+```python
+BRUSHED = Material.STEEL.but(roughness=0.75)
+GRIPPY = Material.RUBBER.but(name="tacky", friction=(1.1, 0.95))
+```
+
+Build one only when the library has nothing close. `density` is required;
+`friction` is optional, and omitting it authors no contact behavior rather than
+inventing a coefficient.
+
+```python
+CERAMIC = Material(name="ceramic", density=2400.0, friction=(0.45, 0.40))
+```
+
+Prefer the library: its numbers were checked, and the manifest records which
+materials came from it.
+
 ## One part, several materials
 
 Material lives on the shape, so a part can be made of more than one thing. Each
@@ -41,22 +63,6 @@ box.add(pad, name="foot", material=Material.RUBBER)        # grips the table
 
 The center of mass and inertia are composed across the shapes, so a heavy steel
 base with a light plastic top sits low, exactly as the real object would.
-
-## Overriding what gets measured
-
-`MassProperties` on the part exists for what measurement cannot reach. Every
-field is optional and anything left out is measured.
-
-```python
-# a substance the library does not cover
-model.part("stone", mass_properties=MassProperties(density=2600.0))
-
-# geometry that stands in for something whose real weight you know
-model.part("motor", mass_properties=MassProperties(mass=0.85, center_of_mass=(0.0, 0.0, 0.04)))
-```
-
-An explicit `mass` or `density` applies to the whole part and ignores the shape
-materials for weighing -- they still decide contact behavior and appearance.
 
 ## What gets measured
 
@@ -74,6 +80,22 @@ If you override `center_of_mass` but let the inertia be measured, the measured t
 shifted to your center with the parallel-axis theorem, so the exported pair stays
 physically consistent. Overriding `diagonal_inertia` takes your tensor as given.
 
+## Overrides
+
+`MassProperties` on the part exists for what measurement cannot reach. Every
+field is optional and anything left out is measured.
+
+```python
+# a substance the library does not cover
+model.part("stone", mass_properties=MassProperties(density=2600.0))
+
+# geometry that stands in for something whose real weight you know
+model.part("motor", mass_properties=MassProperties(mass=0.85, center_of_mass=(0.0, 0.0, 0.04)))
+```
+
+An explicit `mass` or `density` applies to the whole part and ignores the shape
+materials for weighing -- they still decide contact behavior and appearance.
+
 ## Physics mode
 
 When the physics lane is enabled (`mini-articraft generate --physics ...`), **every part
@@ -83,7 +105,7 @@ compiler asks you to state what each shape is made of instead of guessing.
 
 With physics off, parts that cannot be weighed simply export without mass.
 
-## Solid or hollow changes the answer by 10x
+## Modelling hollow things
 
 Mass is measured from the geometry you built, so a part modelled as a solid block is
 weighed as a solid block. Most real objects are not solid, and dense materials punish
