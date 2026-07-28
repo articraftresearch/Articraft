@@ -158,3 +158,31 @@ def test_a_coating_also_supplies_the_look(tmp_path: Path) -> None:
     assert shape.surface_material is Material.STEEL
     assert shape.resolved_appearance is not None
     assert shape.resolved_appearance.metallic == 1.0
+
+
+def test_textured_shapes_keep_their_physics_material(monkeypatch, tmp_path: Path) -> None:
+    """The textured export path returns early and once skipped friction entirely."""
+    from mini_articraft.sdk import ambientcg
+
+    maps = tmp_path / "maps"
+    maps.mkdir()
+    color = maps / "Metal009_1K-JPG_Color.jpg"
+    color.write_bytes(b"image")
+    texture_set = ambientcg.TextureSet("Metal009", "1K", color)
+    monkeypatch.setattr(
+        ambientcg,
+        "fetch_material",
+        lambda kind: (texture_set, ambientcg.MaterialSpec("Metal009")),
+    )
+
+    model = ArticulatedObject("textured")
+    model.part("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube", material=Material.STEEL)
+
+    result = export_object(model, tmp_path / "out", textured=True)
+    stage, meshes = _open(str(result.usdz))
+    physics = _bound_physics_material(stage, meshes["cube"])
+
+    assert physics is not None
+    assert _MaterialAPI(physics).GetStaticFrictionAttr().Get() == pytest.approx(
+        Material.STEEL.static_friction
+    )

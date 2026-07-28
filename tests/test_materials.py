@@ -148,6 +148,7 @@ def test_export_payload_carries_material_and_appearance(tmp_path) -> None:
         "base_color": list(Material.STEEL.appearance.base_color),
         "metallic": 1.0,
         "roughness": Material.STEEL.appearance.roughness,
+        "opacity": Material.STEEL.appearance.opacity,
         "emissive": None,
     }
 
@@ -236,9 +237,32 @@ def test_viewer_readback_exposes_shape_materials(tmp_path) -> None:
 
     body = parts["base"]["shapes"][0]
     assert body["usd_name"] == "body"
-    assert body["material"]["metallic"] == pytest.approx(1.0)
-    assert body["material"]["roughness"] == pytest.approx(0.3)
-    assert body["material"]["base_color"] == pytest.approx([0.8, 0.5, 0.2])
+    assert body["appearance"]["metallic"] == pytest.approx(1.0)
+    assert body["appearance"]["roughness"] == pytest.approx(0.3)
+    assert body["appearance"]["base_color"] == pytest.approx([0.8, 0.5, 0.2])
 
     cap = parts["lid"]["shapes"][0]
-    assert cap["material"]["metallic"] == pytest.approx(0.0)
+    assert cap["appearance"]["metallic"] == pytest.approx(0.0)
+
+
+def test_viewer_receives_the_mass_it_displays(tmp_path) -> None:
+    """The parts panel was added in #68 but the viewer was never given the data."""
+    model = ArticulatedObject("weighed")
+    part = model.part("body")
+    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="shell", material=Material.STEEL)
+    part.add(
+        BoxGeometry([0.05, 0.02, 0.01]).translate(0.06, 0.0, 0.0),
+        name="foot",
+        material=Material.RUBBER,
+    )
+
+    result = export_object(model, tmp_path)
+    version = _read_version(result.usdz)
+    mass = cast(dict[str, Any], version["model"])["parts"][0]["mass"]
+
+    assert mass is not None
+    assert mass["kilograms"] == pytest.approx(
+        0.1**3 * 7850.0 + 0.05 * 0.02 * 0.01 * 1200.0, rel=1e-3
+    )
+    assert mass["materials"] == ["rubber", "steel"]
+    assert len(mass["center_of_mass"]) == 3

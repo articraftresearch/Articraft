@@ -118,7 +118,12 @@ def _read_shapes(part: Usd.Prim) -> list[dict[str, object]]:
     if not shapes_scope:
         return []
     return [
-        {"usd_name": shape.GetName(), "material": _read_material(shape)}
+        {
+            "usd_name": shape.GetName(),
+            "appearance": _read_appearance(shape),
+            "material": _attribute(shape, "material"),
+            "coating": _attribute(shape, "coating"),
+        }
         for shape in shapes_scope.GetChildren()
     ]
 
@@ -126,23 +131,32 @@ def _read_shapes(part: Usd.Prim) -> list[dict[str, object]]:
 def _read_mass(part: Usd.Prim) -> dict[str, object] | None:
     """The part's exported mass, for the viewer's parts panel.
 
-    UsdPhysics attributes are standard, so they are read directly rather than
-    through the mini_articraft namespace.
+    Read from the stage rather than the manifest, because that is the only thing
+    the viewer is given.
     """
 
-    mass = part.GetAttribute("physics:mass")
-    kilograms = mass.Get() if mass else None
-    if kilograms is None:
+    # UsdPhysics attributes are standard, not mini_articraft-namespaced.
+    mass_attr = part.GetAttribute("physics:mass")
+    mass = mass_attr.Get() if mass_attr else None
+    if mass is None:
         return None
-    center = part.GetAttribute("physics:centerOfMass")
-    position = center.Get() if center else None
+    center_attr = part.GetAttribute("physics:centerOfMass")
+    center = center_attr.Get() if center_attr else None
+    shapes = part.GetChild("shapes")
+    names = {
+        str(value)
+        for shape in (shapes.GetChildren() if shapes else [])
+        if (value := _attribute(shape, "material")) is not None
+    }
+    materials = sorted(names)
     return {
-        "kilograms": float(kilograms),
-        "center_of_mass": [float(value) for value in (position or (0.0, 0.0, 0.0))],
+        "kilograms": float(mass),
+        "materials": materials,
+        "center_of_mass": [float(value) for value in (center or (0.0, 0.0, 0.0))],
     }
 
 
-def _read_material(shape: Usd.Prim) -> dict[str, object] | None:
+def _read_appearance(shape: Usd.Prim) -> dict[str, object] | None:
     metallic = _attribute(shape, "material:metallic")
     if metallic is None:
         return None

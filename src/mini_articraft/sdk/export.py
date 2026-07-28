@@ -250,6 +250,12 @@ def _write_parts(
                     asset_dir,
                     mesh_tolerance,
                 )
+                _write_physics_material(
+                    stage,
+                    UsdGeom.Mesh.Get(stage, mesh_path),  # pyright: ignore[reportAttributeAccessIssue]
+                    shape.surface_material,
+                    physics_materials_path,
+                )
                 textured_shapes += 1
                 continue
 
@@ -268,7 +274,7 @@ def _write_parts(
             mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
             mesh.SetNormalsInterpolation(normal_interpolation)
             mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
-            _attrs(mesh.GetPrim(), {"name": shape.name})
+            _attrs(mesh.GetPrim(), {"name": shape.name, **_substance_attrs(shape)})
             _write_collision(mesh, trimesh_obj)
             _write_physics_material(stage, mesh, shape.surface_material, physics_materials_path)
             if appearance is not None:
@@ -468,6 +474,17 @@ def _bind_material(
         )
     usd_material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(usd_material)
+
+
+def _substance_attrs(shape) -> dict[str, object]:
+    """What the shape is made of, recorded on the prim for viewers and tools."""
+
+    values: dict[str, object] = {}
+    if shape.material is not None:
+        values["material"] = shape.material.value
+    if shape.coating is not None:
+        values["coating"] = shape.coating.value
+    return values
 
 
 def _material_attrs(material: Appearance) -> dict[str, object]:
@@ -761,6 +778,9 @@ def _appearance_payload(appearance: Appearance | None) -> dict[str, object] | No
         "base_color": list(appearance.base_color),
         "metallic": appearance.metallic,
         "roughness": appearance.roughness,
+        # The viewer reads opacity directly; without it, alpha in base_color was
+        # silently ignored and glass rendered solid.
+        "opacity": appearance.opacity,
         "emissive": list(appearance.emissive) if appearance.emissive is not None else None,
     }
 
