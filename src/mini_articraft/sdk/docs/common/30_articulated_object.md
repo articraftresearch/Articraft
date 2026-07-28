@@ -69,6 +69,7 @@ part.add(
     *,
     name: str,
     material: Material | None = None,
+    coating: Material | None = None,
     color: Sequence[float] | None = None,
     appearance: Appearance | None = None,
 ) -> build123d.Shape | MeshGeometry
@@ -121,24 +122,44 @@ body.add(trim, name="lens", material=Material.GLASS)
 Different shapes on one part may be different materials. A steel shell with a
 hardwood handle weighs both, shape by shape.
 
+### Coating a shape in something else
+
+Density belongs to the bulk; friction and looks belong to the surface. `coating`
+covers a shape in a different material, so the two can differ:
+
+```python
+# heavy like steel, grippy like rubber
+bar.add(shape, name="bar", material=Material.STEEL, coating=Material.RUBBER)
+
+# chrome-plated plastic: light, but slides and looks like metal
+knob.add(shell, name="knob", material=Material.ABS_PLASTIC, coating=Material.STEEL)
+```
+
+| | Comes from |
+| --- | --- |
+| mass | `material` -- the bulk |
+| friction, restitution | `coating` if given, else `material` |
+| appearance, textures | `coating` if given, else `material` |
+
 ### Changing how something looks
 
-`color` recolors the material without changing what it is. The surface keeps
-responding to light the same way, so red rubber stays matte and a blue steel
-panel stays metallic.
+`color` recolors without changing any physics. The surface keeps responding to
+light the same way, so red rubber stays matte and a blue steel panel stays
+metallic.
 
 ```python
 foot.add(pad, name="foot", material=Material.RUBBER, color=(0.8, 0.1, 0.1))
 ```
 
-An `Appearance` replaces the look entirely, for a surface that is not its
-substance: a chrome-plated plastic knob, a painted steel panel.
+An `Appearance` replaces the look entirely and claims nothing physical -- paint,
+a screen, an indicator lamp. Use `coating` instead when the surface is really a
+different material, or the friction will be wrong.
 
 ```python
 from mini_articraft.sdk import Appearance
 
-knob.add(shell, name="knob", material=Material.ABS_PLASTIC,
-         appearance=Appearance.metal((0.9, 0.9, 0.92)))
+panel.add(face, name="face", material=Material.STEEL,
+          appearance=Appearance(base_color=(0.1, 0.1, 0.12, 1.0), emissive=(0.0, 0.6, 0.4)))
 ```
 
 ```python

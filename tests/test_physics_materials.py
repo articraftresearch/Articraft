@@ -113,3 +113,48 @@ def test_exported_stage_passes_openusd_physics_validation(tmp_path: Path) -> Non
     errors = UsdValidation.ValidationContext(validators).Validate(stage)
 
     assert [str(error) for error in errors] == []
+
+
+def test_a_coating_moves_friction_to_the_surface_without_moving_mass(tmp_path: Path) -> None:
+    """A rubber grip on a steel bar is heavy like steel and grippy like rubber."""
+    from mini_articraft.sdk.export import _resolve_part_mass
+
+    model = ArticulatedObject("gripped")
+    part = model.part("bar")
+    part.add(
+        BoxGeometry((0.02, 0.02, 0.30)),
+        name="bar",
+        material=Material.STEEL,
+        coating=Material.RUBBER,
+    )
+
+    resolved = _resolve_part_mass(part, 0.0005)
+    assert resolved is not None
+    # Mass stays with the material underneath.
+    assert resolved.mass == pytest.approx(0.02 * 0.02 * 0.30 * Material.STEEL.density)
+
+    result = export_object(model, tmp_path)
+    stage, meshes = _open(str(result.usdz))
+    physics = _MaterialAPI(_bound_physics_material(stage, meshes["bar"]))
+
+    # Friction follows the surface.
+    assert physics.GetStaticFrictionAttr().Get() == pytest.approx(Material.RUBBER.static_friction)
+
+
+def test_a_coating_also_supplies_the_look(tmp_path: Path) -> None:
+    model = ArticulatedObject("plated")
+    part = model.part("knob")
+    part.add(
+        BoxGeometry((0.05, 0.05, 0.05)),
+        name="knob",
+        material=Material.ABS_PLASTIC,
+        coating=Material.STEEL,
+    )
+
+    shape = next(part._iter_shapes())
+
+    # Chrome-plated plastic: weighs like plastic, slides and looks like metal.
+    assert shape.material is Material.ABS_PLASTIC
+    assert shape.surface_material is Material.STEEL
+    assert shape.resolved_appearance is not None
+    assert shape.resolved_appearance.metallic == 1.0

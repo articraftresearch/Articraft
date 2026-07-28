@@ -37,14 +37,26 @@ class _ShapeData:
     name: str
     geometry: Geometry
     material: Material | None
+    coating: Material | None
     appearance: Appearance | None
 
     @property
+    def surface_material(self) -> Material | None:
+        """What the outside of this shape is: its coating, else its own material.
+
+        Friction and appearance are surface properties, so both come from here.
+        Density does not: a chrome-plated knob slides like chrome and weighs like
+        plastic.
+        """
+        return self.coating if self.coating is not None else self.material
+
+    @property
     def resolved_appearance(self) -> Appearance | None:
-        """How this shape should look: the override, else its material's look."""
+        """How this shape should look: the override, else its surface's look."""
         if self.appearance is not None:
             return self.appearance
-        return None if self.material is None else self.material.appearance
+        surface = self.surface_material
+        return None if surface is None else surface.appearance
 
     @property
     def color(self) -> Color | None:
@@ -72,6 +84,7 @@ class Part:
         *,
         name: str,
         material: Material | None = None,
+        coating: Material | None = None,
         color: Sequence[float] | None = None,
         appearance: Appearance | None = None,
     ) -> Geometry:
@@ -81,9 +94,13 @@ class Part:
         how it behaves on contact, and how it looks, so it is usually the only
         thing you need.
 
-        ``color`` recolors the material's look without changing what it is made
-        of. ``appearance`` replaces the look entirely, for a surface that is not
-        its substance -- a chrome-plated plastic knob, a painted steel panel.
+        ``coating`` covers the shape in a different material: a rubber grip on a
+        steel bar is heavy like steel and grippy like rubber. Friction and looks
+        follow the coating; mass stays with the material underneath.
+
+        ``color`` recolors without changing any physics. ``appearance`` replaces
+        the look entirely and claims nothing physical -- paint, a screen, an
+        indicator lamp.
         """
 
         shape_name = _as_name(name, field_name=f"shape name on part {self.name!r}")
@@ -98,10 +115,17 @@ class Part:
                 if material is None
                 else _as_material(material, field_name=f"part {self.name!r} shape {shape_name!r}")
             ),
+            coating=(
+                None
+                if coating is None
+                else _as_material(
+                    coating, field_name=f"part {self.name!r} shape {shape_name!r} coating"
+                )
+            ),
             appearance=_resolve_appearance(
                 color=color,
                 appearance=appearance,
-                material=material,
+                surface=coating if coating is not None else material,
                 context=f"part {self.name!r} shape {shape_name!r}",
             ),
         )
@@ -133,6 +157,8 @@ class Part:
                 _as_material(
                     entry.material, field_name=f"part {self.name!r} shape {name!r} material"
                 )
+            if entry.coating is not None:
+                _as_material(entry.coating, field_name=f"part {self.name!r} shape {name!r} coating")
             if entry.appearance is not None:
                 _as_appearance(
                     entry.appearance, field_name=f"part {self.name!r} shape {name!r} appearance"
@@ -297,10 +323,10 @@ def _resolve_appearance(
     *,
     color: Sequence[float] | None,
     appearance: Appearance | None,
-    material: Material | None,
+    surface: Material | None,
     context: str,
 ) -> Appearance | None:
-    """The shape's authored look, or None to fall back to its material's."""
+    """The shape's authored look, or None to fall back to its surface's."""
 
     if appearance is not None:
         if color is not None:
@@ -312,8 +338,8 @@ def _resolve_appearance(
     if color is None:
         return None
     base = _as_color(color, field_name=f"{context} color")
-    # Recoloring a material keeps how its surface responds to light, so a red
-    # rubber pad stays matte and a blue steel panel stays metallic.
-    if material is not None:
-        return _as_material(material, field_name=f"{context} material").appearance.recolored(base)
+    # Recoloring keeps how the surface responds to light, so a red rubber pad
+    # stays matte and a blue steel panel stays metallic.
+    if surface is not None:
+        return _as_material(surface, field_name=f"{context} material").appearance.recolored(base)
     return Appearance(base_color=base)

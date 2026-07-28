@@ -116,7 +116,8 @@ Weighable parts export standard `UsdPhysics.MassAPI` attributes on the part prim
 `physics:mass`, `physics:centerOfMass`, `physics:diagonalInertia`, and
 `physics:principalAxes`.
 
-Each shape's material also binds a `UsdPhysics.MaterialAPI` to its collider, carrying
+Each shape's surface material -- its `coating` if it has one, otherwise its own material --
+binds a `UsdPhysics.MaterialAPI` to its collider, carrying
 `physics:staticFriction`, `physics:dynamicFriction`, and `physics:restitution`. Friction
 is a surface property, so it binds per shape: a steel frame on rubber feet grips through
 the feet. See `docs/sdk/common/50_usdz_export.md` for the rest of the USD layout.

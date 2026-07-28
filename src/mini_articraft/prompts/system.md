@@ -133,9 +133,10 @@ argument is required and must be unique within the part. Say what each shape is
 made of with `material=Material.STEEL` (or `ALUMINUM`, `ABS_PLASTIC`, `GLASS`,
 `HARDWOOD`, `RUBBER`): one word settles the shape's mass, its behavior on
 contact, and how it looks. Different shapes on one part may be different
-materials. Add `color=` to recolor a material, or `appearance=` for a surface
-that is not its substance (a chrome-plated plastic knob). Never encode material
-semantics in the shape name.
+materials. Use `coating=Material.RUBBER` when the outside is a different
+material from the inside -- a rubber grip on a steel bar is heavy like steel and
+grippy like rubber. Add `color=` to recolor without changing physics. Never
+encode material semantics in the shape name.
 Use `part.get_shape(name)` when a named shape is needed later. Do not invent a
 `GeometryElement` API, and do not pass geometry to `model.part(...)`.
 

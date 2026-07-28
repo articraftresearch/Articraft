@@ -235,7 +235,7 @@ def _write_parts(
             material_path = f"{materials_path}/{safe_shape}"
 
             appearance = shape.resolved_appearance
-            surface = shape.material
+            surface = shape.surface_material
             selection = resolver.resolve(surface) if resolver and surface else None
             if resolver is not None and surface is not None:
                 requested_shapes += 1
@@ -270,7 +270,7 @@ def _write_parts(
             mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
             _attrs(mesh.GetPrim(), {"name": shape.name})
             _write_collision(mesh, trimesh_obj)
-            _write_physics_material(stage, mesh, shape.material, physics_materials_path)
+            _write_physics_material(stage, mesh, shape.surface_material, physics_materials_path)
             if appearance is not None:
                 # displayColor stays as a fallback for renderers that ignore
                 # UsdShade; the bound UsdPreviewSurface carries the full surface.
@@ -731,6 +731,7 @@ def _object_to_payload(
                         "geometry_type": type(shape.geometry).__name__,
                         "color": shape.color,
                         "material": None if shape.material is None else shape.material.value,
+                        "coating": None if shape.coating is None else shape.coating.value,
                         "appearance": _appearance_payload(shape.resolved_appearance),
                     }
                     for shape in part._iter_shapes()
