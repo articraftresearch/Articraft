@@ -35,7 +35,7 @@ from mini_articraft.sdk import ArticulatedObject, Material, TestContext, TestRep
 def build_object_model() -> ArticulatedObject:
     model = ArticulatedObject("object")
     base = model.part("base")
-    base.add(Box(0.2, 0.2, 0.1), name="body", material=Material.plastic((0.7, 0.7, 0.72)))
+    base.add(Box(0.2, 0.2, 0.1), name="body", material=Material.ABS_PLASTIC)
     return model
 
 

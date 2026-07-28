@@ -9,6 +9,7 @@ import trimesh
 
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.mass import MassProperties
+from mini_articraft.sdk.materials import Material
 
 # A part with no measurable solid still needs some inertia to simulate. This stands
 # in for a 1 cm radius of gyration; author diagonal_inertia when the part is larger.
@@ -26,62 +27,119 @@ class ResolvedMass:
 
 
 def resolve_mass(
-    properties: MassProperties,
-    meshes: list[trimesh.Trimesh],
+    properties: MassProperties | None,
+    shapes: list[tuple[trimesh.Trimesh, Material | None]],
     *,
     part_name: str,
 ) -> ResolvedMass:
-    """Combine authored mass properties with the part's measured geometry."""
+    """Measure a part's mass distribution, then apply any authored overrides."""
 
-    combined = _combine(meshes, part_name=part_name)
-    volume = float(combined.volume) if combined is not None else 0.0
+    properties = properties or MassProperties()
+    measured = _measure(shapes, properties, part_name=part_name)
 
-    density = properties.resolved_density
-    if properties.mass is not None:
-        mass = properties.mass
-    elif volume > 0.0 and density is not None:
-        mass = density * volume
-    else:
-        raise ValidationError(
-            f"part {part_name!r} has no usable volume to apply a density to; "
-            "set an explicit mass, or make the geometry a closed solid"
-        )
-
-    if combined is None or volume <= 0.0:
+    if measured is None:
         # No measurable solid: an explicit mass still exports, with a point-like
         # inertia the author can override.
+        if properties.mass is None:
+            raise ValidationError(
+                f"part {part_name!r} has no usable volume to apply a density to; "
+                "set an explicit mass, or make the geometry a closed solid"
+            )
+        mass = properties.mass
         center = properties.center_of_mass or (0.0, 0.0, 0.0)
         point_inertia = mass * _POINT_RADIUS_OF_GYRATION**2
         inertia = properties.diagonal_inertia or (point_inertia,) * 3
         axes = properties.principal_axes or (1.0, 0.0, 0.0, 0.0)
         return ResolvedMass(mass, _triple(center), _triple(inertia), axes)
 
-    # trimesh reports inertia for unit density; scale to the resolved mass.
-    measured_center = _triple(combined.center_mass)
-    scale = mass / volume
-    tensor = np.asarray(combined.moment_inertia, dtype=float) * scale
-    eigenvalues, eigenvectors = np.linalg.eigh(tensor)
-    if float(np.linalg.det(eigenvectors)) < 0.0:
-        eigenvectors[:, 0] *= -1.0  # keep a right-handed frame
+    mass, measured_center, tensor = measured
 
     if properties.diagonal_inertia is not None:
         # An authored tensor is taken as given, about whichever center is authored.
         center = properties.center_of_mass or measured_center
-        inertia = properties.diagonal_inertia
         axes = properties.principal_axes or (1.0, 0.0, 0.0, 0.0)
-        return ResolvedMass(float(mass), _triple(center), _triple(inertia), axes)
+        return ResolvedMass(
+            float(mass), _triple(center), _triple(properties.diagonal_inertia), axes
+        )
 
     center = properties.center_of_mass or measured_center
     if properties.center_of_mass is not None:
         # USD expects the inertia about the authored center of mass, so shift the
         # measured tensor there instead of exporting a mismatched pair.
         tensor = _shift_inertia(tensor, mass, measured_center, center)
-        eigenvalues, eigenvectors = np.linalg.eigh(tensor)
-        if float(np.linalg.det(eigenvectors)) < 0.0:
-            eigenvectors[:, 0] *= -1.0
+    eigenvalues, eigenvectors = np.linalg.eigh(tensor)
+    if float(np.linalg.det(eigenvectors)) < 0.0:
+        eigenvectors[:, 0] *= -1.0  # keep a right-handed frame
     inertia = _triple([max(float(value), 1e-12) for value in eigenvalues])
     axes = properties.principal_axes or _quaternion(eigenvectors)
     return ResolvedMass(float(mass), _triple(center), _triple(inertia), axes)
+
+
+def _measure(
+    shapes: list[tuple[trimesh.Trimesh, Material | None]],
+    properties: MassProperties,
+    *,
+    part_name: str,
+) -> tuple[float, tuple[float, float, float], np.ndarray] | None:
+    """Mass, center of mass, and inertia tensor from geometry and materials.
+
+    Shapes are grouped by material and each group is unioned before it is
+    weighed, so geometry that deliberately overlaps -- a handle end embedded in a
+    wall -- is not counted twice. Groups are then combined by mass, which is what
+    lets one part be steel where it is steel and hardwood where it is hardwood.
+    """
+
+    if properties.mass is not None or properties.density is not None:
+        # One density (or one weight) for the whole part: union everything, so an
+        # explicit override behaves exactly as it did before materials moved to
+        # the shape.
+        combined = _combine([mesh for mesh, _ in shapes], part_name=part_name)
+        volume = float(combined.volume) if combined is not None else 0.0
+        if combined is None or volume <= 0.0:
+            return None
+        density = properties.density
+        mass = properties.mass if properties.mass is not None else (density or 0.0) * volume
+        tensor = np.asarray(combined.moment_inertia, dtype=float) * (mass / volume)
+        return float(mass), _triple(combined.center_mass), tensor
+
+    missing = [index for index, (_, material) in enumerate(shapes) if material is None]
+    if missing:
+        raise ValidationError(
+            f"part {part_name!r} has {len(missing)} shape(s) with no material, so its "
+            "mass cannot be measured; pass material= to part.add(), or set an "
+            "explicit mass or density in MassProperties"
+        )
+
+    groups: dict[Material, list[trimesh.Trimesh]] = {}
+    for mesh, material in shapes:
+        assert material is not None
+        groups.setdefault(material, []).append(mesh)
+
+    total_mass = 0.0
+    weighted_center = np.zeros(3, dtype=float)
+    parts: list[tuple[float, np.ndarray, np.ndarray]] = []
+    for material, meshes in groups.items():
+        combined = _combine(meshes, part_name=part_name)
+        volume = float(combined.volume) if combined is not None else 0.0
+        if combined is None or volume <= 0.0:
+            continue
+        mass = material.density * volume
+        # trimesh reports inertia about the group's own center at unit density.
+        tensor = np.asarray(combined.moment_inertia, dtype=float) * material.density
+        center = np.asarray(_triple(combined.center_mass), dtype=float)
+        total_mass += mass
+        weighted_center += mass * center
+        parts.append((mass, center, tensor))
+
+    if not parts or total_mass <= 0.0:
+        return None
+
+    center_of_mass = weighted_center / total_mass
+    tensor = np.zeros((3, 3), dtype=float)
+    for mass, center, group_tensor in parts:
+        # Parallel-axis each group from its own center onto the part's.
+        tensor += _shift_inertia(group_tensor, mass, _triple(center), _triple(center_of_mass))
+    return total_mass, _triple(center_of_mass), tensor
 
 
 def _shift_inertia(

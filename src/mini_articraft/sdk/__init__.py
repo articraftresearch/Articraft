@@ -48,8 +48,8 @@ from mini_articraft.sdk.joints import (
     MotionLimits,
     Origin,
 )
-from mini_articraft.sdk.mass import MassProperties, MaterialDensity
-from mini_articraft.sdk.materials import Material, SurfaceKind
+from mini_articraft.sdk.mass import MassProperties
+from mini_articraft.sdk.materials import Appearance, Material
 from mini_articraft.sdk.object import ArticulatedObject, Part
 from mini_articraft.sdk.testing import (
     AllowedMeshIssues,
@@ -77,6 +77,7 @@ from mini_articraft.sdk.visual import (
 __all__ = [
     "AllowedMeshIssues",
     "AllowedOverlap",
+    "Appearance",
     "ArcPipeGeometry",
     "ArticulatedObject",
     "Articulation",
@@ -96,7 +97,6 @@ __all__ = [
     "LoftGeometry",
     "MassProperties",
     "Material",
-    "MaterialDensity",
     "MeridionalSectionView",
     "MeshGeometry",
     "MeshHealthFinding",
@@ -115,7 +115,6 @@ __all__ = [
     "SectionView",
     "SphereGeometry",
     "SuperellipsoidGeometry",
-    "SurfaceKind",
     "SweepGeometry",
     "TestArtifact",
     "TestContext",

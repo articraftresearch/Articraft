@@ -21,7 +21,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from mini_articraft.sdk.materials import SurfaceKind
+from mini_articraft.sdk.materials import Material
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,12 +55,12 @@ class MaterialSpec:
     asset: str
 
 
+# Materials without an entry export parametrically instead of textured.
 _MATERIALS = {
-    SurfaceKind.ALUMINUM: MaterialSpec("Metal050A"),
-    SurfaceKind.STEEL: MaterialSpec("Metal009"),
-    SurfaceKind.DARK_METAL: MaterialSpec("Metal046A"),
-    SurfaceKind.PLASTIC: MaterialSpec("Plastic010"),
-    SurfaceKind.RUBBER: MaterialSpec("Rubber004"),
+    Material.ALUMINUM: MaterialSpec("Metal050A"),
+    Material.STEEL: MaterialSpec("Metal009"),
+    Material.ABS_PLASTIC: MaterialSpec("Plastic010"),
+    Material.RUBBER: MaterialSpec("Rubber004"),
 }
 
 _URL = "https://ambientcg.com/get?file={asset}_{res}-JPG.zip"
@@ -109,7 +109,7 @@ def fetch_texture_set(
 
 
 def fetch_material(
-    kind: SurfaceKind,
+    kind: Material,
     *,
     resolution: str = "1K",
     cache_root: Path | None = None,

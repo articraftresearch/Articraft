@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import mini_articraft.environments.worker as worker
 from mini_articraft.record import Record
-from mini_articraft.sdk import ArticulatedObject, BoxGeometry, Material
+from mini_articraft.sdk import Appearance, ArticulatedObject, BoxGeometry
 from mini_articraft.sdk.export import TextureExportReport, export_object
 
 
@@ -14,7 +14,7 @@ def _model() -> ArticulatedObject:
     model.part("base").add(
         BoxGeometry([0.1, 0.1, 0.1]),
         name="body",
-        material=Material.matte((0.5, 0.5, 0.5)),
+        appearance=Appearance.matte((0.5, 0.5, 0.5)),
     )
     return model
 

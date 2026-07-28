@@ -68,8 +68,9 @@ part.add(
     shape: build123d.Shape | MeshGeometry,
     *,
     name: str,
-    color: Sequence[float] | None = None,
     material: Material | None = None,
+    color: Sequence[float] | None = None,
+    appearance: Appearance | None = None,
 ) -> build123d.Shape | MeshGeometry
 ```
 
@@ -97,42 +98,62 @@ create two rigid bodies.
 
 ### Materials
 
-For a physically based surface, pass a `Material` instead of a `color`. A
-material uses the metallic/roughness workflow and is exported as a bound
-`UsdPreviewSurface`, so metal reads as metal and plastic reads as plastic in the
-viewer and in USDZ preview. `color` and `material` cannot both be set;
-`color=(r, g, b)` is shorthand for a matte dielectric material.
+`material` says what the shape is made of. One word settles three things: how
+heavy the shape is, how it behaves on contact, and how it looks. It is usually
+the only one you need.
 
 ```python
-from mini_articraft.sdk import Material, SurfaceKind
+from mini_articraft.sdk import Material
 
-body.add(
-    shell,
-    name="shell",
-    material=Material.metal(
-        (0.72, 0.74, 0.78),
-        roughness=0.30,
-        surface=SurfaceKind.ALUMINUM,
-    ),
-)
-body.add(trim, name="lens", material=Material.glass())
+body.add(shell, name="shell", material=Material.ALUMINUM)
+body.add(trim, name="lens", material=Material.GLASS)
+```
+
+| Material | Density kg/m^3 | Looks like |
+| --- | --- | --- |
+| `Material.STEEL` | 7850 | light grey metal |
+| `Material.ALUMINUM` | 2700 | pale metal |
+| `Material.ABS_PLASTIC` | 1050 | off-white dielectric |
+| `Material.GLASS` | 2500 | pale, translucent |
+| `Material.HARDWOOD` | 700 | mid brown, diffuse |
+| `Material.RUBBER` | 1200 | near-black, matte |
+
+Different shapes on one part may be different materials. A steel shell with a
+hardwood handle weighs both, shape by shape.
+
+### Changing how something looks
+
+`color` recolors the material without changing what it is. The surface keeps
+responding to light the same way, so red rubber stays matte and a blue steel
+panel stays metallic.
+
+```python
+foot.add(pad, name="foot", material=Material.RUBBER, color=(0.8, 0.1, 0.1))
+```
+
+An `Appearance` replaces the look entirely, for a surface that is not its
+substance: a chrome-plated plastic knob, a painted steel panel.
+
+```python
+from mini_articraft.sdk import Appearance
+
+knob.add(shell, name="knob", material=Material.ABS_PLASTIC,
+         appearance=Appearance.metal((0.9, 0.9, 0.92)))
 ```
 
 ```python
-Material(
+Appearance(
     base_color: (r, g, b, a) in [0, 1],   # alpha is opacity
     metallic: float = 0.0,                 # 0 dielectric, 1 raw metal
     roughness: float = 0.6,                # 0 mirror, 1 fully diffuse
     emissive: (r, g, b) | None = None,     # optional unlit glow
-    surface: SurfaceKind | None = None,     # optional physical surface family
 )
 ```
 
-Presets: `Material.metal(color, roughness=...)`, `Material.plastic(color)`,
-`Material.rubber(color)`, `Material.matte(color)`, `Material.glass(color)`.
-Metal, plastic, and rubber presets record matching physical surface families by
-default. Pass a different `SurfaceKind`, or `surface=None`, when the default is
-not appropriate. Exporters never infer a material from a shape name.
+Presets: `Appearance.metal(color, roughness=...)`, `Appearance.plastic(color)`,
+`Appearance.rubber(color)`, `Appearance.matte(color)`, `Appearance.glass(color)`.
+`color` and `appearance` cannot both be set -- an appearance already carries its
+color. Exporters never infer a material from a shape name.
 
 ### Build123d placement
 

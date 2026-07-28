@@ -9,13 +9,10 @@ from mini_articraft.sdk import (
     ArticulationType,
     BoxGeometry,
     CylinderGeometry,
-    MassProperties,
     Material,
-    MaterialDensity,
     MotionLimits,
     Origin,
     SphereGeometry,
-    SurfaceKind,
 )
 from mini_articraft.sdk.export import export_object
 from mini_articraft.sdk.mesh import boolean_difference
@@ -89,7 +86,7 @@ def test_shapes_with_materials_are_colliders_too(tmp_path: Path) -> None:
     model.part("body").add(
         BoxGeometry((0.1, 0.1, 0.1)),
         name="cube",
-        material=Material.metal((0.7, 0.7, 0.72), surface=SurfaceKind.STEEL),
+        material=Material.STEEL,
     )
 
     result = export_object(model, tmp_path)
@@ -108,10 +105,14 @@ def test_exported_stage_passes_openusd_physics_validation(tmp_path: Path) -> Non
     from pxr import UsdValidation
 
     model = ArticulatedObject("rig")
-    base = model.part("base", mass_properties=MassProperties(material=MaterialDensity.STEEL))
-    base.add(BoxGeometry((0.2, 0.2, 0.02)), name="plate")
-    arm = model.part("arm", mass_properties=MassProperties(material=MaterialDensity.ALUMINUM))
-    arm.add(BoxGeometry((0.03, 0.15, 0.03)).translate(0.0, 0.075, 0.03), name="beam")
+    base = model.part("base")
+    base.add(BoxGeometry((0.2, 0.2, 0.02)), name="plate", material=Material.STEEL)
+    arm = model.part("arm")
+    arm.add(
+        BoxGeometry((0.03, 0.15, 0.03)).translate(0.0, 0.075, 0.03),
+        name="beam",
+        material=Material.ALUMINUM,
+    )
     model.articulation(
         "pivot",
         ArticulationType.REVOLUTE,

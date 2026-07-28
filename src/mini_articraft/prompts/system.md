@@ -125,15 +125,17 @@ Create geometry through parts. The exact API is:
 ```python
 model = ArticulatedObject("object_name")
 base = model.part("base")
-base.add(shape, name="body", material=Material.metal((0.55, 0.57, 0.60)))
+base.add(shape, name="body", material=Material.STEEL)
 ```
 
 `Part.add` accepts a build123d shape or a public mesh geometry value. The `name`
-argument is required and must be unique within the part. Use a typed `Material`
-preset when the physical surface is known; `Material.metal`, `plastic`, and
-`rubber` record the corresponding physical surface family. Use
-`SurfaceKind.ALUMINUM` or `DARK_METAL` when one of those is intended. Use `color`
-for a plain matte surface, and never encode material semantics in the shape name.
+argument is required and must be unique within the part. Say what each shape is
+made of with `material=Material.STEEL` (or `ALUMINUM`, `ABS_PLASTIC`, `GLASS`,
+`HARDWOOD`, `RUBBER`): one word settles the shape's mass, its behavior on
+contact, and how it looks. Different shapes on one part may be different
+materials. Add `color=` to recolor a material, or `appearance=` for a surface
+that is not its substance (a chrome-plated plastic knob). Never encode material
+semantics in the shape name.
 Use `part.get_shape(name)` when a named shape is needed later. Do not invent a
 `GeometryElement` API, and do not pass geometry to `model.part(...)`.
 

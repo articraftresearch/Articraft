@@ -7,11 +7,11 @@ import pytest
 from pxr import Usd, UsdGeom, UsdShade  # pyright: ignore[reportAttributeAccessIssue]
 
 from mini_articraft.sdk import (
+    Appearance,
     ArticulatedObject,
     BoxGeometry,
     Material,
     MotionLimits,
-    SurfaceKind,
     ambientcg,
 )
 from mini_articraft.sdk.errors import ValidationError
@@ -25,7 +25,7 @@ def _model() -> ArticulatedObject:
     base.add(
         BoxGeometry([0.2, 0.2, 0.1]),
         name="body",
-        material=Material.metal((0.8, 0.5, 0.2, 1.0), roughness=0.3),
+        appearance=Appearance.metal((0.8, 0.5, 0.2, 1.0), roughness=0.3),
     )
     lid = model.part("lid")
     lid.add(BoxGeometry([0.2, 0.2, 0.02]), name="cap", color=(0.2, 0.3, 0.8))
@@ -40,43 +40,76 @@ def _model() -> ArticulatedObject:
 
 
 def test_material_validates_ranges_and_presets() -> None:
-    metal = Material.metal((0.8, 0.8, 0.85, 1.0))
+    metal = Appearance.metal((0.8, 0.8, 0.85, 1.0))
     assert metal.metallic == 1.0
     assert metal.opacity == 1.0
-    assert metal.surface == SurfaceKind.STEEL
-    assert Material.plastic((0.5, 0.5, 0.5), surface=None).surface is None
-    glass = Material.glass()
+    glass = Appearance.glass()
     assert glass.metallic == 0.0
     assert glass.opacity < 1.0
 
     with pytest.raises(ValidationError, match="metallic"):
-        Material(base_color=(0.5, 0.5, 0.5, 1.0), metallic=1.5)
+        Appearance(base_color=(0.5, 0.5, 0.5, 1.0), metallic=1.5)
     with pytest.raises(ValidationError, match="roughness"):
-        Material(base_color=(0.5, 0.5, 0.5, 1.0), roughness=-0.1)
+        Appearance(base_color=(0.5, 0.5, 0.5, 1.0), roughness=-0.1)
     with pytest.raises(ValidationError, match="base_color"):
-        Material(base_color=(2.0, 0.0, 0.0, 1.0))
-    with pytest.raises(ValidationError, match="SurfaceKind"):
-        Material(surface="steel")  # type: ignore[arg-type]
+        Appearance(base_color=(2.0, 0.0, 0.0, 1.0))
     with pytest.raises(ValidationError, match="3 numeric values"):
-        Material(emissive=(0.1, 0.2, 0.3, 0.4))  # type: ignore[arg-type]
+        Appearance(emissive=(0.1, 0.2, 0.3, 0.4))  # type: ignore[arg-type]
 
 
-def test_color_shorthand_becomes_a_matte_dielectric() -> None:
+def test_color_alone_becomes_a_matte_dielectric() -> None:
     part = ArticulatedObject("o").part("p")
     part.add(BoxGeometry([0.1, 0.1, 0.1]), name="s", color=(0.2, 0.3, 0.8))
     shape = next(part._iter_shapes())
-    assert shape.material == Material(base_color=(0.2, 0.3, 0.8, 1.0))
+    assert shape.resolved_appearance == Appearance(base_color=(0.2, 0.3, 0.8, 1.0))
     assert shape.color == (0.2, 0.3, 0.8, 1.0)
 
 
-def test_color_and_material_are_mutually_exclusive() -> None:
+def test_a_material_supplies_its_own_look() -> None:
     part = ArticulatedObject("o").part("p")
-    with pytest.raises(ValidationError, match="both color and material"):
+    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="s", material=Material.RUBBER)
+    shape = next(part._iter_shapes())
+    assert shape.appearance is None
+    assert shape.resolved_appearance == Material.RUBBER.appearance
+
+
+def test_color_recolors_a_material_without_changing_what_it_is() -> None:
+    part = ArticulatedObject("o").part("p")
+    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="s", material=Material.STEEL, color=(0.2, 0.3, 0.8))
+    shape = next(part._iter_shapes())
+
+    assert shape.material is Material.STEEL
+    assert shape.color == (0.2, 0.3, 0.8, 1.0)
+    # Still reads as metal: recoloring keeps how the surface responds to light.
+    assert shape.resolved_appearance is not None
+    assert shape.resolved_appearance.metallic == Material.STEEL.appearance.metallic
+    assert shape.resolved_appearance.roughness == Material.STEEL.appearance.roughness
+
+
+def test_appearance_overrides_the_material_look_entirely() -> None:
+    part = ArticulatedObject("o").part("p")
+    part.add(
+        BoxGeometry([0.1, 0.1, 0.1]),
+        name="s",
+        material=Material.ABS_PLASTIC,
+        appearance=Appearance.metal(),
+    )
+    shape = next(part._iter_shapes())
+
+    # Chrome-plated plastic: weighs like plastic, looks like metal.
+    assert shape.material is Material.ABS_PLASTIC
+    assert shape.resolved_appearance is not None
+    assert shape.resolved_appearance.metallic == 1.0
+
+
+def test_color_and_appearance_are_mutually_exclusive() -> None:
+    part = ArticulatedObject("o").part("p")
+    with pytest.raises(ValidationError, match="both color and appearance"):
         part.add(
             BoxGeometry([0.1, 0.1, 0.1]),
             name="s",
             color=(0.2, 0.3, 0.8),
-            material=Material.metal(),
+            appearance=Appearance.metal(),
         )
 
 
@@ -101,29 +134,32 @@ def test_export_binds_usd_preview_surface(tmp_path) -> None:
     assert mesh.GetAttribute("primvars:displayColor").Get() is not None
 
 
-def test_export_payload_carries_material(tmp_path) -> None:
-    result = export_object(_model(), tmp_path)
+def test_export_payload_carries_material_and_appearance(tmp_path) -> None:
+    model = ArticulatedObject("materialed")
+    part = model.part("base")
+    part.add(BoxGeometry([0.2, 0.2, 0.1]), name="body", material=Material.STEEL)
+
+    result = export_object(model, tmp_path)
     manifest = json.loads(result.manifest.read_text())
     body = manifest["parts"][0]["shapes"][0]
-    assert body["material"] == {
-        "base_color": [0.8, 0.5, 0.2, 1.0],
+
+    assert body["material"] == "steel"
+    assert body["appearance"] == {
+        "base_color": list(Material.STEEL.appearance.base_color),
         "metallic": 1.0,
-        "roughness": 0.3,
+        "roughness": Material.STEEL.appearance.roughness,
         "emissive": None,
-        "surface": "steel",
     }
 
 
 def test_textured_export_resolves_each_explicit_kind_once(monkeypatch, tmp_path) -> None:
     model = ArticulatedObject("textures")
     part = model.part("part")
-    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="warm_light", material=Material.metal())
-    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="showcase", material=Material.metal())
-    part.add(
-        BoxGeometry([0.1, 0.1, 0.1]),
-        name="steel_by_name_only",
-        material=Material.matte((0.5, 0.5, 0.5)),
-    )
+    # The material is the texture key, so two steel shapes share one fetch and a
+    # shape with only a color asks for nothing.
+    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="warm_light", material=Material.STEEL)
+    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="showcase", material=Material.STEEL)
+    part.add(BoxGeometry([0.1, 0.1, 0.1]), name="steel_by_name_only", color=(0.5, 0.5, 0.5))
     attempts = 0
 
     def fail_fetch(_kind):
@@ -158,7 +194,7 @@ def test_textured_export_applies_explicit_texture(monkeypatch, tmp_path) -> None
     model.part("part").add(
         BoxGeometry([0.1, 0.1, 0.1]),
         name="name_has_no_material_semantics",
-        material=Material.metal(),
+        material=Material.STEEL,
     )
 
     result = export_object(model, tmp_path / "result", textured=True)
@@ -182,7 +218,10 @@ def test_textured_export_applies_explicit_texture(monkeypatch, tmp_path) -> None
     assert diffuse_source is not None
     assert UsdShade.Shader(diffuse_source[0].GetPrim()).GetIdAttr().Get() == "UsdUVTexture"
     diffuse = UsdShade.Shader(diffuse_source[0].GetPrim())
-    assert tuple(diffuse.GetInput("scale").Get()) == pytest.approx((0.82, 0.82, 0.85, 1.0))
+    # The texture is tinted by the material's own base color.
+    assert tuple(diffuse.GetInput("scale").Get()) == pytest.approx(
+        Material.STEEL.appearance.base_color
+    )
     roughness_source = shader.GetInput("roughness").GetConnectedSource()
     assert roughness_source is not None
     roughness = UsdShade.Shader(roughness_source[0].GetPrim())

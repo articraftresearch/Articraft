@@ -12,32 +12,33 @@ from mini_articraft.sdk import (
     BoxGeometry,
     CylinderGeometry,
     MassProperties,
-    MaterialDensity,
+    Material,
     TestContext,
 )
 from mini_articraft.sdk._mass_solver import resolve_mass
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import export_object
+from mini_articraft.sdk.export import _resolve_part_mass, export_object
 
 
 def _box(size=(0.2, 0.1, 0.05)) -> trimesh.Trimesh:
     return trimesh.creation.box(size)
 
 
-def test_material_density_lookup() -> None:
-    assert MaterialDensity.STEEL.density == 7850.0
-    assert MassProperties(material=MaterialDensity.STEEL).resolved_density == 7850.0
-    assert MassProperties(density=1234.0).resolved_density == 1234.0
-    assert MassProperties(mass=2.0).resolved_density is None
+def test_material_carries_every_physical_property() -> None:
+    assert Material.STEEL.density == 7850.0
+    assert Material.RUBBER.static_friction > Material.STEEL.static_friction
+    assert Material.RUBBER.dynamic_friction < Material.RUBBER.static_friction
+    assert 0.0 <= Material.HARDWOOD.restitution <= 1.0
+    # A material also supplies the look it takes when nothing overrides it.
+    assert Material.STEEL.appearance.metallic == 1.0
+    assert Material.RUBBER.appearance.metallic == 0.0
 
 
-def test_mass_properties_reject_conflicting_and_empty_values() -> None:
-    with pytest.raises(ValidationError, match="only one of"):
-        MassProperties(material=MaterialDensity.STEEL, density=1000.0)
-    with pytest.raises(ValidationError, match="only one of"):
+def test_mass_properties_reject_conflicting_values() -> None:
+    with pytest.raises(ValidationError, match="either density or mass"):
         MassProperties(mass=1.0, density=1000.0)
-    with pytest.raises(ValidationError, match="need one of"):
-        MassProperties()
+    # Every field is an override, so an empty one is simply "measure everything".
+    assert MassProperties().density is None
     with pytest.raises(ValidationError, match="positive"):
         MassProperties(density=-5.0)
     with pytest.raises(ValidationError, match="positive"):
@@ -51,8 +52,8 @@ def test_mass_properties_reject_conflicting_and_empty_values() -> None:
 def test_computed_mass_and_inertia_match_the_analytic_box() -> None:
     width, depth, height = 0.2, 0.1, 0.05
     resolved = resolve_mass(
-        MassProperties(material=MaterialDensity.STEEL),
-        [_box((width, depth, height))],
+        None,
+        [(_box((width, depth, height)), Material.STEEL)],
         part_name="slab",
     )
     expected_mass = width * depth * height * 7850.0
@@ -78,7 +79,7 @@ def test_explicit_values_win_over_measurement() -> None:
             diagonal_inertia=(1.0, 2.0, 3.0),
             principal_axes=(0.0, 1.0, 0.0, 0.0),
         ),
-        [_box()],
+        [(_box(), None)],
         part_name="slab",
     )
     assert resolved.mass == 0.5
@@ -90,9 +91,7 @@ def test_explicit_values_win_over_measurement() -> None:
 def test_center_of_mass_follows_offset_geometry() -> None:
     offset = _box((0.1, 0.1, 0.1))
     offset.apply_translation((0.3, 0.0, 0.0))
-    resolved = resolve_mass(
-        MassProperties(material=MaterialDensity.ABS_PLASTIC), [offset], part_name="nub"
-    )
+    resolved = resolve_mass(None, [(offset, Material.ABS_PLASTIC)], part_name="nub")
     assert resolved.center_of_mass[0] == pytest.approx(0.3, abs=1e-6)
 
 
@@ -100,15 +99,17 @@ def test_overlapping_shapes_do_not_double_count_mass() -> None:
     first = _box((0.1, 0.1, 0.1))
     second = _box((0.1, 0.1, 0.1))
     second.apply_translation((0.05, 0.0, 0.0))  # half of it overlaps the first
-    resolved = resolve_mass(MassProperties(density=1000.0), [first, second], part_name="pair")
+    resolved = resolve_mass(
+        MassProperties(density=1000.0), [(first, None), (second, None)], part_name="pair"
+    )
     union_volume = 0.1 * 0.1 * 0.15
     assert resolved.mass == pytest.approx(union_volume * 1000.0, rel=1e-3)
 
 
 def test_export_writes_mass_api_attributes(tmp_path) -> None:
     model = ArticulatedObject("massed")
-    part = model.part("body", mass_properties=MassProperties(material=MaterialDensity.HARDWOOD))
-    part.add(BoxGeometry((0.2, 0.2, 0.05)), name="slab")
+    part = model.part("body")
+    part.add(BoxGeometry((0.2, 0.2, 0.05)), name="slab", material=Material.HARDWOOD)
 
     result = export_object(model, tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
@@ -142,8 +143,8 @@ def test_export_omits_mass_api_when_the_part_has_no_properties(tmp_path) -> None
 
 def test_missing_mass_check_reports_every_part_without_properties() -> None:
     model = ArticulatedObject("mixed")
-    heavy = model.part("heavy", mass_properties=MassProperties(material=MaterialDensity.STEEL))
-    heavy.add(BoxGeometry((0.1, 0.1, 0.1)), name="block")
+    heavy = model.part("heavy")
+    heavy.add(BoxGeometry((0.1, 0.1, 0.1)), name="block", material=Material.STEEL)
     light = model.part("light")
     light.add(CylinderGeometry(0.05, 0.02).translate(0.0, 0.0, 0.06), name="disc")
 
@@ -167,9 +168,11 @@ def test_missing_mass_check_passes_when_every_part_has_properties() -> None:
 
 def test_authored_center_of_mass_shifts_the_measured_inertia() -> None:
     box = _box((0.1, 0.1, 0.1))
-    measured = resolve_mass(MassProperties(density=1000.0), [box], part_name="p")
+    measured = resolve_mass(MassProperties(density=1000.0), [(box, None)], part_name="p")
     shifted = resolve_mass(
-        MassProperties(density=1000.0, center_of_mass=(0.0, 0.0, 0.5)), [box], part_name="p"
+        MassProperties(density=1000.0, center_of_mass=(0.0, 0.0, 0.5)),
+        [(box, None)],
+        part_name="p",
     )
     # Parallel axis adds m*d^2 about the two axes perpendicular to the offset.
     expected = measured.mass * 0.5**2
@@ -182,7 +185,7 @@ def test_authored_center_of_mass_shifts_the_measured_inertia() -> None:
 def test_inverted_winding_still_measures_a_positive_mass() -> None:
     inverted = _box((0.1, 0.1, 0.1))
     inverted.invert()
-    resolved = resolve_mass(MassProperties(density=1000.0), [inverted], part_name="p")
+    resolved = resolve_mass(MassProperties(density=1000.0), [(inverted, None)], part_name="p")
     assert resolved.mass == pytest.approx(1.0)
 
 
@@ -191,7 +194,9 @@ def test_open_shapes_fail_instead_of_being_dropped() -> None:
     open_shell = _box((0.1, 0.1, 0.1))
     open_shell.faces = open_shell.faces[:-2]
     with pytest.raises(ValidationError, match="not closed solids"):
-        resolve_mass(MassProperties(density=1000.0), [solid, open_shell], part_name="mixed")
+        resolve_mass(
+            MassProperties(density=1000.0), [(solid, None), (open_shell, None)], part_name="mixed"
+        )
 
 
 def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -> None:
@@ -229,8 +234,8 @@ def test_viewer_receives_the_mass_it_displays(tmp_path) -> None:
     from mini_articraft.viewer import _read_version
 
     model = ArticulatedObject("weighed")
-    part = model.part("body", mass_properties=MassProperties(material=MaterialDensity.STEEL))
-    part.add(BoxGeometry((0.1, 0.1, 0.1)), name="shell")
+    part = model.part("body")
+    part.add(BoxGeometry((0.1, 0.1, 0.1)), name="shell", material=Material.STEEL)
 
     result = export_object(model, tmp_path)
     mass = _read_version(result.usdz)["model"]["parts"][0]["mass"]  # pyright: ignore[reportIndexIssue]
@@ -238,3 +243,39 @@ def test_viewer_receives_the_mass_it_displays(tmp_path) -> None:
     assert mass is not None
     assert mass["kilograms"] == pytest.approx(0.1**3 * 7850.0, rel=1e-3)
     assert len(mass["center_of_mass"]) == 3
+
+
+def test_one_part_may_be_made_of_several_materials() -> None:
+    """The whole point of material living on the shape rather than the part."""
+    model = ArticulatedObject("mixed")
+    part = model.part("body")
+    part.add(
+        BoxGeometry((0.1, 0.1, 0.1)).translate(-0.2, 0.0, 0.0),
+        name="steel_block",
+        material=Material.STEEL,
+    )
+    part.add(
+        BoxGeometry((0.1, 0.1, 0.1)).translate(0.2, 0.0, 0.0),
+        name="wood_block",
+        material=Material.HARDWOOD,
+    )
+
+    resolved = _resolve_part_mass(part, 0.0005)
+    assert resolved is not None
+
+    litre = 0.1**3
+    assert resolved.mass == pytest.approx(litre * 7850.0 + litre * 700.0)
+    # The center of mass is pulled toward the steel, not sat between the blocks.
+    expected_x = (litre * 7850.0 * -0.2 + litre * 700.0 * 0.2) / resolved.mass
+    assert resolved.center_of_mass[0] == pytest.approx(expected_x, abs=1e-4)
+
+
+def test_an_explicit_mass_overrides_the_materials() -> None:
+    model = ArticulatedObject("stand_in")
+    part = model.part("motor", mass_properties=MassProperties(mass=0.85))
+    part.add(CylinderGeometry(0.03, 0.05), name="can", material=Material.STEEL)
+
+    resolved = _resolve_part_mass(part, 0.0005)
+
+    assert resolved is not None
+    assert resolved.mass == pytest.approx(0.85)

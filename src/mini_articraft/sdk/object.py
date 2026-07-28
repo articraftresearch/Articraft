@@ -18,7 +18,14 @@ from mini_articraft.sdk.joints import (
     _coerce_part_name,
 )
 from mini_articraft.sdk.mass import MassProperties
-from mini_articraft.sdk.materials import Color, Material, _as_color, _as_material
+from mini_articraft.sdk.materials import (
+    Appearance,
+    Color,
+    Material,
+    _as_appearance,
+    _as_color,
+    _as_material,
+)
 
 Geometry: TypeAlias = Shape | MeshGeometry
 
@@ -30,11 +37,20 @@ class _ShapeData:
     name: str
     geometry: Geometry
     material: Material | None
+    appearance: Appearance | None
+
+    @property
+    def resolved_appearance(self) -> Appearance | None:
+        """How this shape should look: the override, else its material's look."""
+        if self.appearance is not None:
+            return self.appearance
+        return None if self.material is None else self.material.appearance
 
     @property
     def color(self) -> Color | None:
-        """Base color of the shape's material, for display-color fallbacks."""
-        return None if self.material is None else self.material.base_color
+        """Base color, for display-color fallbacks."""
+        appearance = self.resolved_appearance
+        return None if appearance is None else appearance.base_color
 
 
 @dataclass
@@ -55,14 +71,19 @@ class Part:
         shape: Geometry,
         *,
         name: str,
-        color: Sequence[float] | None = None,
         material: Material | None = None,
+        color: Sequence[float] | None = None,
+        appearance: Appearance | None = None,
     ) -> Geometry:
         """Add named geometry in this part's local frame.
 
-        Pass ``material`` for a physically based surface (metal, plastic, glass),
-        or ``color`` for a plain colored surface. ``color`` is shorthand for a
-        matte dielectric ``Material`` and cannot be combined with ``material``.
+        ``material`` says what the shape is made of. It decides the shape's mass,
+        how it behaves on contact, and how it looks, so it is usually the only
+        thing you need.
+
+        ``color`` recolors the material's look without changing what it is made
+        of. ``appearance`` replaces the look entirely, for a surface that is not
+        its substance -- a chrome-plated plastic knob, a painted steel panel.
         """
 
         shape_name = _as_name(name, field_name=f"shape name on part {self.name!r}")
@@ -72,8 +93,14 @@ class Part:
         self._shapes[shape_name] = _ShapeData(
             name=shape_name,
             geometry=shape,
-            material=_resolve_material(
+            material=(
+                None
+                if material is None
+                else _as_material(material, field_name=f"part {self.name!r} shape {shape_name!r}")
+            ),
+            appearance=_resolve_appearance(
                 color=color,
+                appearance=appearance,
                 material=material,
                 context=f"part {self.name!r} shape {shape_name!r}",
             ),
@@ -105,6 +132,10 @@ class Part:
             if entry.material is not None:
                 _as_material(
                     entry.material, field_name=f"part {self.name!r} shape {name!r} material"
+                )
+            if entry.appearance is not None:
+                _as_appearance(
+                    entry.appearance, field_name=f"part {self.name!r} shape {name!r} appearance"
                 )
 
 
@@ -262,16 +293,27 @@ def _validate_geometry(shape: object, *, context: str) -> None:
     raise ValidationError(f"{context} must be a build123d Shape or MeshGeometry")
 
 
-def _resolve_material(
+def _resolve_appearance(
     *,
     color: Sequence[float] | None,
+    appearance: Appearance | None,
     material: Material | None,
     context: str,
-) -> Material | None:
-    if material is not None:
+) -> Appearance | None:
+    """The shape's authored look, or None to fall back to its material's."""
+
+    if appearance is not None:
         if color is not None:
-            raise ValidationError(f"{context} cannot set both color and material")
-        return _as_material(material, field_name=f"{context} material")
-    if color is not None:
-        return Material(base_color=_as_color(color, field_name=f"{context} color"))
-    return None
+            raise ValidationError(
+                f"{context} cannot set both color and appearance; "
+                "an appearance already carries its color"
+            )
+        return _as_appearance(appearance, field_name=f"{context} appearance")
+    if color is None:
+        return None
+    base = _as_color(color, field_name=f"{context} color")
+    # Recoloring a material keeps how its surface responds to light, so a red
+    # rubber pad stays matte and a blue steel panel stays metallic.
+    if material is not None:
+        return _as_material(material, field_name=f"{context} material").appearance.recolored(base)
+    return Appearance(base_color=base)
