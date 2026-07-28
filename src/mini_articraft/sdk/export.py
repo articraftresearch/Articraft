@@ -288,9 +288,7 @@ def _write_parts(
                 # UsdShade; the bound UsdPreviewSurface carries the full surface.
                 mesh.CreateDisplayColorAttr([Gf.Vec3f(*display.base_color[:3])])
                 mesh.CreateDisplayOpacityAttr([display.opacity])
-                _bind_shared_appearance(
-                    stage, mesh, display, appearances_path, shared_appearances
-                )
+                _bind_shared_appearance(stage, mesh, display, appearances_path, shared_appearances)
                 _attrs(mesh.GetPrim(), _material_attrs(display))
     errors = tuple(resolver.errors.values()) if resolver is not None else ()
     return (

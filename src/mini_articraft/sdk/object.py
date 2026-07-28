@@ -306,5 +306,3 @@ def _validate_geometry(shape: object, *, context: str) -> None:
             raise ValidationError(f"{context} must be non-empty")
         return
     raise ValidationError(f"{context} must be a build123d Shape or MeshGeometry")
-
-

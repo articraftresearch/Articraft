@@ -233,9 +233,7 @@ def test_textured_export_applies_explicit_texture(monkeypatch, tmp_path) -> None
     assert UsdShade.Shader(diffuse_source[0].GetPrim()).GetIdAttr().Get() == "UsdUVTexture"
     diffuse = UsdShade.Shader(diffuse_source[0].GetPrim())
     # The texture is tinted by the material's own base color.
-    assert tuple(diffuse.GetInput("scale").Get()) == pytest.approx(
-        Material.STEEL.base_color
-    )
+    assert tuple(diffuse.GetInput("scale").Get()) == pytest.approx(Material.STEEL.base_color)
     roughness_source = shader.GetInput("roughness").GetConnectedSource()
     assert roughness_source is not None
     roughness = UsdShade.Shader(roughness_source[0].GetPrim())
