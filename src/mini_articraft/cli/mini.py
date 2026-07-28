@@ -42,11 +42,11 @@ def generate(
         resolve_path=True,
         help="Local reference image for reconstruction.",
     ),
-    provider: Literal["openai", "gemini", "anthropic"] | None = typer.Option(
+    provider: Literal["openai", "gemini", "anthropic", "openrouter"] | None = typer.Option(
         None,
         "--provider",
         case_sensitive=False,
-        help="Model provider to use: openai, gemini, or anthropic.",
+        help="Model provider to use: openai, gemini, anthropic, or openrouter.",
     ),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use."),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
@@ -251,7 +251,7 @@ def _default_output_dir() -> Path:
 
 
 def _settings(
-    provider: Literal["openai", "gemini", "anthropic"] | None,
+    provider: Literal["openai", "gemini", "anthropic", "openrouter"] | None,
     model: str | None,
     output_dir: Path | None,
     effort: str | None,
@@ -283,6 +283,7 @@ def _settings(
             "anthropic": "anthropic_model",
             "gemini": "gemini_model",
             "openai": "openai_model",
+            "openrouter": "openrouter_model",
         }[settings.provider]
         settings = settings.model_copy(update={model_key: model})
 
@@ -319,6 +320,13 @@ def _settings(
 
 
 def _missing_provider_settings(settings: Settings) -> list[str]:
+    if settings.provider == "openrouter":
+        missing = []
+        if not (settings.openrouter_api_key or "").strip():
+            missing.append("OPENROUTER_API_KEY")
+        if not settings.openrouter_model.strip():
+            missing.append("MINI_ARTICRAFT_OPENROUTER_MODEL or --model")
+        return missing
     if settings.provider == "anthropic":
         return [] if anthropic_api_key_value(settings) else ["ANTHROPIC_API_KEY"]
     if settings.provider == "gemini":

@@ -330,6 +330,40 @@ def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
     assert settings.selected_model == "claude-opus-5"
 
 
+def test_cli_selects_openrouter_provider_with_arbitrary_model(monkeypatch, tmp_path: Path) -> None:
+    reset_fakes()
+    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(mini, "LocalEnvironment", FakeEnvironment)
+    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        mini,
+        "get_settings",
+        lambda: Settings(openrouter_api_key="or-test", max_turns=123),
+    )
+
+    output_dir = tmp_path / "runs"
+    result = CliRunner().invoke(
+        mini.app,
+        [
+            "generate",
+            "make a hinge",
+            "--provider",
+            "openrouter",
+            "--model",
+            "vendor/new-model",
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    settings = FakeOpenAIModel.instances[0].settings
+    assert settings.provider == "openrouter"
+    assert settings.openrouter_model == "vendor/new-model"
+    assert settings.output_dir == output_dir
+    assert settings.selected_model == "vendor/new-model"
+
+
 def test_cli_warns_on_missing_required_settings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
@@ -377,6 +411,24 @@ def test_cli_warns_on_missing_anthropic_key(monkeypatch, tmp_path: Path) -> None
     assert result.exit_code == 1
     assert "Missing required environment variable" in result.output
     assert "ANTHROPIC_API_KEY" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_cli_warns_on_missing_openrouter_key_and_model(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("MINI_ARTICRAFT_OPENROUTER_MODEL", raising=False)
+
+    result = CliRunner().invoke(
+        mini.app,
+        ["generate", "make a hinge", "--provider", "openrouter", "--no-tui"],
+    )
+
+    assert result.exit_code == 1
+    assert "OPENROUTER_API_KEY" in result.output
+    assert "MINI_ARTICRAFT_OPENROUTER_MODEL or --model" in result.output
     assert "Traceback" not in result.output
 
 
