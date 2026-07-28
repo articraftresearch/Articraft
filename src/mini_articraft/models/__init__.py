@@ -13,10 +13,13 @@ from mini_articraft.models.openai import OpenAIModel
 from mini_articraft.models.openai import (
     context_window_tokens_for as openai_context_window_tokens_for,
 )
+from mini_articraft.models.openrouter import OpenRouterModel
 from mini_articraft.settings import Settings
 
 
 def create_model(settings: Settings) -> Model:
+    if settings.provider == "openrouter":
+        return OpenRouterModel(settings)
     if settings.provider == "anthropic":
         return AnthropicModel(settings)
     if settings.provider == "gemini":
@@ -36,6 +39,7 @@ __all__ = [
     "AnthropicModel",
     "GeminiModel",
     "OpenAIModel",
+    "OpenRouterModel",
     "context_window_tokens_for",
     "create_model",
 ]
