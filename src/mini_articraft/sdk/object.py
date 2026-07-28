@@ -18,14 +18,7 @@ from mini_articraft.sdk.joints import (
     _coerce_part_name,
 )
 from mini_articraft.sdk.mass import MassProperties
-from mini_articraft.sdk.materials import (
-    Appearance,
-    Color,
-    Material,
-    _as_appearance,
-    _as_color,
-    _as_material,
-)
+from mini_articraft.sdk.materials import Color, Material, _as_color, _as_material
 
 Geometry: TypeAlias = Shape | MeshGeometry
 
@@ -38,31 +31,33 @@ class _ShapeData:
     geometry: Geometry
     material: Material | None
     coating: Material | None
-    appearance: Appearance | None
+    tint: Color | None
 
     @property
     def surface_material(self) -> Material | None:
         """What the outside of this shape is: its coating, else its own material.
 
-        Friction and appearance are surface properties, so both come from here.
+        Friction and looks are surface properties, so both come from here.
         Density does not: a chrome-plated knob slides like chrome and weighs like
         plastic.
         """
         return self.coating if self.coating is not None else self.material
 
     @property
-    def resolved_appearance(self) -> Appearance | None:
-        """How this shape should look: the override, else its surface's look."""
-        if self.appearance is not None:
-            return self.appearance
+    def display_material(self) -> Material | None:
+        """The surface as it should be drawn, with any one-off tint applied."""
         surface = self.surface_material
-        return None if surface is None else surface.appearance
+        if surface is None:
+            if self.tint is None:
+                return None
+            return Material(name="color", density=1.0, base_color=self.tint)
+        return surface if self.tint is None else surface.but(color=self.tint)
 
     @property
     def color(self) -> Color | None:
         """Base color, for display-color fallbacks."""
-        appearance = self.resolved_appearance
-        return None if appearance is None else appearance.base_color
+        display = self.display_material
+        return None if display is None else display.base_color
 
 
 @dataclass
@@ -86,7 +81,6 @@ class Part:
         material: Material | None = None,
         coating: Material | None = None,
         color: Sequence[float] | None = None,
-        appearance: Appearance | None = None,
     ) -> Geometry:
         """Add named geometry in this part's local frame.
 
@@ -98,9 +92,9 @@ class Part:
         steel bar is heavy like steel and grippy like rubber. Friction and looks
         follow the coating; mass stays with the material underneath.
 
-        ``color`` recolors without changing any physics. ``appearance`` replaces
-        the look entirely and claims nothing physical -- paint, a screen, an
-        indicator lamp.
+        ``color`` tints the surface of this one shape and changes no physics.
+        For anything more, derive a material with ``Material.but(...)`` and give
+        it a name to reuse across shapes and parts.
         """
 
         shape_name = _as_name(name, field_name=f"shape name on part {self.name!r}")
@@ -122,11 +116,10 @@ class Part:
                     coating, field_name=f"part {self.name!r} shape {shape_name!r} coating"
                 )
             ),
-            appearance=_resolve_appearance(
-                color=color,
-                appearance=appearance,
-                surface=coating if coating is not None else material,
-                context=f"part {self.name!r} shape {shape_name!r}",
+            tint=(
+                None
+                if color is None
+                else _as_color(color, field_name=f"part {self.name!r} shape {shape_name!r} color")
             ),
         )
         return shape
@@ -159,10 +152,6 @@ class Part:
                 )
             if entry.coating is not None:
                 _as_material(entry.coating, field_name=f"part {self.name!r} shape {name!r} coating")
-            if entry.appearance is not None:
-                _as_appearance(
-                    entry.appearance, field_name=f"part {self.name!r} shape {name!r} appearance"
-                )
 
 
 PartRef: TypeAlias = str | Part
@@ -319,27 +308,3 @@ def _validate_geometry(shape: object, *, context: str) -> None:
     raise ValidationError(f"{context} must be a build123d Shape or MeshGeometry")
 
 
-def _resolve_appearance(
-    *,
-    color: Sequence[float] | None,
-    appearance: Appearance | None,
-    surface: Material | None,
-    context: str,
-) -> Appearance | None:
-    """The shape's authored look, or None to fall back to its surface's."""
-
-    if appearance is not None:
-        if color is not None:
-            raise ValidationError(
-                f"{context} cannot set both color and appearance; "
-                "an appearance already carries its color"
-            )
-        return _as_appearance(appearance, field_name=f"{context} appearance")
-    if color is None:
-        return None
-    base = _as_color(color, field_name=f"{context} color")
-    # Recoloring keeps how the surface responds to light, so a red rubber pad
-    # stays matte and a blue steel panel stays metallic.
-    if surface is not None:
-        return _as_material(surface, field_name=f"{context} material").appearance.recolored(base)
-    return Appearance(base_color=base)

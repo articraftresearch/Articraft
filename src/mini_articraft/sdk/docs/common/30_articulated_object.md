@@ -71,7 +71,6 @@ part.add(
     material: Material | None = None,
     coating: Material | None = None,
     color: Sequence[float] | None = None,
-    appearance: Appearance | None = None,
 ) -> build123d.Shape | MeshGeometry
 ```
 
@@ -141,40 +140,43 @@ knob.add(shell, name="knob", material=Material.ABS_PLASTIC, coating=Material.STE
 | friction, restitution | `coating` if given, else `material` |
 | appearance, textures | `coating` if given, else `material` |
 
-### Changing how something looks
+### Varying a material
 
-`color` recolors without changing any physics. The surface keeps responding to
-light the same way, so red rubber stays matte and a blue steel panel stays
-metallic.
+`Material.but(...)` derives a variant, keeping everything you do not change.
+Give it a name and reuse it across shapes and parts:
+
+```python
+BRUSHED = Material.STEEL.but(roughness=0.75)
+GRIPPY  = Material.RUBBER.but(name="tacky_rubber", friction=(1.1, 0.95))
+
+panel.add(face, name="face", material=BRUSHED)
+lid.add(top, name="top", material=BRUSHED)
+```
+
+A derived material keeps its origin's texture, so brushed steel still looks like
+steel when textures are enabled.
+
+`color=` on `part.add()` tints a single shape without naming a variant. It
+changes nothing physical.
 
 ```python
 foot.add(pad, name="foot", material=Material.RUBBER, color=(0.8, 0.1, 0.1))
 ```
 
-An `Appearance` replaces the look entirely and claims nothing physical -- paint,
-a screen, an indicator lamp. Use `coating` instead when the surface is really a
-different material, or the friction will be wrong.
+### Inventing a material
+
+When the library has nothing close, build one. `density` is required, because
+mass cannot be measured without it. `friction` is optional -- a material without
+it authors no contact behavior at all, which is honest, rather than inventing a
+coefficient.
 
 ```python
-from mini_articraft.sdk import Appearance
-
-panel.add(face, name="face", material=Material.STEEL,
-          appearance=Appearance(base_color=(0.1, 0.1, 0.12, 1.0), emissive=(0.0, 0.6, 0.4)))
+CERAMIC = Material(name="ceramic", density=2400.0, friction=(0.45, 0.40))
+CONCRETE = Material(name="concrete", density=2350.0)   # no friction claimed
 ```
 
-```python
-Appearance(
-    base_color: (r, g, b, a) in [0, 1],   # alpha is opacity
-    metallic: float = 0.0,                 # 0 dielectric, 1 raw metal
-    roughness: float = 0.6,                # 0 mirror, 1 fully diffuse
-    emissive: (r, g, b) | None = None,     # optional unlit glow
-)
-```
-
-Presets: `Appearance.metal(color, roughness=...)`, `Appearance.plastic(color)`,
-`Appearance.rubber(color)`, `Appearance.matte(color)`, `Appearance.glass(color)`.
-`color` and `appearance` cannot both be set -- an appearance already carries its
-color. Exporters never infer a material from a shape name.
+Prefer the library. Its numbers were checked; an invented one is only as good as
+the guess behind it, and the manifest records which is which.
 
 ### Build123d placement
 

@@ -26,12 +26,16 @@ def _box(size=(0.2, 0.1, 0.05)) -> trimesh.Trimesh:
 
 def test_material_carries_every_physical_property() -> None:
     assert Material.STEEL.density == 7850.0
-    assert Material.RUBBER.static_friction > Material.STEEL.static_friction
-    assert Material.RUBBER.dynamic_friction < Material.RUBBER.static_friction
+    assert Material.RUBBER.friction is not None and Material.STEEL.friction is not None
+    rubber_static, rubber_dynamic = Material.RUBBER.friction
+    steel_static, _ = Material.STEEL.friction
+    assert rubber_static > steel_static
+    assert rubber_dynamic < rubber_static
+    assert Material.HARDWOOD.restitution is not None
     assert 0.0 <= Material.HARDWOOD.restitution <= 1.0
-    # A material also supplies the look it takes when nothing overrides it.
-    assert Material.STEEL.appearance.metallic == 1.0
-    assert Material.RUBBER.appearance.metallic == 0.0
+    # One material also carries how it looks.
+    assert Material.STEEL.metallic == 1.0
+    assert Material.RUBBER.metallic == 0.0
 
 
 def test_mass_properties_reject_conflicting_values() -> None:

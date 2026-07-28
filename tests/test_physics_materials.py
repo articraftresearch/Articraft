@@ -156,8 +156,8 @@ def test_a_coating_also_supplies_the_look(tmp_path: Path) -> None:
     # Chrome-plated plastic: weighs like plastic, slides and looks like metal.
     assert shape.material is Material.ABS_PLASTIC
     assert shape.surface_material is Material.STEEL
-    assert shape.resolved_appearance is not None
-    assert shape.resolved_appearance.metallic == 1.0
+    assert shape.display_material is not None
+    assert shape.display_material.metallic == 1.0
 
 
 def test_textured_shapes_keep_their_physics_material(monkeypatch, tmp_path: Path) -> None:

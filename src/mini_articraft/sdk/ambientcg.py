@@ -55,14 +55,6 @@ class MaterialSpec:
     asset: str
 
 
-# Materials without an entry export parametrically instead of textured.
-_MATERIALS = {
-    Material.ALUMINUM: MaterialSpec("Metal050A"),
-    Material.STEEL: MaterialSpec("Metal009"),
-    Material.ABS_PLASTIC: MaterialSpec("Plastic010"),
-    Material.RUBBER: MaterialSpec("Rubber004"),
-}
-
 _URL = "https://ambientcg.com/get?file={asset}_{res}-JPG.zip"
 _CACHE_ROOT = Path.home() / ".cache" / "mini_articraft" / "ambientcg"
 _DOWNLOAD_TIMEOUT_SECONDS = 30
@@ -114,9 +106,15 @@ def fetch_material(
     resolution: str = "1K",
     cache_root: Path | None = None,
 ) -> tuple[TextureSet, MaterialSpec]:
-    """Fetch the texture set and rendering metadata for ``kind``."""
+    """Fetch the texture set and rendering metadata for ``kind``.
 
-    spec = _MATERIALS[kind]
+    The asset comes from the material itself, so a derived material keeps the
+    texture of whatever it was derived from.
+    """
+
+    if kind.texture is None:
+        raise RuntimeError(f"material {kind.name!r} has no texture")
+    spec = MaterialSpec(kind.texture)
     return (
         fetch_texture_set(spec.asset, resolution=resolution, cache_root=cache_root),
         spec,

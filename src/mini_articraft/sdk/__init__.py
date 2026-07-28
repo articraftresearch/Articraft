@@ -49,7 +49,7 @@ from mini_articraft.sdk.joints import (
     Origin,
 )
 from mini_articraft.sdk.mass import MassProperties
-from mini_articraft.sdk.materials import Appearance, Material
+from mini_articraft.sdk.materials import Material
 from mini_articraft.sdk.object import ArticulatedObject, Part
 from mini_articraft.sdk.testing import (
     AllowedMeshIssues,
@@ -77,7 +77,6 @@ from mini_articraft.sdk.visual import (
 __all__ = [
     "AllowedMeshIssues",
     "AllowedOverlap",
-    "Appearance",
     "ArcPipeGeometry",
     "ArticulatedObject",
     "Articulation",

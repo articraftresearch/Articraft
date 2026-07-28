@@ -135,8 +135,10 @@ made of with `material=Material.STEEL` (or `ALUMINUM`, `ABS_PLASTIC`, `GLASS`,
 contact, and how it looks. Different shapes on one part may be different
 materials. Use `coating=Material.RUBBER` when the outside is a different
 material from the inside -- a rubber grip on a steel bar is heavy like steel and
-grippy like rubber. Add `color=` to recolor without changing physics. Never
-encode material semantics in the shape name.
+grippy like rubber. Add `color=` to tint one shape. For anything more, derive a
+variant with `Material.STEEL.but(roughness=0.75)` and give it a name to reuse.
+Build a new one only when the library has nothing close: `Material(name="ceramic",
+density=2400.0)`. Never encode material semantics in the shape name.
 Use `part.get_shape(name)` when a named shape is needed later. Do not invent a
 `GeometryElement` API, and do not pass geometry to `model.part(...)`.
 

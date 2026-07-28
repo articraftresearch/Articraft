@@ -31,7 +31,7 @@ from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
 from mini_articraft.sdk._mass_solver import ResolvedMass, resolve_mass
 from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
-from mini_articraft.sdk.materials import Appearance, Material
+from mini_articraft.sdk.materials import Material, is_library_material
 from mini_articraft.sdk.object import ArticulatedObject, Geometry
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
@@ -71,12 +71,14 @@ class _TextureResolver:
     errors: dict[Material, str] = field(default_factory=dict)
 
     def resolve(self, kind: Material) -> ambientcg.TextureSet | None:
+        if kind.texture is None:
+            return None
         if kind not in self.resolved:
             try:
                 self.resolved[kind] = ambientcg.fetch_material(kind)[0]
             except Exception as exc:
                 self.resolved[kind] = None
-                self.errors[kind] = f"{kind.value}: {type(exc).__name__}: {exc}"
+                self.errors[kind] = f"{kind.name}: {type(exc).__name__}: {exc}"
         return self.resolved[kind]
 
 
@@ -207,6 +209,10 @@ def _write_parts(
     # A sibling of parts and joints, not a child of parts: these are shared by the
     # whole object rather than belonging to any one rigid body.
     physics_materials_path = f"{scope_path.rsplit('/', 1)[0]}/physics_materials"
+    # The same Material value used by several shapes should be one prim, so a
+    # named appearance can be attached across shapes and parts.
+    appearances_path = f"{scope_path.rsplit('/', 1)[0]}/appearances"
+    shared_appearances: dict[Material, str] = {}
     requested_shapes = 0
     textured_shapes = 0
 
@@ -227,26 +233,26 @@ def _write_parts(
         materials_path = f"{part_path}/materials"
         shape_entries = list(part._iter_shapes())
         safe_shape_names = _safe_name_map(shape.name for shape in shape_entries)
-        if textured or any(shape.resolved_appearance is not None for shape in shape_entries):
+        if textured or any(shape.display_material is not None for shape in shape_entries):
             UsdGeom.Scope.Define(stage, materials_path)
         for shape in shape_entries:
             safe_shape = safe_shape_names[shape.name]
             mesh_path = f"{shapes_path}/{safe_shape}"
             material_path = f"{materials_path}/{safe_shape}"
 
-            appearance = shape.resolved_appearance
+            display = shape.display_material
             surface = shape.surface_material
             selection = resolver.resolve(surface) if resolver and surface else None
-            if resolver is not None and surface is not None:
+            if resolver is not None and surface is not None and surface.texture is not None:
                 requested_shapes += 1
-            if selection is not None and appearance is not None and asset_dir is not None:
+            if selection is not None and display is not None and asset_dir is not None:
                 _write_textured_shape(
                     stage,
                     mesh_path,
                     material_path,
                     shape,
                     selection,
-                    appearance,
+                    display,
                     asset_dir,
                     mesh_tolerance,
                 )
@@ -277,13 +283,15 @@ def _write_parts(
             _attrs(mesh.GetPrim(), {"name": shape.name, **_substance_attrs(shape)})
             _write_collision(mesh, trimesh_obj)
             _write_physics_material(stage, mesh, shape.surface_material, physics_materials_path)
-            if appearance is not None:
+            if display is not None:
                 # displayColor stays as a fallback for renderers that ignore
                 # UsdShade; the bound UsdPreviewSurface carries the full surface.
-                mesh.CreateDisplayColorAttr([Gf.Vec3f(*appearance.base_color[:3])])
-                mesh.CreateDisplayOpacityAttr([appearance.opacity])
-                _bind_material(stage, mesh, material_path, appearance)
-                _attrs(mesh.GetPrim(), _material_attrs(appearance))
+                mesh.CreateDisplayColorAttr([Gf.Vec3f(*display.base_color[:3])])
+                mesh.CreateDisplayOpacityAttr([display.opacity])
+                _bind_shared_appearance(
+                    stage, mesh, display, appearances_path, shared_appearances
+                )
+                _attrs(mesh.GetPrim(), _material_attrs(display))
     errors = tuple(resolver.errors.values()) if resolver is not None else ()
     return (
         paths,
@@ -302,7 +310,7 @@ def _write_textured_shape(
     material_path: str,
     shape,
     texture_set,
-    material: Appearance,
+    material: Material,
     asset_dir: Path,
     mesh_tolerance: float,
 ) -> None:
@@ -379,7 +387,7 @@ def _bind_textured_material(
     mesh: UsdGeom.Mesh,
     material_path: str,
     texture_set,
-    authored: Appearance,
+    authored: Material,
     asset_dir: Path,
 ) -> None:
     local: dict[str, str] = {}
@@ -452,11 +460,30 @@ def _bind_textured_material(
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
 
 
+def _bind_shared_appearance(
+    stage: Usd.Stage,
+    mesh: UsdGeom.Mesh,
+    appearance: Material,
+    scope_path: str,
+    shared: dict[Material, str],
+) -> None:
+    """Bind the mesh to a prim for this appearance, defining it only once."""
+
+    path = shared.get(appearance)
+    if path is None:
+        UsdGeom.Scope.Define(stage, scope_path)
+        path = f"{scope_path}/appearance_{len(shared)}"
+        _bind_material(stage, mesh, path, appearance)
+        shared[appearance] = path
+        return
+    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(UsdShade.Material.Get(stage, path))
+
+
 def _bind_material(
     stage: Usd.Stage,
     mesh: UsdGeom.Mesh,
     material_path: str,
-    material: Appearance,
+    material: Material,
 ) -> None:
     usd_material = UsdShade.Material.Define(stage, material_path)
     shader = UsdShade.Shader.Define(stage, f"{material_path}/surface")
@@ -481,13 +508,13 @@ def _substance_attrs(shape) -> dict[str, object]:
 
     values: dict[str, object] = {}
     if shape.material is not None:
-        values["material"] = shape.material.value
+        values["material"] = shape.material.name
     if shape.coating is not None:
-        values["coating"] = shape.coating.value
+        values["coating"] = shape.coating.name
     return values
 
 
-def _material_attrs(material: Appearance) -> dict[str, object]:
+def _material_attrs(material: Material) -> dict[str, object]:
     red, green, blue, alpha = material.base_color
     values: dict[str, object] = {
         "material:metallic": material.metallic,
@@ -520,7 +547,7 @@ def _mass_entry(part, resolved: ResolvedMass) -> dict[str, object]:
     # Materials live on the shapes now, so a part reports the ones it is made of
     # rather than a single name it no longer has.
     materials = sorted(
-        {shape.material.value for shape in part._iter_shapes() if shape.material is not None}
+        {shape.material.name for shape in part._iter_shapes() if shape.material is not None}
     )
     overrides = part.mass_properties
     return {
@@ -576,17 +603,21 @@ def _write_physics_material(
     prim. A shape with no material gets none, and the engine applies its default.
     """
 
-    if material is None:
+    if material is None or material.friction is None:
+        # No friction authored means we do not know it; the engine's default is
+        # a better answer than a number we invented.
         return
-    path = f"{scope_path}/{material.value}"
+    path = f"{scope_path}/{_safe_name(material.name)}"
     usd_material = UsdShade.Material.Get(stage, path)
     if not usd_material:
         UsdGeom.Scope.Define(stage, scope_path)
         usd_material = UsdShade.Material.Define(stage, path)
         physics = UsdPhysics.MaterialAPI.Apply(usd_material.GetPrim())  # pyright: ignore[reportAttributeAccessIssue]
-        physics.CreateStaticFrictionAttr(material.static_friction)
-        physics.CreateDynamicFrictionAttr(material.dynamic_friction)
-        physics.CreateRestitutionAttr(material.restitution)
+        static, dynamic = material.friction
+        physics.CreateStaticFrictionAttr(static)
+        physics.CreateDynamicFrictionAttr(dynamic)
+        if material.restitution is not None:
+            physics.CreateRestitutionAttr(material.restitution)
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(
         usd_material,
         bindingStrength=UsdShade.Tokens.weakerThanDescendants,
@@ -747,9 +778,8 @@ def _object_to_payload(
                         "name": shape.name,
                         "geometry_type": type(shape.geometry).__name__,
                         "color": shape.color,
-                        "material": None if shape.material is None else shape.material.value,
-                        "coating": None if shape.coating is None else shape.coating.value,
-                        "appearance": _appearance_payload(shape.resolved_appearance),
+                        "material": _material_payload(shape.material),
+                        "coating": _material_payload(shape.coating),
                     }
                     for shape in part._iter_shapes()
                 ],
@@ -771,17 +801,28 @@ def _object_to_payload(
     }
 
 
-def _appearance_payload(appearance: Appearance | None) -> dict[str, object] | None:
-    if appearance is None:
+def _material_payload(material: Material | None) -> dict[str, object] | None:
+    """The manifest view of a material.
+
+    ``library`` records whether the numbers came from the checked library or were
+    derived or invented, so a reviewer can tell them apart.
+    """
+
+    if material is None:
         return None
     return {
-        "base_color": list(appearance.base_color),
-        "metallic": appearance.metallic,
-        "roughness": appearance.roughness,
+        "name": material.name,
+        "library": is_library_material(material),
+        "density": material.density,
+        "friction": list(material.friction) if material.friction is not None else None,
+        "restitution": material.restitution,
+        "base_color": list(material.base_color),
+        "metallic": material.metallic,
+        "roughness": material.roughness,
         # The viewer reads opacity directly; without it, alpha in base_color was
         # silently ignored and glass rendered solid.
-        "opacity": appearance.opacity,
-        "emissive": list(appearance.emissive) if appearance.emissive is not None else None,
+        "opacity": material.opacity,
+        "emissive": list(material.emissive) if material.emissive is not None else None,
     }
 
 
@@ -1006,10 +1047,10 @@ def _audit_usdz(
             if limits.upper is not None:
                 _expect_number_attr(prim, "limits:upper", limits.upper, joint_name=name)
 
-    # Appearance drives the bound UsdPreviewSurface, and a material supplies one
+    # Material drives the bound UsdPreviewSurface, and a material supplies one
     # when nothing overrides it, so count what the shape will actually look like.
     expected_materials = sum(
-        shape.resolved_appearance is not None for part in obj.parts for shape in part._iter_shapes()
+        shape.display_material is not None for part in obj.parts for shape in part._iter_shapes()
     )
     if material_bindings != expected_materials:
         raise RuntimeError(

@@ -417,7 +417,7 @@ def _world_meshes(
                 continue
             mesh = geometry_to_trimesh(shape.geometry, mesh_tolerance).copy()
             mesh.apply_transform(transforms[part.name])
-            appearance = shape.resolved_appearance
+            appearance = shape.display_material
             if color_by == "material" and appearance is not None:
                 color = cast(
                     tuple[int, int, int],

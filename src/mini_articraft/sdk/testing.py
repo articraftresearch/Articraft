@@ -27,7 +27,7 @@ from mini_articraft.sdk._mesh_core import geometry_to_trimesh
 from mini_articraft.sdk._mesh_health import MeshHealthIssue, analyze_mesh_health
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType
-from mini_articraft.sdk.materials import Material
+from mini_articraft.sdk.materials import LIBRARY
 from mini_articraft.sdk.object import ArticulatedObject, Part, PartRef
 
 DEFAULT_MESH_TOLERANCE = 0.001
@@ -1044,7 +1044,7 @@ class TestContext:
             except Exception as exc:
                 unresolved.append(f"{part.name}: {exc}")
         if unresolved:
-            materials = ", ".join(f"{item.value} ({item.density:g})" for item in Material)
+            materials = ", ".join(f"{item.name} ({item.density:g})" for item in LIBRARY)
             return self._record(
                 "fail_if_parts_have_no_mass",
                 False,
