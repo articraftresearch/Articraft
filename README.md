@@ -69,6 +69,30 @@ uv run mini-articraft view runs/<run-id>
 
 Use the viewer to examine each generated version and move its joints.
 
+### Simulate a run
+
+Export validation says the USD is well formed. Simulation says whether the object
+stands up. Drop a run on a floor and see what happens:
+
+```shell
+uv sync --group sim
+uv run mini-articraft simulate runs/<run-id>
+```
+
+```
+2 bodies, 29.306 kg total
+  heights: +0.0370 -> +0.0169 m (lowest body)
+  contacts at rest: 8
+  deepest penetration: -4.15 mm
+  largest part separation change: +0.00 mm
+  residual velocity: 0.0000
+  verdict: stands up
+```
+
+It reports whether the object fell through the floor, whether its parts stayed
+together, and whether it settled. MuJoCo is optional, so the `sim` group is not
+installed by default.
+
 ### Run the checks
 
 ```shell
