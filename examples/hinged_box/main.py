@@ -18,7 +18,6 @@ from mini_articraft.sdk import (
     Material,
     MotionLimits,
     Origin,
-    SurfaceKind,
     TestContext,
     TestReport,
 )
@@ -28,18 +27,9 @@ def build_object_model() -> ArticulatedObject:
     model = ArticulatedObject("hinged_box")
 
     base = model.part("base")
-    # A physically based material. A metal's base_color is its reflection tint, so
-    # steel is light and fairly rough -- a dark, mirror-smooth metal reads as a
-    # black blob because it only reflects the environment.
-    base.add(
-        Box(0.10, 0.08, 0.04),
-        name="body",
-        material=Material.metal(
-            (0.60, 0.62, 0.66),
-            roughness=0.5,
-            surface=SurfaceKind.ALUMINUM,
-        ),
-    )
+    # Saying what a shape is made of settles its mass, how it behaves on contact,
+    # and how it looks. Aluminum comes out light and metallic without asking.
+    base.add(Box(0.10, 0.08, 0.04), name="body", material=Material.ALUMINUM)
 
     lid = model.part("lid")
     lid.add(
@@ -50,8 +40,10 @@ def build_object_model() -> ArticulatedObject:
         # the parts physically connected (declared below with allow_overlap).
         Box(0.10, 0.08, 0.015).translate((0.0, 0.04, 0.007)),
         name="body",
-        # A dielectric for contrast: an amber plastic lid next to the metal base.
-        material=Material.plastic((0.62, 0.45, 0.16)),
+        # A recolor keeps the material -- still plastic, still 1050 kg/m^3 --
+        # and only changes what it looks like: an amber lid on a metal base.
+        material=Material.ABS_PLASTIC,
+        color=(0.62, 0.45, 0.16),
     )
 
     model.articulation(

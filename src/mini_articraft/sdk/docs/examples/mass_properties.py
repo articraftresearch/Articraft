@@ -1,17 +1,17 @@
-"""Give each part a mass by saying what it is made of.
+"""Say what each shape is made of, and the physics follows.
 
 A part is one rigid body, so a simulator needs to know how heavy it is, where that
-weight sits, and how it resists rotation. You name the material; the SDK measures the
-volume, center of mass, and inertia from the geometry the part already contains.
+weight sits, and how it resists rotation. You name the material on each shape; the
+SDK measures volume, center of mass, and inertia from the geometry.
 
-Three ways to declare it, in precedence order (give exactly one):
+Material lives on the shape, not the part, so one rigid body can be made of more
+than one thing -- this tin is a steel body with a hardwood lid, and it weighs and
+balances accordingly. The same material also decides how each surface behaves on
+contact and how it looks, so naming it once is usually all a shape needs.
 
-  1. ``mass=`` sets kilograms directly and ignores volume.
-  2. ``density=`` multiplies your kg/m^3 by the measured volume.
-  3. ``material=`` looks up a density from ``MaterialDensity`` and does the same.
-
-``center_of_mass``, ``diagonal_inertia``, and ``principal_axes`` are measured unless
-you pass them explicitly.
+Reach for ``MassProperties`` on the part only to override measurement: a density
+the library does not cover, or a known weight for geometry that stands in for
+something else.
 """
 
 from __future__ import annotations
@@ -22,8 +22,7 @@ from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     CylinderGeometry,
-    MassProperties,
-    MaterialDensity,
+    Material,
     MotionLimits,
     Origin,
     RoundedBoxGeometry,
@@ -44,16 +43,16 @@ def build_object_model() -> ArticulatedObject:
     model = ArticulatedObject("weighted_tin")
 
     # Steel base disc. Mass is the material's density times the measured volume.
-    base = model.part("base", mass_properties=MassProperties(material=MaterialDensity.STEEL))
+    base = model.part("base")
     base.add(
         CylinderGeometry(RADIUS + 0.006, 0.006, radial_segments=64).translate(0.0, 0.0, 0.003),
         name="base_disc",
-        color=(0.55, 0.56, 0.60),
+        material=Material.STEEL,
     )
 
     # Hollow steel body: the cavity is cut away, so the measured volume is the
     # wall rather than a solid cylinder, and the mass follows automatically.
-    body_part = model.part("body", mass_properties=MassProperties(material=MaterialDensity.STEEL))
+    body_part = model.part("body")
     # Weld the hinge lug onto the solid cylinder first, then cut the cavity. Welding
     # into an already-hollow shell makes the bead negotiate the thin wall and the
     # curved inner surface at once, which is where slivers and degenerate faces come
@@ -73,17 +72,17 @@ def build_object_model() -> ArticulatedObject:
             0.0, 0.0, HEIGHT / 2 + WALL
         ),
     )
-    body_part.add(shell, name="body_shell", color=(0.72, 0.73, 0.76))
+    body_part.add(shell, name="body_shell", material=Material.STEEL)
 
     # A hardwood lid, authored in the hinge frame: the disc reaches forward from
     # the pivot so it covers the mouth, and the barrel sits on the pivot itself.
-    lid = model.part("lid", mass_properties=MassProperties(material=MaterialDensity.HARDWOOD))
+    lid = model.part("lid")
     disc = CylinderGeometry(RADIUS, 0.008, radial_segments=64).translate(0.0, RADIUS, 0.004)
     barrel = CylinderGeometry(0.006, 0.024, radial_segments=32).rotate_y(math.pi / 2)
     lid.add(
         weld(disc, barrel, radius=0.004, tolerance=0.0012),
         name="lid_disc",
-        color=(0.62, 0.45, 0.24),
+        material=Material.HARDWOOD,
     )
 
     model.articulation(

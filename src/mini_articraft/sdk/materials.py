@@ -1,147 +1,188 @@
-"""Physically based materials for shapes.
+"""What a shape is made of.
 
-A :class:`Material` describes how a shape's surface responds to light using the
-metallic/roughness workflow shared by glTF and USD's ``UsdPreviewSurface``. It
-is authored once, stored on a shape, exported into the USDZ package as a bound
-``UsdPreviewSurface`` shader, and surfaced to the viewer so metal, plastic,
-rubber, and glass read differently instead of looking like flat display colors.
+A :class:`Material` answers every physical question about a shape at once: how
+heavy it is, how it behaves on contact, and how it looks. Naming one from the
+library is usually all a shape needs::
 
-The optional :class:`SurfaceKind` records the physical surface family so exporters
-can enrich it without inferring material behavior from shape names.
+    body.add(shell, name="shell", material=Material.STEEL)
+
+Derive a variant with :meth:`Material.but` when a shape differs from the library
+entry, and assign it to a name to reuse it across shapes and parts::
+
+    BRUSHED = Material.STEEL.but(roughness=0.75)
+
+Build one directly when the library has nothing close. ``density`` is required
+because mass cannot be measured without it. ``friction`` is optional, and a
+material without it authors no contact behavior at all rather than inventing a
+coefficient::
+
+    CERAMIC = Material(name="ceramic", density=2400.0, friction=(0.45, 0.40))
+
+Prefer the library. Its numbers were checked; an invented one is only as good as
+the guess behind it.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
-from enum import StrEnum
-from typing import TypeAlias
+from dataclasses import dataclass, replace
+from typing import ClassVar, TypeAlias
 
 from mini_articraft.sdk.errors import ValidationError
 
 Color: TypeAlias = tuple[float, float, float, float]
 Rgb: TypeAlias = tuple[float, float, float]
+Friction: TypeAlias = tuple[float, float]
 
 
-class SurfaceKind(StrEnum):
-    """Physical surface families understood by material exporters."""
-
-    ALUMINUM = "aluminum"
-    STEEL = "steel"
-    DARK_METAL = "dark_metal"
-    PLASTIC = "plastic"
-    RUBBER = "rubber"
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Material:
-    """A metallic/roughness surface description in linear-ish authoring space.
+    """What a shape is made of, and everything that follows from it.
 
-    - ``base_color`` is ``(r, g, b, a)`` in ``[0, 1]``; the alpha channel is the
-      surface opacity (``a < 1`` makes the shape translucent).
-    - ``metallic`` in ``[0, 1]``: ``0`` is a dielectric (plastic, wood, rubber),
-      ``1`` is a raw metal.
-    - ``roughness`` in ``[0, 1]``: ``0`` is a mirror-smooth surface, ``1`` is
-      fully diffuse.
-    - ``emissive`` is an optional ``(r, g, b)`` glow color, unlit by the scene.
-    - ``surface`` optionally records a physical surface family such as steel or plastic.
+    - ``density`` in kg/m^3 decides the shape's mass from its measured volume.
+    - ``friction`` is ``(static, dynamic)``; ``None`` authors no contact
+      behavior, leaving the simulator's own default in place.
+    - ``restitution`` in ``[0, 1]`` is how much impact speed survives a bounce.
+    - ``base_color`` ``(r, g, b, a)``, ``metallic``, ``roughness``, and
+      ``emissive`` describe how the surface responds to light; alpha is opacity.
+    - ``texture`` names an ambientCG asset, used when textures are enabled.
     """
 
+    name: str
+    density: float
+    friction: Friction | None = None
+    restitution: float | None = None
     base_color: Color = (0.8, 0.8, 0.8, 1.0)
     metallic: float = 0.0
     roughness: float = 0.6
     emissive: Rgb | None = None
-    surface: SurfaceKind | None = None
+    texture: str | None = None
+
+    # Library entries, defined after the class body.
+    STEEL: ClassVar[Material]
+    ALUMINUM: ClassVar[Material]
+    ABS_PLASTIC: ClassVar[Material]
+    GLASS: ClassVar[Material]
+    HARDWOOD: ClassVar[Material]
+    RUBBER: ClassVar[Material]
 
     def __post_init__(self) -> None:
+        name = str(self.name).strip()
+        if not name:
+            raise ValidationError("material name must not be empty")
+        object.__setattr__(self, "name", name)
         object.__setattr__(
-            self, "base_color", _as_color(self.base_color, field_name="material base_color")
+            self, "density", _positive(self.density, field_name=f"material {name!r} density")
+        )
+        if self.friction is not None:
+            object.__setattr__(self, "friction", _as_friction(self.friction, name=name))
+        if self.restitution is not None:
+            object.__setattr__(
+                self,
+                "restitution",
+                _as_unit(self.restitution, field_name=f"material {name!r} restitution"),
+            )
+        object.__setattr__(
+            self, "base_color", _as_color(self.base_color, field_name=f"material {name!r} color")
         )
         object.__setattr__(
-            self, "metallic", _as_unit(self.metallic, field_name="material metallic")
+            self, "metallic", _as_unit(self.metallic, field_name=f"material {name!r} metallic")
         )
         object.__setattr__(
-            self, "roughness", _as_unit(self.roughness, field_name="material roughness")
+            self, "roughness", _as_unit(self.roughness, field_name=f"material {name!r} roughness")
         )
         if self.emissive is not None:
             object.__setattr__(
-                self, "emissive", _as_rgb(self.emissive, field_name="material emissive")
+                self, "emissive", _as_rgb(self.emissive, field_name=f"material {name!r} emissive")
             )
-        if self.surface is not None and not isinstance(self.surface, SurfaceKind):
-            raise ValidationError("material surface must be a SurfaceKind")
+
+    def but(
+        self,
+        *,
+        name: str | None = None,
+        density: float | None = None,
+        friction: Friction | None = None,
+        restitution: float | None = None,
+        color: Sequence[float] | None = None,
+        metallic: float | None = None,
+        roughness: float | None = None,
+        emissive: Rgb | None = None,
+    ) -> Material:
+        """This material with some properties changed, keeping the rest.
+
+        A derived material keeps its origin's texture, so brushed steel still
+        looks like steel when textures are enabled.
+        """
+
+        changes: dict[str, object] = {}
+        if name is not None:
+            changes["name"] = name
+        if density is not None:
+            changes["density"] = density
+        if friction is not None:
+            changes["friction"] = friction
+        if restitution is not None:
+            changes["restitution"] = restitution
+        if color is not None:
+            changes["base_color"] = _as_color(color, field_name=f"material {self.name!r} color")
+        if metallic is not None:
+            changes["metallic"] = metallic
+        if roughness is not None:
+            changes["roughness"] = roughness
+        if emissive is not None:
+            changes["emissive"] = emissive
+        return replace(self, **changes)  # pyright: ignore[reportArgumentType]
 
     @property
     def opacity(self) -> float:
         return self.base_color[3]
 
-    # Convenience presets so authored code (and the agent) can name a material
-    # by what it is instead of tuning metallic/roughness by hand.
+    @property
+    def static_friction(self) -> float | None:
+        return None if self.friction is None else self.friction[0]
 
-    @classmethod
-    def metal(
-        cls,
-        color: Sequence[float] = (0.82, 0.82, 0.85, 1.0),
-        *,
-        roughness: float = 0.35,
-        surface: SurfaceKind | None = SurfaceKind.STEEL,
-    ) -> Material:
-        return cls(
-            base_color=_as_color(color, field_name="metal color"),
-            metallic=1.0,
-            roughness=roughness,
-            surface=surface,
-        )
+    @property
+    def dynamic_friction(self) -> float | None:
+        return None if self.friction is None else self.friction[1]
 
-    @classmethod
-    def plastic(
-        cls,
-        color: Sequence[float],
-        *,
-        roughness: float = 0.45,
-        surface: SurfaceKind | None = SurfaceKind.PLASTIC,
-    ) -> Material:
-        return cls(
-            base_color=_as_color(color, field_name="plastic color"),
-            metallic=0.0,
-            roughness=roughness,
-            surface=surface,
-        )
 
-    @classmethod
-    def rubber(
-        cls,
-        color: Sequence[float],
-        *,
-        roughness: float = 0.9,
-        surface: SurfaceKind | None = SurfaceKind.RUBBER,
-    ) -> Material:
-        return cls(
-            base_color=_as_color(color, field_name="rubber color"),
-            metallic=0.0,
-            roughness=roughness,
-            surface=surface,
-        )
+def is_library_material(material: Material) -> bool:
+    """Whether this is a library entry rather than a derived or invented one.
 
-    @classmethod
-    def matte(cls, color: Sequence[float], *, roughness: float = 0.8) -> Material:
-        return cls(
-            base_color=_as_color(color, field_name="matte color"), metallic=0.0, roughness=roughness
-        )
-
-    @classmethod
-    def glass(
-        cls, color: Sequence[float] = (0.9, 0.93, 0.96, 0.25), *, roughness: float = 0.05
-    ) -> Material:
-        return cls(
-            base_color=_as_color(color, field_name="glass color"), metallic=0.0, roughness=roughness
-        )
+    Recorded in the manifest so a reviewer can tell which numbers were checked.
+    """
+    return any(material == entry for entry in LIBRARY)
 
 
 def _as_material(value: object, *, field_name: str) -> Material:
     if not isinstance(value, Material):
-        raise ValidationError(f"{field_name} must be a Material")
+        names = ", ".join(f"Material.{entry.name.upper()}" for entry in LIBRARY)
+        raise ValidationError(f"{field_name} must be a Material (library: {names})")
     return value
+
+
+def _as_friction(value: object, *, name: str) -> Friction:
+    try:
+        numbers = tuple(float(item) for item in value)  # type: ignore[union-attr]
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"material {name!r} friction must be (static, dynamic)") from exc
+    if len(numbers) != 2:
+        raise ValidationError(f"material {name!r} friction must be (static, dynamic)")
+    for coefficient in numbers:
+        if not math.isfinite(coefficient) or coefficient < 0.0:
+            raise ValidationError(f"material {name!r} friction must be non-negative and finite")
+    return (numbers[0], numbers[1])
+
+
+def _positive(value: object, *, field_name: str) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{field_name} must be a number") from exc
+    if not math.isfinite(number) or number <= 0.0:
+        raise ValidationError(f"{field_name} must be a positive, finite number")
+    return number
 
 
 def _as_color(value: Sequence[float], *, field_name: str) -> Color:
@@ -186,3 +227,71 @@ def _as_unit(value: float, *, field_name: str) -> float:
     if not math.isfinite(number) or number < 0.0 or number > 1.0:
         raise ValidationError(f"{field_name} must be between 0.0 and 1.0")
     return number
+
+
+# Densities are standard engineering values. Friction and restitution are
+# per-material approximations, which a simulator combines with whatever the shape
+# is actually touching.
+Material.STEEL = Material(
+    name="steel",
+    density=7850.0,
+    friction=(0.42, 0.36),
+    restitution=0.55,
+    base_color=(0.72, 0.73, 0.76, 1.0),
+    metallic=1.0,
+    roughness=0.35,
+    texture="Metal009",
+)
+Material.ALUMINUM = Material(
+    name="aluminum",
+    density=2700.0,
+    friction=(0.45, 0.38),
+    restitution=0.40,
+    base_color=(0.85, 0.86, 0.88, 1.0),
+    metallic=1.0,
+    roughness=0.28,
+    texture="Metal050A",
+)
+Material.ABS_PLASTIC = Material(
+    name="abs_plastic",
+    density=1050.0,
+    friction=(0.40, 0.32),
+    restitution=0.45,
+    base_color=(0.80, 0.80, 0.82, 1.0),
+    roughness=0.45,
+    texture="Plastic010",
+)
+Material.GLASS = Material(
+    name="glass",
+    density=2500.0,
+    friction=(0.40, 0.35),
+    restitution=0.60,
+    base_color=(0.90, 0.93, 0.96, 0.25),
+    roughness=0.05,
+)
+Material.HARDWOOD = Material(
+    name="hardwood",
+    density=700.0,
+    friction=(0.50, 0.40),
+    restitution=0.35,
+    base_color=(0.62, 0.45, 0.24, 1.0),
+    roughness=0.75,
+)
+Material.RUBBER = Material(
+    name="rubber",
+    density=1200.0,
+    friction=(0.95, 0.85),
+    restitution=0.75,
+    base_color=(0.12, 0.12, 0.13, 1.0),
+    roughness=0.90,
+    texture="Rubber004",
+)
+
+LIBRARY: tuple[Material, ...] = (
+    Material.STEEL,
+    Material.ALUMINUM,
+    Material.ABS_PLASTIC,
+    Material.GLASS,
+    Material.HARDWOOD,
+    Material.RUBBER,
+)
