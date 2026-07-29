@@ -103,6 +103,7 @@ def add_tool_results(
             "role": "assistant",
             "content": response["text"],
             "tool_calls": response["tool_calls"],
+            "provider_content": response["provider_content"],
         }
     )
     messages.extend(
@@ -265,20 +266,12 @@ def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
     ]
 
 
-def test_anthropic_summary_does_not_mutate_history_and_reset_replays_blocks() -> None:
+def test_anthropic_summary_request() -> None:
     model, client = anthropic_model(
-        [
-            tool_use_response("read", {"path": "main.py"}, call_id="call_read"),
-            text_response("checkpoint", input_tokens=100, output_tokens=20),
-            text_response("done"),
-        ]
+        [text_response("checkpoint", input_tokens=100, output_tokens=20)]
     )
-    messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
 
-    first = run(model.query(messages, tools=[]))
-    history_before = list(model._history)
-    count_before = model._last_message_count
-    summary = run(
+    result = run(
         model.summarize_context(
             [
                 {"role": "system", "content": "summarize"},
@@ -288,44 +281,12 @@ def test_anthropic_summary_does_not_mutate_history_and_reset_replays_blocks() ->
         )
     )
 
-    assert summary["text"] == "checkpoint"
-    assert model._history == history_before
-    assert model._last_message_count == count_before
-    summary_request = client.messages.requests[1]
-    assert summary_request["max_tokens"] == 8_192
-    assert summary_request["system"] == "summarize"
-    assert "tools" not in summary_request
-    assert "cache_control" not in summary_request
-
-    messages.extend(
-        [
-            {
-                "role": "assistant",
-                "content": first["text"],
-                "tool_calls": first["tool_calls"],
-                "provider_content": first["provider_content"],
-            },
-            {
-                "type": "function_call_output",
-                "call_id": "call_read",
-                "output": '{"result": "file contents"}',
-            },
-        ]
-    )
-    model.reset_history()
-    run(model.query(messages, tools=[]))
-
-    replayed = client.messages.requests[2]["messages"]
-    assert replayed[0] == {"role": "user", "content": "build"}
-    assert replayed[1]["role"] == "assistant"
-    assert replayed[1]["content"][0]["type"] == "thinking"
-    assert replayed[1]["content"][1] == {
-        "type": "tool_use",
-        "id": "call_read",
-        "name": "read",
-        "input": {"path": "main.py"},
-    }
-    assert replayed[2]["content"][0]["tool_use_id"] == "call_read"
+    assert result["text"] == "checkpoint"
+    request = client.messages.requests[0]
+    assert request["max_tokens"] == 8_192
+    assert request["system"] == "summarize"
+    assert "tools" not in request
+    assert "cache_control" not in request
 
 
 def test_anthropic_model_groups_consecutive_tool_results() -> None:

@@ -6,7 +6,6 @@ from mini_articraft.agent.compaction import (
     KEEP_RECENT_TOKENS,
     RESERVE_TOKENS,
     prepare_compaction,
-    serialize_messages,
 )
 
 
@@ -55,7 +54,6 @@ def test_compaction_threshold_and_message_replacement() -> None:
 
     compacted = plan.apply(messages, "checkpoint")
     assert plan.tokens_before == threshold + 1
-    assert plan.messages_summarized == 2
     assert compacted[:3] == messages[:3]
     assert compacted[2]["content"][1]["image_url"].endswith("REFERENCE")
     assert compacted[3]["compaction"]["summary"] == "checkpoint"
@@ -63,38 +61,26 @@ def test_compaction_threshold_and_message_replacement() -> None:
 
 
 def test_summary_input_omits_large_payloads() -> None:
-    serialized = serialize_messages(
-        [
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "name": "write",
-                        "arguments": json.dumps(
-                            {"path": "main.py", "content": "SECRET_FILE_BODY" * 200}
-                        ),
-                    }
-                ],
-            },
-            {
-                "type": "function_call_output",
-                "output": [
-                    {"type": "input_text", "text": "x" * 3_000},
-                    {
-                        "type": "input_image",
-                        "image_url": "data:image/png;base64,SECRET_IMAGE_DATA",
-                    },
-                ],
-            },
-        ]
+    messages = _history(260_000)
+    messages[3]["tool_calls"][0]["arguments"] = json.dumps(
+        {"path": "main.py", "content": "SECRET_FILE_BODY" * 200}
     )
+    messages[4]["output"] = [
+        {"type": "input_text", "text": "x" * 3_000},
+        {
+            "type": "input_image",
+            "image_url": "data:image/png;base64,SECRET_IMAGE_DATA",
+        },
+    ]
 
-    assert "SECRET_FILE_BODY" not in serialized
-    assert "SECRET_IMAGE_DATA" not in serialized
-    assert "[file content omitted]" in serialized
-    assert "more characters omitted" in serialized
-    assert "image payload omitted" in serialized
+    plan = prepare_compaction(messages, 272_000)
+    assert plan is not None
+    summary_input = plan.summary_messages[1]["content"]
+    assert "SECRET_FILE_BODY" not in summary_input
+    assert "SECRET_IMAGE_DATA" not in summary_input
+    assert "[file content omitted]" in summary_input
+    assert "more characters omitted" in summary_input
+    assert "image payload omitted" in summary_input
 
 
 def test_repeated_compaction_updates_checkpoint_and_paths() -> None:

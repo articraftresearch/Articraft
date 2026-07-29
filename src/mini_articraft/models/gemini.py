@@ -39,8 +39,6 @@ class GeminiModel:
         self.config = settings or get_settings()
         _raise_for_unsupported_model(self.config.gemini_model)
         self._client = client
-        self._history: list[Any] = []
-        self._last_message_count = 0
 
     @property
     def context_window_tokens(self) -> int:
@@ -53,12 +51,10 @@ class GeminiModel:
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Query Gemini and return the response shape used by the agent."""
-        new_steps = self._new_input_steps(messages)
-        input_steps = [*self._history, *new_steps]
         try:
             response = await self._client_or_create().aio.interactions.create(
                 model=self.config.gemini_model,
-                input=input_steps,
+                input=_input_steps(messages),
                 system_instruction=_instructions(messages) or None,
                 tools=_tools(tools or []) or None,
                 store=False,
@@ -75,8 +71,6 @@ class GeminiModel:
         if not text and not tool_calls and not _response_has_thoughts(response_steps):
             raise ModelError("Gemini response did not contain text, thoughts, or tool calls")
 
-        self._history = [*input_steps, *response_steps]
-        self._last_message_count = len(messages) + 1
         token_usage = _response_token_usage(response)
         return {
             "text": text,
@@ -93,7 +87,7 @@ class GeminiModel:
         *,
         max_output_tokens: int,
     ) -> dict[str, Any]:
-        """Create one summary without changing the active conversation history."""
+        """Create one context summary."""
         try:
             response = await self._client_or_create().aio.interactions.create(
                 model=self.config.gemini_model,
@@ -114,15 +108,9 @@ class GeminiModel:
         token_usage = _response_token_usage(response)
         return {
             "text": text,
-            "tool_calls": [],
             "token_usage": token_usage,
             "cost": _response_cost(self.config.gemini_model, token_usage),
-            "response": response,
         }
-
-    def reset_history(self) -> None:
-        self._history = []
-        self._last_message_count = 0
 
     async def close(self) -> None:
         client = self._client
@@ -151,9 +139,6 @@ class GeminiModel:
         )
         return self._client
 
-    def _new_input_steps(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return _input_steps(messages[self._last_message_count :], self._history)
-
 
 def _instructions(messages: list[dict[str, Any]]) -> str:
     return "\n\n".join(
@@ -170,16 +155,9 @@ def _message_text(message: dict[str, Any]) -> str:
     return content
 
 
-def _input_steps(
-    messages: list[dict[str, Any]],
-    history: list[Any] | None = None,
-) -> list[dict[str, Any]]:
+def _input_steps(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
-    tool_names = {
-        str(_value(step, "id") or ""): str(_value(step, "name") or "")
-        for step in history or []
-        if _value(step, "type") == "function_call"
-    }
+    tool_names: dict[str, str] = {}
     for message in messages:
         if message.get("type") == "function_call_output":
             call_id = str(message.get("call_id") or "")
@@ -207,30 +185,9 @@ def _input_steps(
 
 def _assistant_steps(message: dict[str, Any]) -> list[dict[str, Any]]:
     provider_content = message.get("provider_content")
-    if isinstance(provider_content, list):
-        return [dict(step) for step in provider_content if isinstance(step, dict)]
-
-    steps: list[dict[str, Any]] = []
-    text = str(message.get("content") or "")
-    if text:
-        steps.append({"type": "model_output", "content": [{"type": "text", "text": text}]})
-    for call in message.get("tool_calls") or []:
-        if not isinstance(call, dict):
-            continue
-        raw_arguments = call.get("arguments") or "{}"
-        try:
-            arguments = json.loads(str(raw_arguments))
-        except json.JSONDecodeError:
-            arguments = {}
-        steps.append(
-            {
-                "type": "function_call",
-                "id": str(call.get("id") or ""),
-                "name": str(call.get("name") or ""),
-                "arguments": arguments if isinstance(arguments, dict) else {},
-            }
-        )
-    return steps
+    if not isinstance(provider_content, list):
+        raise TypeError("Gemini assistant messages require provider_content")
+    return [dict(step) for step in provider_content if isinstance(step, dict)]
 
 
 def _user_content(message: dict[str, Any]) -> list[dict[str, str]]:

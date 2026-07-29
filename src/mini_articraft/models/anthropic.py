@@ -40,8 +40,6 @@ class AnthropicModel:
         self.config = settings or get_settings()
         _raise_for_unsupported_model(self.config.anthropic_model)
         self._client = client
-        self._history: list[dict[str, Any]] = []
-        self._last_message_count = 0
 
     @property
     def context_window_tokens(self) -> int:
@@ -54,9 +52,8 @@ class AnthropicModel:
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Query Anthropic and return the response shape used by the agent."""
-        request_messages = self._request_messages(messages)
         try:
-            response = await self._send(messages, request_messages, tools)
+            response = await self._send(messages, tools)
         except ModelError:
             raise
         except Exception as exc:
@@ -69,11 +66,6 @@ class AnthropicModel:
             raise ModelError("Anthropic response did not contain text, thinking, or tool calls")
 
         token_usage = _response_token_usage(response)
-        self._history = [
-            *request_messages,
-            {"role": "assistant", "content": response_content},
-        ]
-        self._last_message_count = len(messages) + 1
         return {
             "text": text,
             "tool_calls": tool_calls,
@@ -89,7 +81,7 @@ class AnthropicModel:
         *,
         max_output_tokens: int,
     ) -> dict[str, Any]:
-        """Create one summary without changing the active conversation history."""
+        """Create one context summary."""
         request: dict[str, Any] = {
             "model": self.config.anthropic_model,
             "max_tokens": max_output_tokens,
@@ -110,15 +102,9 @@ class AnthropicModel:
         token_usage = _response_token_usage(response)
         return {
             "text": text,
-            "tool_calls": [],
             "token_usage": token_usage,
             "cost": _response_cost(self.config.anthropic_model, token_usage),
-            "response": response,
         }
-
-    def reset_history(self) -> None:
-        self._history = []
-        self._last_message_count = 0
 
     async def close(self) -> None:
         client = self._client
@@ -128,17 +114,16 @@ class AnthropicModel:
 
     async def _send(
         self,
-        source_messages: list[dict[str, Any]],
-        request_messages: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> Any:
         request: dict[str, Any] = {
             "model": self.config.anthropic_model,
             "max_tokens": _MAX_OUTPUT_TOKENS,
-            "messages": request_messages,
+            "messages": _messages(messages),
             "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
-        system = _system(source_messages)
+        system = _system(messages)
         if system:
             request["system"] = system
         converted_tools = _tools(tools or [])
@@ -146,12 +131,6 @@ class AnthropicModel:
             request["tools"] = converted_tools
 
         return await self._client_or_create().messages.create(**request)
-
-    def _request_messages(
-        self,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        return [*self._history, *_messages(messages[self._last_message_count :])]
 
     def _client_or_create(self) -> Any:
         if self._client is None:
@@ -205,30 +184,9 @@ def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _assistant_content(message: dict[str, Any]) -> list[dict[str, Any]]:
     provider_content = message.get("provider_content")
-    if isinstance(provider_content, list):
-        return [dict(block) for block in provider_content if isinstance(block, dict)]
-
-    content: list[dict[str, Any]] = []
-    text = str(message.get("content") or "")
-    if text:
-        content.append({"type": "text", "text": text})
-    for call in message.get("tool_calls") or []:
-        if not isinstance(call, dict):
-            continue
-        raw_arguments = call.get("arguments") or "{}"
-        try:
-            tool_input = json.loads(str(raw_arguments))
-        except json.JSONDecodeError:
-            tool_input = {}
-        content.append(
-            {
-                "type": "tool_use",
-                "id": str(call.get("id") or ""),
-                "name": str(call.get("name") or ""),
-                "input": tool_input if isinstance(tool_input, dict) else {},
-            }
-        )
-    return content
+    if not isinstance(provider_content, list):
+        raise TypeError("Anthropic assistant messages require provider_content")
+    return [dict(block) for block in provider_content if isinstance(block, dict)]
 
 
 def _tool_result_block(message: dict[str, Any]) -> dict[str, Any]:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,7 +17,6 @@ ESTIMATED_IMAGE_TOKENS = 1_200
 @dataclass(frozen=True)
 class Compaction:
     tokens_before: int
-    messages_summarized: int
     recent_messages: list[dict[str, Any]]
     summary_messages: list[dict[str, Any]]
     modified_files: list[str]
@@ -41,8 +39,6 @@ class Compaction:
             "type": "compaction",
             "summary": summary,
             "tokens_before": self.tokens_before,
-            "messages_summarized": self.messages_summarized,
-            "messages_kept": len(self.recent_messages),
             "modified_files": self.modified_files,
             "inspected_images": self.inspected_images,
             "token_usage": usage,
@@ -56,7 +52,7 @@ def prepare_compaction(
     if len(messages) <= STATIC_MESSAGE_COUNT or context_window_tokens <= 0:
         return None
 
-    tokens_before = estimate_context_tokens(messages)
+    tokens_before = _context_tokens(messages)
     if tokens_before <= context_window_tokens - RESERVE_TOKENS:
         return None
 
@@ -82,11 +78,10 @@ def prepare_compaction(
     summary_parts = [f"<task>\n{task}\n</task>"]
     if previous:
         summary_parts.append(f"<previous-checkpoint>\n{previous}\n</previous-checkpoint>")
-    summary_parts.append(f"<old-work>\n{serialize_messages(new_messages)}\n</old-work>")
+    summary_parts.append(f"<old-work>\n{_summary_history(new_messages)}\n</old-work>")
 
     return Compaction(
         tokens_before=tokens_before,
-        messages_summarized=len(old_messages),
         recent_messages=messages[cut:],
         summary_messages=[
             {
@@ -100,7 +95,7 @@ def prepare_compaction(
     )
 
 
-def estimate_context_tokens(messages: list[dict[str, Any]]) -> int:
+def _context_tokens(messages: list[dict[str, Any]]) -> int:
     for index in range(len(messages) - 1, -1, -1):
         usage = messages[index].get("token_usage")
         if messages[index].get("role") != "assistant" or not isinstance(usage, dict):
@@ -115,7 +110,7 @@ def estimate_context_tokens(messages: list[dict[str, Any]]) -> int:
     return sum(_message_tokens(message) for message in messages)
 
 
-def serialize_messages(messages: list[dict[str, Any]]) -> str:
+def _summary_history(messages: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for message in messages:
         if message.get("type") == "function_call_output":
@@ -152,7 +147,7 @@ def _message_tokens(message: dict[str, Any]) -> int:
         if isinstance(call, dict):
             chars += len(str(call.get("name") or ""))
             chars += len(str(call.get("arguments") or ""))
-    return math.ceil(chars / 4)
+    return (chars + 3) // 4
 
 
 def _content_chars(content: Any) -> int:

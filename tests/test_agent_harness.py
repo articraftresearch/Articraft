@@ -42,17 +42,11 @@ class CompactingScriptedModel(ScriptedModel):
             context_window_tokens=272_000,
         )
         self.summary_response = summary_response
-        self.summary_messages = []
         self.summary_max_output_tokens = 0
-        self.reset_calls = 0
 
     async def summarize_context(self, messages, *, max_output_tokens):
-        self.summary_messages.append(list(messages))
         self.summary_max_output_tokens = max_output_tokens
         return self.summary_response
-
-    def reset_history(self) -> None:
-        self.reset_calls += 1
 
 
 def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
@@ -163,15 +157,9 @@ def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> 
     recent_text = "recent work " * 8_000
 
     def inspect_compacted_query(query: ModelQuery) -> Response:
-        assert len(query.messages) == 6
         assert query.messages[3]["compaction"]["summary"] == "CAD checkpoint"
         assert query.messages[4]["content"] == recent_text
-        assert query.messages[5]["type"] == "function_call_output"
-        return text(
-            "done",
-            cost=0.5,
-            token_usage={"input_tokens": 400, "output_tokens": 100, "total_tokens": 500},
-        )
+        return text("done", cost=0.5, token_usage={"total_tokens": 500})
 
     model = CompactingScriptedModel(
         [
@@ -183,33 +171,20 @@ def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> 
                 ),
                 text=old_text,
                 cost=0.1,
-                token_usage={
-                    "input_tokens": 90_000,
-                    "output_tokens": 10_000,
-                    "total_tokens": 100_000,
-                },
+                token_usage={"total_tokens": 100_000},
             ),
             calls(
                 tool_call("compile", {}, call_id="call_compile"),
                 text=recent_text,
                 cost=0.2,
-                token_usage={
-                    "input_tokens": 250_000,
-                    "output_tokens": 10_000,
-                    "total_tokens": 260_000,
-                },
+                token_usage={"total_tokens": 260_000},
             ),
             inspect_compacted_query,
         ],
         {
             "text": "CAD checkpoint",
-            "tool_calls": [],
             "cost": 0.25,
-            "token_usage": {
-                "input_tokens": 80,
-                "output_tokens": 20,
-                "total_tokens": 100,
-            },
+            "token_usage": {"total_tokens": 100},
         },
     )
     agent = Agent(
@@ -224,14 +199,11 @@ def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> 
     assert result["status"] == "success"
     assert result["cost"] == 1.05
     assert result["token_usage"]["total_tokens"] == 360_600
-    assert model.reset_calls == 1
     assert model.summary_max_output_tokens == 8_192
 
     conversation = read_conversation(tmp_path / "box" / "conversation.jsonl")
     compaction = next(row for row in conversation if row.get("type") == "compaction")
     assert compaction["summary"] == "CAD checkpoint"
-    assert compaction["messages_summarized"] == 2
-    assert compaction["messages_kept"] == 2
     assert any(
         row.get("role") == "assistant" and row.get("content") == old_text for row in conversation
     )

@@ -52,8 +52,6 @@ class ToolFinished:
 @dataclass(frozen=True)
 class ContextCompacted:
     tokens_before: int
-    messages_summarized: int
-    messages_kept: int
 
 
 @dataclass(frozen=True)

@@ -134,10 +134,9 @@ class Agent:
             for turn in range(1, self.config.max_turns + 1):
                 self._emit(events.TurnStarted(turn))
                 summarize_context = getattr(self.model, "summarize_context", None)
-                reset_history = getattr(self.model, "reset_history", None)
                 plan = (
                     prepare_compaction(self.messages, context_window_tokens)
-                    if callable(summarize_context) and callable(reset_history)
+                    if callable(summarize_context)
                     else None
                 )
                 if plan is not None:
@@ -160,18 +159,11 @@ class Agent:
                     token_usage = _add_token_usage(token_usage, summary_usage)
                     _save_cost(run_dir, cost, token_usage)
                     self.messages = plan.apply(self.messages, summary)
-                    reset_history()
                     append_conversation(
                         conversation_path,
                         plan.record(summary, summary_usage),
                     )
-                    self._emit(
-                        events.ContextCompacted(
-                            plan.tokens_before,
-                            plan.messages_summarized,
-                            len(plan.recent_messages),
-                        )
-                    )
+                    self._emit(events.ContextCompacted(plan.tokens_before))
                 try:
                     response = await self.model.query(self.messages, tools=tools.schemas())
                 except Exception as exc:

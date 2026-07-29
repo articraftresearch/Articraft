@@ -191,16 +191,11 @@ class RunRenderer:
             ):
                 self._names.setdefault(call_id, name)
                 self._print_tool_result(name, payload, duration=duration)
-            case events.ContextCompacted(
-                tokens_before=tokens,
-                messages_summarized=summarized,
-                messages_kept=kept,
-            ):
+            case events.ContextCompacted(tokens_before=tokens):
                 self._activity = "thinking"
                 self._print(
                     Text(
-                        f"  context compacted at {_format_tokens(tokens)} "
-                        f"({summarized} messages summarized, {kept} kept)",
+                        f"  context compacted at {_format_tokens(tokens)}",
                         style="dim",
                     )
                 )
