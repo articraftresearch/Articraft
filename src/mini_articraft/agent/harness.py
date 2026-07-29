@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import BaseModel
 
 import mini_articraft.agent.tools as tools
-from mini_articraft import Environment, Model, package_dir
+from mini_articraft import ContextSummarizer, Environment, Model, package_dir
 from mini_articraft.agent import events
 from mini_articraft.agent.compaction import SUMMARY_MAX_OUTPUT_TOKENS, prepare_compaction
 from mini_articraft.agent.images import PreparedImage, prepare_image
@@ -133,15 +133,15 @@ class Agent:
         try:
             for turn in range(1, self.config.max_turns + 1):
                 self._emit(events.TurnStarted(turn))
-                summarize_context = getattr(self.model, "summarize_context", None)
+                summarizer = self.model if isinstance(self.model, ContextSummarizer) else None
                 plan = (
                     prepare_compaction(self.messages, context_window_tokens)
-                    if callable(summarize_context)
+                    if summarizer is not None
                     else None
                 )
-                if plan is not None:
+                if plan is not None and summarizer is not None:
                     try:
-                        summary_response = await summarize_context(
+                        summary_response = await summarizer.summarize_context(
                             plan.summary_messages,
                             max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
                         )
