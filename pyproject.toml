@@ -45,6 +45,9 @@ Repository = "https://github.com/mattzh72/mini-articraft"
 Issues = "https://github.com/mattzh72/mini-articraft/issues"
 
 [dependency-groups]
+sim = [
+    "mujoco>=3.2",
+]
 dev = [
     "basedpyright>=1.39.9",
     "pyyaml>=6.0",

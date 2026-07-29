@@ -23,10 +23,10 @@ from mini_articraft.models.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
 from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
-from mini_articraft.viewer import serve_viewer
+from mini_articraft.viewer import load_viewer_run, serve_viewer
 
 app = typer.Typer(help="Generate articulated objects with mini-articraft.", add_completion=False)
-COMMANDS = {"generate", "replay", "view", "texture"}
+COMMANDS = {"generate", "replay", "view", "simulate", "texture"}
 
 
 @app.command()
@@ -127,6 +127,43 @@ def view(
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
+
+
+@app.command()
+def simulate(
+    run: str = typer.Argument(
+        ..., help="Run id under the output directory, or a path to a run directory."
+    ),
+    output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
+    seconds: float = typer.Option(3.0, "--seconds", help="How long to simulate."),
+) -> None:
+    """Drop a run's latest USDZ on a floor and report whether it behaves.
+
+    OpenUSD validation says the stage is well formed; this says whether the
+    object stands up, stays together, and settles.
+    """
+    from mini_articraft.simulate import SimulationUnavailable, simulate_usdz
+
+    run_dir = _resolve_run_dir(run, output_dir)
+    try:
+        viewer_run = load_viewer_run(run_dir)
+        usdz = viewer_run.files[str(viewer_run.versions[0]["id"])]
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+
+    try:
+        result = simulate_usdz(usdz, run_dir / "result" / "simulation", seconds=seconds)
+    except SimulationUnavailable as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    except ValueError as exc:
+        typer.echo(f"could not simulate {usdz.name}: {exc}", err=True)
+        raise typer.Exit(1) from None
+
+    typer.echo(result.summary())
+    if not result.stood_up:
+        raise typer.Exit(1)
 
 
 @app.command()
