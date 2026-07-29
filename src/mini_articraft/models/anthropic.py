@@ -321,7 +321,9 @@ def _response_tool_calls(content: list[Any]) -> list[dict[str, Any]]:
 
 
 def _record_block(block: Any) -> dict[str, Any]:
-    return block if isinstance(block, dict) else block.model_dump(mode="json")
+    return (
+        dict(block) if isinstance(block, dict) else block.model_dump(mode="json", exclude_none=True)
+    )
 
 
 def _has_thinking(content: list[Any]) -> bool:

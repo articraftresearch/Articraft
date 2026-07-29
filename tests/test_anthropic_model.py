@@ -186,6 +186,16 @@ def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost() -> Non
     ]
 
 
+def test_anthropic_model_records_real_sdk_blocks_without_null_fields() -> None:
+    model, _client = anthropic_model(
+        [SimpleNamespace(content=[anthropic.types.TextBlock(text="done", type="text")])]
+    )
+
+    result = run(model.query([{"role": "user", "content": "build"}]))
+
+    assert result["provider_content"] == [{"type": "text", "text": "done"}]
+
+
 def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
     first_content = [
         {

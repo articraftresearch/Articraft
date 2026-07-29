@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from google.genai import interactions
+from pydantic import TypeAdapter
 
 from mini_articraft.errors import ModelError
 from mini_articraft.models.gemini import GeminiModel, context_window_tokens_for
@@ -281,6 +283,52 @@ def test_gemini_model_preserves_response_steps_for_tool_results() -> None:
             ],
         },
     ]
+    TypeAdapter(interactions.InteractionsInput).validate_python(
+        client.interactions.requests[1]["input"]
+    )
+
+
+def test_gemini_model_marks_tool_errors() -> None:
+    model, client = gemini_model(
+        [
+            function_call_response("write", {"path": "main.py"}, call_id="call_write"),
+            text_response("done"),
+        ]
+    )
+    messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
+    first = run(model.query(messages))
+    messages.extend(
+        [
+            {
+                "role": "assistant",
+                "content": first["text"],
+                "tool_calls": first["tool_calls"],
+                "provider_content": first["provider_content"],
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_write",
+                "output": '{"error": "write failed"}',
+            },
+        ]
+    )
+
+    run(model.query(messages))
+
+    result = client.interactions.requests[1]["input"][-1]
+    assert result["is_error"] is True
+    TypeAdapter(interactions.InteractionsInput).validate_python([result])
+
+
+def test_gemini_model_preserves_unknown_response_steps() -> None:
+    raw = {"type": "future_step", "payload": {"opaque": "value"}}
+    response = text_response("done")
+    response.steps.insert(0, interactions.UnknownStep(raw=raw))
+    model, _client = gemini_model([response])
+
+    result = run(model.query([{"role": "user", "content": "build"}]))
+
+    assert result["provider_content"][0] == raw
 
 
 def test_gemini_summary_request() -> None:

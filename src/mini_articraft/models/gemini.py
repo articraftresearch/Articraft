@@ -164,14 +164,16 @@ def _input_steps(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             name = tool_names.get(call_id)
             if not name:
                 raise ModelError(f"Gemini tool result has unknown call id: {call_id}")
-            steps.append(
-                {
-                    "type": "function_result",
-                    "name": name,
-                    "call_id": call_id,
-                    "result": _function_result_content(message.get("output")),
-                }
-            )
+            output = message.get("output")
+            result = {
+                "type": "function_result",
+                "name": name,
+                "call_id": call_id,
+                "result": _function_result_content(output),
+            }
+            if _function_result_is_error(output):
+                result["is_error"] = True
+            steps.append(result)
         elif message.get("role") == "user":
             steps.append({"type": "user_input", "content": _user_content(message)})
         elif message.get("role") == "assistant":
@@ -264,6 +266,24 @@ def _result_text(output: Any) -> str:
     return json.dumps(output)
 
 
+def _function_result_is_error(output: Any) -> bool:
+    if isinstance(output, list):
+        output = next(
+            (
+                item.get("text")
+                for item in output
+                if isinstance(item, dict) and item.get("type") == "input_text"
+            ),
+            None,
+        )
+    if isinstance(output, str):
+        try:
+            output = json.loads(output)
+        except json.JSONDecodeError:
+            return False
+    return isinstance(output, dict) and "error" in output
+
+
 def _image_content(image_url: str, detail: str) -> dict[str, str] | None:
     header, separator, data = image_url.partition(",")
     if not separator or not header.startswith("data:") or not header.endswith(";base64"):
@@ -280,12 +300,15 @@ def _response_steps(response: Any) -> list[dict[str, Any]]:
     steps = getattr(response, "steps", None)
     if not steps:
         return []
-    return [
-        dict(step)
-        if isinstance(step, dict)
-        else step.model_dump(mode="json", by_alias=True, exclude_none=True)
-        for step in steps
-    ]
+    return [_record_step(step) for step in steps]
+
+
+def _record_step(step: Any) -> dict[str, Any]:
+    if isinstance(step, dict):
+        return dict(step)
+    if getattr(step, "is_unknown", False) and isinstance(getattr(step, "raw", None), dict):
+        return dict(step.raw)
+    return step.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 def _response_text(steps: list[Any]) -> str:
