@@ -152,34 +152,7 @@ class GeminiModel:
         return self._client
 
     def _new_input_steps(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        steps: list[dict[str, Any]] = []
-        for message in messages[self._last_message_count :]:
-            if message.get("type") == "function_call_output":
-                call_id = str(message.get("call_id") or "")
-                steps.append(
-                    {
-                        "type": "function_result",
-                        "name": self._tool_name(call_id, steps),
-                        "call_id": call_id,
-                        "result": _function_result_content(message.get("output")),
-                    }
-                )
-            elif message.get("role") == "user":
-                steps.append(
-                    {
-                        "type": "user_input",
-                        "content": _user_content(message),
-                    }
-                )
-            elif message.get("role") == "assistant":
-                steps.extend(_assistant_steps(message))
-        return steps
-
-    def _tool_name(self, call_id: str, new_steps: list[dict[str, Any]]) -> str:
-        for step in reversed([*self._history, *new_steps]):
-            if _value(step, "type") == "function_call" and _value(step, "id") == call_id:
-                return str(_value(step, "name") or "")
-        raise ModelError(f"Gemini tool result has unknown call id: {call_id}")
+        return _input_steps(messages[self._last_message_count :], self._history)
 
 
 def _instructions(messages: list[dict[str, Any]]) -> str:
@@ -197,9 +170,16 @@ def _message_text(message: dict[str, Any]) -> str:
     return content
 
 
-def _input_steps(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _input_steps(
+    messages: list[dict[str, Any]],
+    history: list[Any] | None = None,
+) -> list[dict[str, Any]]:
     steps: list[dict[str, Any]] = []
-    tool_names: dict[str, str] = {}
+    tool_names = {
+        str(_value(step, "id") or ""): str(_value(step, "name") or "")
+        for step in history or []
+        if _value(step, "type") == "function_call"
+    }
     for message in messages:
         if message.get("type") == "function_call_output":
             call_id = str(message.get("call_id") or "")
@@ -339,26 +319,16 @@ def _image_content(image_url: str, detail: str) -> dict[str, str] | None:
     }
 
 
-def _response_steps(response: Any) -> list[Any]:
+def _response_steps(response: Any) -> list[dict[str, Any]]:
     steps = getattr(response, "steps", None)
     if not steps:
         return []
-    return [_record_value(step) for step in steps]
-
-
-def _record_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: _record_value(child) for key, child in value.items()}
-    if isinstance(value, list):
-        return [_record_value(child) for child in value]
-    model_dump = getattr(value, "model_dump", None)
-    if model_dump is not None:
-        return model_dump(mode="json", by_alias=True, exclude_none=True)
-    if hasattr(value, "__dict__"):
-        return {
-            key: _record_value(child) for key, child in vars(value).items() if child is not None
-        }
-    return value
+    return [
+        dict(step)
+        if isinstance(step, dict)
+        else step.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for step in steps
+    ]
 
 
 def _response_text(steps: list[Any]) -> str:

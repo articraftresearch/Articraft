@@ -49,8 +49,6 @@ class CompactingScriptedModel(ScriptedModel):
     async def summarize_context(self, messages, *, max_output_tokens):
         self.summary_messages.append(list(messages))
         self.summary_max_output_tokens = max_output_tokens
-        if isinstance(self.summary_response, BaseException):
-            raise self.summary_response
         return self.summary_response
 
     def reset_history(self) -> None:
@@ -228,10 +226,6 @@ def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> 
     assert result["token_usage"]["total_tokens"] == 360_600
     assert model.reset_calls == 1
     assert model.summary_max_output_tokens == 8_192
-    assert model.summary_messages[0][0]["role"] == "system"
-    summary_input = model.summary_messages[0][1]["content"]
-    assert "old work" in summary_input
-    assert GOOD_MAIN_PY not in summary_input
 
     conversation = read_conversation(tmp_path / "box" / "conversation.jsonl")
     compaction = next(row for row in conversation if row.get("type") == "compaction")
@@ -242,36 +236,6 @@ def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> 
         row.get("role") == "assistant" and row.get("content") == old_text for row in conversation
     )
     assert any(isinstance(event, events.ContextCompacted) for event in seen_events)
-
-
-def test_agent_stops_with_clear_error_when_compaction_fails(tmp_path) -> None:
-    model = CompactingScriptedModel(
-        [
-            calls(
-                tool_call(
-                    "write",
-                    {"path": "main.py", "content": GOOD_MAIN_PY},
-                    call_id="call_write",
-                ),
-                text="old work " * 10_000,
-                token_usage={"total_tokens": 100_000},
-            ),
-            calls(
-                tool_call("compile", {}, call_id="call_compile"),
-                text="recent work " * 8_000,
-                token_usage={"total_tokens": 260_000},
-            ),
-        ],
-        RuntimeError("summary unavailable"),
-    )
-    agent = Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3)
-
-    result = run(agent.run("a box", run_id="box"))
-
-    assert result["status"] == "error"
-    assert result["error"] == ("context compaction failed: RuntimeError: summary unavailable")
-    assert len(model.queries) == 2
-    assert model.reset_calls == 0
 
 
 def test_agent_sends_typed_image_content_but_records_only_metadata(

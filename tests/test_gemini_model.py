@@ -51,10 +51,10 @@ def text_response(
         status="completed",
         output_text=text,
         steps=[
-            SimpleNamespace(
-                type="model_output",
-                content=[SimpleNamespace(type="text", text=text)],
-            )
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": text}],
+            }
         ],
         usage=SimpleNamespace(
             total_input_tokens=input_tokens,
@@ -76,20 +76,20 @@ def function_call_response(
     steps = []
     if text:
         steps.append(
-            SimpleNamespace(
-                type="model_output",
-                content=[SimpleNamespace(type="text", text=text)],
-            )
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": text}],
+            }
         )
     steps.extend(
         [
-            SimpleNamespace(type="thought", signature="opaque"),
-            SimpleNamespace(
-                type="function_call",
-                id=call_id,
-                name=name,
-                arguments=arguments,
-            ),
+            {"type": "thought", "signature": "opaque"},
+            {
+                "type": "function_call",
+                "id": call_id,
+                "name": name,
+                "arguments": arguments,
+            },
         ]
     )
     return SimpleNamespace(
@@ -109,19 +109,6 @@ def gemini_model(
     kwargs.setdefault("gemini_model", DEFAULT_GEMINI_MODEL)
     client = FakeClient(responses)
     return GeminiModel(Settings(**kwargs), client=client), client
-
-
-def dump(value: Any) -> Any:
-    if isinstance(value, list):
-        return [dump(item) for item in value]
-    if isinstance(value, dict):
-        return {key: dump(item) for key, item in value.items()}
-    if isinstance(value, SimpleNamespace):
-        return {key: dump(item) for key, item in vars(value).items() if item is not None}
-    model_dump = getattr(value, "model_dump", None)
-    if model_dump is not None:
-        return model_dump(mode="json", exclude_none=True)
-    return value
 
 
 def test_gemini_model_sends_messages_tools_and_returns_usage() -> None:
@@ -261,7 +248,7 @@ def test_gemini_model_preserves_response_steps_for_tool_results() -> None:
     second = run(model.query(messages, tools=[]))
 
     assert second["text"] == "done"
-    assert dump(client.interactions.requests[1]["input"]) == [
+    assert client.interactions.requests[1]["input"] == [
         {
             "type": "user_input",
             "content": [{"type": "text", "text": "build"}],
@@ -307,7 +294,7 @@ def test_gemini_summary_does_not_mutate_history_and_reset_replays_steps() -> Non
     messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
 
     first = run(model.query(messages, tools=[]))
-    history_before = dump(model._history)
+    history_before = list(model._history)
     count_before = model._last_message_count
     summary = run(
         model.summarize_context(
@@ -320,7 +307,7 @@ def test_gemini_summary_does_not_mutate_history_and_reset_replays_steps() -> Non
     )
 
     assert summary["text"] == "checkpoint"
-    assert dump(model._history) == history_before
+    assert model._history == history_before
     assert model._last_message_count == count_before
     summary_request = client.interactions.requests[1]
     assert summary_request["generation_config"] == {"max_output_tokens": 8_192}

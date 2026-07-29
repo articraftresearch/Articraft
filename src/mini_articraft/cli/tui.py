@@ -192,17 +192,15 @@ class RunRenderer:
                 self._names.setdefault(call_id, name)
                 self._print_tool_result(name, payload, duration=duration)
             case events.ContextCompacted(
-                tokens_before=tokens_before,
-                messages_summarized=messages_summarized,
-                messages_kept=messages_kept,
+                tokens_before=tokens,
+                messages_summarized=summarized,
+                messages_kept=kept,
             ):
                 self._activity = "thinking"
                 self._print(
                     Text(
-                        "  context compacted at "
-                        f"{_format_tokens(tokens_before)} "
-                        f"({messages_summarized} messages summarized, "
-                        f"{messages_kept} kept)",
+                        f"  context compacted at {_format_tokens(tokens)} "
+                        f"({summarized} messages summarized, {kept} kept)",
                         style="dim",
                     )
                 )
@@ -251,14 +249,6 @@ class RunRenderer:
                 )
             case "compiler", _:
                 self._print_compile(str(row.get("status") or ""), str(row.get("error") or ""))
-            case _, "compaction":
-                self._print(
-                    Text(
-                        "  context compacted at "
-                        f"{_format_tokens(int(row.get('tokens_before') or 0))}",
-                        style="dim",
-                    )
-                )
             case _, "function_call_output":
                 call_id = str(row.get("call_id") or "")
                 name = self._names.get(call_id, "tool")

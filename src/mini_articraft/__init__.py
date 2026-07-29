@@ -18,22 +18,9 @@ class Model(Protocol):
     async def close(self) -> None: ...
 
 
-class ContextCompactingModel(Protocol):
-    context_window_tokens: int
-
-    async def summarize_context(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        max_output_tokens: int,
-    ) -> dict[str, Any]: ...
-
-    def reset_history(self) -> None: ...
-
-
 class Environment(Protocol):
     def create_run(self, run_id: str) -> Path: ...
     def compile_path(self, run_dir: Path | str) -> dict[str, Any]: ...
 
 
-__all__ = ["ContextCompactingModel", "Environment", "Model", "__version__", "package_dir"]
+__all__ = ["Environment", "Model", "__version__", "package_dir"]

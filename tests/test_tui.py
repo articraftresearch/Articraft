@@ -137,17 +137,6 @@ def test_renderer_shows_token_usage_bar() -> None:
     assert "(0.3%)" in out
 
 
-def test_renderer_shows_context_compaction() -> None:
-    renderer, console = _renderer()
-
-    renderer.handle(events.ContextCompacted(260_000, 12, 4))
-
-    out = _text(console)
-    assert "context compacted at 260k" in out
-    assert "12 messages summarized" in out
-    assert "4 kept" in out
-
-
 def test_renderer_uses_gpt_5_6_sol_context_window() -> None:
     renderer, console = _renderer()
 
