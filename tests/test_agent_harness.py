@@ -34,6 +34,29 @@ from mini_articraft.environments.local import DEFAULT_MAIN_PY, LocalEnvironment
 from mini_articraft.record import Record, read_conversation
 
 
+class CompactingScriptedModel(ScriptedModel):
+    def __init__(self, responses, summary_response):
+        super().__init__(
+            responses,
+            model_name="claude-test",
+            context_window_tokens=272_000,
+        )
+        self.summary_response = summary_response
+        self.summary_messages = []
+        self.summary_max_output_tokens = 0
+        self.reset_calls = 0
+
+    async def summarize_context(self, messages, *, max_output_tokens):
+        self.summary_messages.append(list(messages))
+        self.summary_max_output_tokens = max_output_tokens
+        if isinstance(self.summary_response, BaseException):
+            raise self.summary_response
+        return self.summary_response
+
+    def reset_history(self) -> None:
+        self.reset_calls += 1
+
+
 def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
     model = ScriptedModel(
         [
@@ -134,6 +157,121 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
         "write_stdin",
         "compile",
     }
+
+
+def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> None:
+    seen_events = []
+    old_text = "old work " * 10_000
+    recent_text = "recent work " * 8_000
+
+    def inspect_compacted_query(query: ModelQuery) -> Response:
+        assert len(query.messages) == 6
+        assert query.messages[3]["compaction"]["summary"] == "CAD checkpoint"
+        assert query.messages[4]["content"] == recent_text
+        assert query.messages[5]["type"] == "function_call_output"
+        return text(
+            "done",
+            cost=0.5,
+            token_usage={"input_tokens": 400, "output_tokens": 100, "total_tokens": 500},
+        )
+
+    model = CompactingScriptedModel(
+        [
+            calls(
+                tool_call(
+                    "write",
+                    {"path": "main.py", "content": GOOD_MAIN_PY},
+                    call_id="call_write",
+                ),
+                text=old_text,
+                cost=0.1,
+                token_usage={
+                    "input_tokens": 90_000,
+                    "output_tokens": 10_000,
+                    "total_tokens": 100_000,
+                },
+            ),
+            calls(
+                tool_call("compile", {}, call_id="call_compile"),
+                text=recent_text,
+                cost=0.2,
+                token_usage={
+                    "input_tokens": 250_000,
+                    "output_tokens": 10_000,
+                    "total_tokens": 260_000,
+                },
+            ),
+            inspect_compacted_query,
+        ],
+        {
+            "text": "CAD checkpoint",
+            "tool_calls": [],
+            "cost": 0.25,
+            "token_usage": {
+                "input_tokens": 80,
+                "output_tokens": 20,
+                "total_tokens": 100,
+            },
+        },
+    )
+    agent = Agent(
+        model,
+        LocalEnvironment(output_dir=tmp_path),
+        max_turns=3,
+        on_event=seen_events.append,
+    )
+
+    result = run(agent.run("a box", run_id="box"))
+
+    assert result["status"] == "success"
+    assert result["cost"] == 1.05
+    assert result["token_usage"]["total_tokens"] == 360_600
+    assert model.reset_calls == 1
+    assert model.summary_max_output_tokens == 8_192
+    assert model.summary_messages[0][0]["role"] == "system"
+    summary_input = model.summary_messages[0][1]["content"]
+    assert "old work" in summary_input
+    assert GOOD_MAIN_PY not in summary_input
+
+    conversation = read_conversation(tmp_path / "box" / "conversation.jsonl")
+    compaction = next(row for row in conversation if row.get("type") == "compaction")
+    assert compaction["summary"] == "CAD checkpoint"
+    assert compaction["messages_summarized"] == 2
+    assert compaction["messages_kept"] == 2
+    assert any(
+        row.get("role") == "assistant" and row.get("content") == old_text for row in conversation
+    )
+    assert any(isinstance(event, events.ContextCompacted) for event in seen_events)
+
+
+def test_agent_stops_with_clear_error_when_compaction_fails(tmp_path) -> None:
+    model = CompactingScriptedModel(
+        [
+            calls(
+                tool_call(
+                    "write",
+                    {"path": "main.py", "content": GOOD_MAIN_PY},
+                    call_id="call_write",
+                ),
+                text="old work " * 10_000,
+                token_usage={"total_tokens": 100_000},
+            ),
+            calls(
+                tool_call("compile", {}, call_id="call_compile"),
+                text="recent work " * 8_000,
+                token_usage={"total_tokens": 260_000},
+            ),
+        ],
+        RuntimeError("summary unavailable"),
+    )
+    agent = Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3)
+
+    result = run(agent.run("a box", run_id="box"))
+
+    assert result["status"] == "error"
+    assert result["error"] == ("context compaction failed: RuntimeError: summary unavailable")
+    assert len(model.queries) == 2
+    assert model.reset_calls == 0
 
 
 def test_agent_sends_typed_image_content_but_records_only_metadata(

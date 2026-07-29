@@ -13,8 +13,14 @@ from typing import Any
 from pydantic import BaseModel
 
 import mini_articraft.agent.tools as tools
-from mini_articraft import Environment, Model, package_dir
+from mini_articraft import ContextCompactingModel, Environment, Model, package_dir
 from mini_articraft.agent import events
+from mini_articraft.agent.compaction import (
+    SUMMARY_MAX_OUTPUT_TOKENS,
+    compacted_messages,
+    compaction_record,
+    prepare_compaction,
+)
 from mini_articraft.agent.images import PreparedImage, prepare_image
 from mini_articraft.agent.tools import ToolContext
 from mini_articraft.record import Record, append_conversation
@@ -132,6 +138,44 @@ class Agent:
         try:
             for turn in range(1, self.config.max_turns + 1):
                 self._emit(events.TurnStarted(turn))
+                compaction_model = _context_compaction_model(self.model)
+                plan = (
+                    prepare_compaction(self.messages, context_window_tokens)
+                    if compaction_model is not None
+                    else None
+                )
+                if plan is not None and compaction_model is not None:
+                    try:
+                        summary_response = await compaction_model.summarize_context(
+                            plan.summary_messages,
+                            max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
+                        )
+                        summary = str(summary_response.get("text") or "").strip()
+                        if not summary:
+                            raise ValueError("summary response did not contain text")
+                    except Exception as exc:
+                        termination_error = (
+                            f"context compaction failed: {type(exc).__name__}: {exc}"
+                        )
+                        break
+
+                    cost += _cost(summary_response)
+                    summary_usage = _token_usage(summary_response)
+                    token_usage = _add_token_usage(token_usage, summary_usage)
+                    _save_cost(run_dir, cost, token_usage)
+                    self.messages = compacted_messages(self.messages, plan, summary)
+                    compaction_model.reset_history()
+                    append_conversation(
+                        conversation_path,
+                        compaction_record(plan, summary, summary_usage),
+                    )
+                    self._emit(
+                        events.ContextCompacted(
+                            plan.tokens_before,
+                            len(plan.messages_to_summarize),
+                            len(plan.recent_messages),
+                        )
+                    )
                 try:
                     response = await self.model.query(self.messages, tools=tools.schemas())
                 except Exception as exc:
@@ -497,6 +541,14 @@ def _token_usage(response: dict[str, Any]) -> dict[str, int]:
 def _add_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
     keys = left.keys() | right.keys()
     return {key: left.get(key, 0) + right.get(key, 0) for key in keys}
+
+
+def _context_compaction_model(model: Model) -> ContextCompactingModel | None:
+    summarize = getattr(model, "summarize_context", None)
+    reset = getattr(model, "reset_history", None)
+    if not callable(summarize) or not callable(reset):
+        return None
+    return model  # type: ignore[return-value]
 
 
 def _read_prompt(name: str) -> str:

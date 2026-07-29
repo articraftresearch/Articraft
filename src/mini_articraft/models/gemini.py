@@ -8,6 +8,8 @@ from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_GEMINI_MODEL, Settings, get_settings
 
 _LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
+# Use the same conservative working budget as Codex instead of the full API window.
+_AGENT_CONTEXT_WINDOW_TOKENS = 272_000
 
 
 @dataclass(frozen=True)
@@ -21,9 +23,9 @@ class _ModelSpec:
 
 # Prices are USD per million tokens for the Gemini Developer API Standard tier.
 _MODELS = {
-    "gemini-3.6-flash": _ModelSpec(1_048_576, 1.50, 0.15, 7.50),
+    "gemini-3.6-flash": _ModelSpec(_AGENT_CONTEXT_WINDOW_TOKENS, 1.50, 0.15, 7.50),
     "gemini-3.1-pro-preview": _ModelSpec(
-        1_048_576,
+        _AGENT_CONTEXT_WINDOW_TOKENS,
         2.00,
         0.20,
         12.00,
@@ -74,15 +76,53 @@ class GeminiModel:
             raise ModelError("Gemini response did not contain text, thoughts, or tool calls")
 
         self._history = [*input_steps, *response_steps]
-        self._last_message_count = len(messages)
+        self._last_message_count = len(messages) + 1
         token_usage = _response_token_usage(response)
         return {
             "text": text,
             "tool_calls": tool_calls,
             "token_usage": token_usage,
             "cost": _response_cost(self.config.gemini_model, token_usage),
+            "provider_content": response_steps,
             "response": response,
         }
+
+    async def summarize_context(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_output_tokens: int,
+    ) -> dict[str, Any]:
+        """Create one summary without changing the active conversation history."""
+        try:
+            response = await self._client_or_create().aio.interactions.create(
+                model=self.config.gemini_model,
+                input=_input_steps(messages),
+                system_instruction=_instructions(messages) or None,
+                tools=None,
+                generation_config={"max_output_tokens": max_output_tokens},
+                store=False,
+            )
+        except Exception as exc:
+            raise ModelError(f"Gemini summary request failed: {_format_exception(exc)}") from exc
+
+        response_steps = _response_steps(response)
+        text = _response_text(response_steps)
+        _raise_for_bad_status(response, [])
+        if not text:
+            raise ModelError("Gemini summary response did not contain text")
+        token_usage = _response_token_usage(response)
+        return {
+            "text": text,
+            "tool_calls": [],
+            "token_usage": token_usage,
+            "cost": _response_cost(self.config.gemini_model, token_usage),
+            "response": response,
+        }
+
+    def reset_history(self) -> None:
+        self._history = []
+        self._last_message_count = 0
 
     async def close(self) -> None:
         client = self._client
@@ -119,7 +159,7 @@ class GeminiModel:
                 steps.append(
                     {
                         "type": "function_result",
-                        "name": self._tool_name(call_id),
+                        "name": self._tool_name(call_id, steps),
                         "call_id": call_id,
                         "result": _function_result_content(message.get("output")),
                     }
@@ -131,10 +171,12 @@ class GeminiModel:
                         "content": _user_content(message),
                     }
                 )
+            elif message.get("role") == "assistant":
+                steps.extend(_assistant_steps(message))
         return steps
 
-    def _tool_name(self, call_id: str) -> str:
-        for step in reversed(self._history):
+    def _tool_name(self, call_id: str, new_steps: list[dict[str, Any]]) -> str:
+        for step in reversed([*self._history, *new_steps]):
             if _value(step, "type") == "function_call" and _value(step, "id") == call_id:
                 return str(_value(step, "name") or "")
         raise ModelError(f"Gemini tool result has unknown call id: {call_id}")
@@ -153,6 +195,62 @@ def _message_text(message: dict[str, Any]) -> str:
     if not isinstance(content, str):
         raise TypeError("GeminiModel messages must use string content")
     return content
+
+
+def _input_steps(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    tool_names: dict[str, str] = {}
+    for message in messages:
+        if message.get("type") == "function_call_output":
+            call_id = str(message.get("call_id") or "")
+            name = tool_names.get(call_id)
+            if not name:
+                raise ModelError(f"Gemini tool result has unknown call id: {call_id}")
+            steps.append(
+                {
+                    "type": "function_result",
+                    "name": name,
+                    "call_id": call_id,
+                    "result": _function_result_content(message.get("output")),
+                }
+            )
+        elif message.get("role") == "user":
+            steps.append({"type": "user_input", "content": _user_content(message)})
+        elif message.get("role") == "assistant":
+            assistant_steps = _assistant_steps(message)
+            steps.extend(assistant_steps)
+            for step in assistant_steps:
+                if step.get("type") == "function_call":
+                    tool_names[str(step.get("id") or "")] = str(step.get("name") or "")
+    return steps
+
+
+def _assistant_steps(message: dict[str, Any]) -> list[dict[str, Any]]:
+    provider_content = message.get("provider_content")
+    if isinstance(provider_content, list):
+        return [dict(step) for step in provider_content if isinstance(step, dict)]
+
+    steps: list[dict[str, Any]] = []
+    text = str(message.get("content") or "")
+    if text:
+        steps.append({"type": "model_output", "content": [{"type": "text", "text": text}]})
+    for call in message.get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        raw_arguments = call.get("arguments") or "{}"
+        try:
+            arguments = json.loads(str(raw_arguments))
+        except json.JSONDecodeError:
+            arguments = {}
+        steps.append(
+            {
+                "type": "function_call",
+                "id": str(call.get("id") or ""),
+                "name": str(call.get("name") or ""),
+                "arguments": arguments if isinstance(arguments, dict) else {},
+            }
+        )
+    return steps
 
 
 def _user_content(message: dict[str, Any]) -> list[dict[str, str]]:
@@ -245,12 +343,22 @@ def _response_steps(response: Any) -> list[Any]:
     steps = getattr(response, "steps", None)
     if not steps:
         return []
-    return [
-        step.model_dump(mode="json", by_alias=True, exclude_none=True)
-        if hasattr(step, "model_dump")
-        else step
-        for step in steps
-    ]
+    return [_record_value(step) for step in steps]
+
+
+def _record_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _record_value(child) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_record_value(child) for child in value]
+    model_dump = getattr(value, "model_dump", None)
+    if model_dump is not None:
+        return model_dump(mode="json", by_alias=True, exclude_none=True)
+    if hasattr(value, "__dict__"):
+        return {
+            key: _record_value(child) for key, child in vars(value).items() if child is not None
+        }
+    return value
 
 
 def _response_text(steps: list[Any]) -> str:

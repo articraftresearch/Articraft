@@ -291,6 +291,77 @@ def test_gemini_model_preserves_response_steps_for_tool_results() -> None:
     ]
 
 
+def test_gemini_summary_does_not_mutate_history_and_reset_replays_steps() -> None:
+    model, client = gemini_model(
+        [
+            function_call_response(
+                "read",
+                {"path": "main.py"},
+                call_id="call_read",
+                text="I will read the file.",
+            ),
+            text_response("checkpoint", input_tokens=100, output_tokens=20),
+            text_response("done"),
+        ]
+    )
+    messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
+
+    first = run(model.query(messages, tools=[]))
+    history_before = dump(model._history)
+    count_before = model._last_message_count
+    summary = run(
+        model.summarize_context(
+            [
+                {"role": "system", "content": "summarize"},
+                {"role": "user", "content": "old work"},
+            ],
+            max_output_tokens=8_192,
+        )
+    )
+
+    assert summary["text"] == "checkpoint"
+    assert dump(model._history) == history_before
+    assert model._last_message_count == count_before
+    summary_request = client.interactions.requests[1]
+    assert summary_request["generation_config"] == {"max_output_tokens": 8_192}
+    assert summary_request["system_instruction"] == "summarize"
+    assert summary_request["tools"] is None
+
+    messages.extend(
+        [
+            {
+                "role": "assistant",
+                "content": first["text"],
+                "tool_calls": first["tool_calls"],
+                "provider_content": first["provider_content"],
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_read",
+                "output": '{"result": "file contents"}',
+            },
+        ]
+    )
+    model.reset_history()
+    run(model.query(messages, tools=[]))
+
+    replayed = client.interactions.requests[2]["input"]
+    assert replayed[0] == {
+        "type": "user_input",
+        "content": [{"type": "text", "text": "build"}],
+    }
+    assert replayed[1]["type"] == "model_output"
+    assert replayed[2] == {"type": "thought", "signature": "opaque"}
+    assert replayed[3] == {
+        "type": "function_call",
+        "id": "call_read",
+        "name": "read",
+        "arguments": {"path": "main.py"},
+    }
+    assert replayed[4]["type"] == "function_result"
+    assert replayed[4]["name"] == "read"
+
+
 def test_gemini_model_converts_image_tool_results() -> None:
     model, client = gemini_model(
         [
@@ -365,8 +436,13 @@ def test_gemini_model_rejects_unsupported_models() -> None:
             )
         )
 
-    assert context_window_tokens_for("gemini-3.6-flash") == 1_048_576
-    assert context_window_tokens_for("gemini-3.1-pro-preview") == 1_048_576
+
+def test_gemini_model_exposes_conservative_context_window() -> None:
+    model, _client = gemini_model([text_response("done")])
+
+    assert model.context_window_tokens == 272_000
+    assert context_window_tokens_for("gemini-3.6-flash") == 272_000
+    assert context_window_tokens_for("gemini-3.1-pro-preview") == 272_000
     assert context_window_tokens_for("gemini-3.5-flash") is None
 
 
