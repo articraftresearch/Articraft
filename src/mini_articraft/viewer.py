@@ -73,6 +73,7 @@ def _read_version(path: Path) -> dict[str, object]:
             "name": _attribute(part, "name", part.GetName()),
             "usd_name": part.GetName(),
             "shapes": _read_shapes(part),
+            "mass": _read_mass(part),
         }
         for part in object_prim.GetChild("parts").GetChildren()
     ]
@@ -120,6 +121,25 @@ def _read_shapes(part: Usd.Prim) -> list[dict[str, object]]:
         {"usd_name": shape.GetName(), "material": _read_material(shape)}
         for shape in shapes_scope.GetChildren()
     ]
+
+
+def _read_mass(part: Usd.Prim) -> dict[str, object] | None:
+    """The part's exported mass, for the viewer's parts panel.
+
+    UsdPhysics attributes are standard, so they are read directly rather than
+    through the mini_articraft namespace.
+    """
+
+    mass = part.GetAttribute("physics:mass")
+    kilograms = mass.Get() if mass else None
+    if kilograms is None:
+        return None
+    center = part.GetAttribute("physics:centerOfMass")
+    position = center.Get() if center else None
+    return {
+        "kilograms": float(kilograms),
+        "center_of_mass": [float(value) for value in (position or (0.0, 0.0, 0.0))],
+    }
 
 
 def _read_material(shape: Usd.Prim) -> dict[str, object] | None:
