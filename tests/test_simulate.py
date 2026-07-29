@@ -108,3 +108,59 @@ def test_contact_friction_reaches_the_geom(tmp_path: Path) -> None:
     assert geom is not None
     friction = float(str(geom.get("friction")).split()[0])
     assert friction == pytest.approx(Material.RUBBER.dynamic_friction or 0.0, abs=1e-3)
+
+
+def test_material_friction_reaches_the_contact_not_the_floors(tmp_path: Path) -> None:
+    """MuJoCo combines friction with max, so a floor with any of its own masks ours."""
+    import mujoco
+
+    model = ArticulatedObject("block")
+    model.part("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube", material=Material.STEEL)
+
+    path = write_mjcf(_export(model, tmp_path), tmp_path / "sim")
+    compiled = mujoco.MjModel.from_xml_path(str(path))
+    data = mujoco.MjData(compiled)
+    for _ in range(200):
+        mujoco.mj_step(compiled, data)
+
+    assert data.ncon
+    assert data.contact.friction[0][0] == pytest.approx(Material.STEEL.dynamic_friction, abs=1e-3)
+
+
+def test_tilting_measures_the_friction_that_was_authored(tmp_path: Path) -> None:
+    """A grippier material has to hold to a steeper angle than a slippery one."""
+    angles = {}
+    for material in (Material.RUBBER, Material.STEEL):
+        model = ArticulatedObject("block")
+        model.part("body").add(BoxGeometry((0.12, 0.12, 0.06)), name="block", material=material)
+        result = simulate_usdz(
+            _export(model, tmp_path / material.name),
+            tmp_path / material.name / "sim",
+            seconds=6.0,
+            scenario="tilt",
+        )
+        assert result.slip_angle is not None, result.summary()
+        angles[material.name] = result.slip_angle
+
+    assert angles["rubber"] > angles["steel"]
+
+
+def test_a_tilt_run_stops_once_it_slips(tmp_path: Path) -> None:
+    """Tilting past the slip angle topples the object and tells us nothing more."""
+    model = ArticulatedObject("block")
+    model.part("body").add(BoxGeometry((0.12, 0.12, 0.06)), name="block", material=Material.STEEL)
+
+    result = simulate_usdz(
+        _export(model, tmp_path), tmp_path / "sim", seconds=20.0, scenario="tilt"
+    )
+
+    assert result.slip_angle is not None
+    assert result.slip_angle < 50.0
+    # It is still whole and not flying: the run ended at the answer.
+    assert result.residual_velocity < 5.0
+    assert result.parts_stayed_together
+
+
+def test_an_unknown_scenario_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown scenario"):
+        simulate_usdz(_export(_hinged_box(), tmp_path), tmp_path / "sim", scenario="wobble")

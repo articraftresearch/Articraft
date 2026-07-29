@@ -114,7 +114,10 @@ def test_viewer_page_exposes_only_the_minimal_view_options() -> None:
 
     assert 'id="part-colors"' in page
     assert 'id="preview-motion"' in page
-    assert page.count('role="switch"') == 2
+    # Only shown once a run has been simulated; the option list stays enumerated
+    # here so it cannot creep.
+    assert 'id="play-simulation"' in page
+    assert page.count('role="switch"') == 3
     assert "contrastingPalette(version.model.parts.length)" in page
     assert "index%palette.length" not in page
 

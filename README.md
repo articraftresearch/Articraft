@@ -89,9 +89,21 @@ uv run mini-articraft simulate runs/<run-id>
   verdict: stands up
 ```
 
-It reports whether the object fell through the floor, whether its parts stayed
-together, and whether it settled. MuJoCo is optional, so the `sim` group is not
-installed by default.
+Tilt the floor until it slides, which measures the friction its materials
+declared instead of taking it on faith:
+
+```shell
+uv run mini-articraft simulate runs/<run-id> --scenario tilt --seconds 8
+```
+
+```
+  slipped at: 42.3 deg of tilt
+  friction: measured 0.91, authored 0.85
+```
+
+Every run records its motion, so `mini-articraft view` gains a **Play
+simulation** switch that replays it in the same viewer used to pose joints.
+MuJoCo is optional, so the `sim` group is not installed by default.
 
 ### Run the checks
 

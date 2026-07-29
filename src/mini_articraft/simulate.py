@@ -44,9 +44,41 @@ _Mesh = UsdGeom.Mesh  # pyright: ignore[reportAttributeAccessIssue]
 DROP_HEIGHT = 0.02
 """Metres above the floor to release the object, so contact is exercised."""
 
+TILT_RATE = 12.0
+"""Degrees per second the floor tilts in the ``tilt`` scenario."""
+
+SLIP_DISTANCE = 0.02
+"""Lateral metres that counts as sliding rather than settling."""
+
+MAX_TILT = 50.0
+"""Degrees to stop tilting at. Past this an object topples rather than slides."""
+
 
 class SimulationUnavailable(RuntimeError):
     """MuJoCo is not installed."""
+
+
+@dataclass(frozen=True)
+class Trajectory:
+    """The simulated motion, in the terms the viewer already understands.
+
+    The viewer poses an object by moving joints, so a recording is the joint
+    values over time. It pins the root at the origin, which simulation does not,
+    so the root's pose travels alongside.
+    """
+
+    fps: float
+    root: str
+    joint_names: tuple[str, ...]
+    frames: tuple[dict[str, Any], ...]
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "fps": self.fps,
+            "root": self.root,
+            "joints": list(self.joint_names),
+            "frames": list(self.frames),
+        }
 
 
 @dataclass(frozen=True)
@@ -62,6 +94,14 @@ class SimulationResult:
     largest_separation_change: float
     residual_velocity: float
     diverged: bool = False
+    trajectory: Trajectory | None = None
+    scenario: str = "drop"
+    slip_angle: float | None = None
+    """Degrees of tilt at which the object started sliding, in the tilt scenario."""
+    measured_friction: float | None = None
+    """The coefficient implied by that slip angle: tan(slip)."""
+    expected_friction: float | None = None
+    """The lowest friction authored on a shape that touches the floor."""
 
     @property
     def fell_through_floor(self) -> bool:
@@ -73,22 +113,38 @@ class SimulationResult:
 
     @property
     def stood_up(self) -> bool:
-        return (
-            not self.diverged
-            and not self.fell_through_floor
-            and self.parts_stayed_together
-            and self.deepest_penetration > -0.01
-        )
+        """Whether the object behaved. A tilt run is judged on staying whole."""
+
+        if self.diverged or not self.parts_stayed_together:
+            return False
+        if self.scenario == "tilt":
+            return True
+        return self.fell_through_floor is False and self.deepest_penetration > -0.01
 
     def summary(self) -> str:
         lines = [
             f"{len(self.bodies)} bodies, {self.total_mass:.3f} kg total",
-            f"  heights: {self.start_heights[0]:+.4f} -> {self.end_heights[0]:+.4f} m (lowest body)",
+            f"  heights: {self.start_heights[0]:+.4f} -> {self.end_heights[0]:+.4f} m (lowest body)"
+            if self.scenario == "drop"
+            else "  settled, then tilted until it moved",
             f"  contacts at rest: {self.contacts}",
             f"  deepest penetration: {self.deepest_penetration * 1000:+.2f} mm",
             f"  largest part separation change: {self.largest_separation_change * 1000:+.2f} mm",
             f"  residual velocity: {self.residual_velocity:.4f}",
         ]
+        if self.scenario == "tilt":
+            if self.slip_angle is None:
+                lines.append("  never slipped: it held to the end of the tilt")
+            else:
+                lines.append(f"  slipped at: {self.slip_angle:.1f} deg of tilt")
+                lines.append(
+                    f"  friction: measured {self.measured_friction:.2f}"
+                    + (
+                        f", authored {self.expected_friction:.2f}"
+                        if self.expected_friction is not None
+                        else ""
+                    )
+                )
         if self.diverged:
             lines.append("  DIVERGED: the solver produced non-finite state")
         lines.append(f"  verdict: {'stands up' if self.stood_up else 'FAILED'}")
@@ -122,8 +178,25 @@ class _Scene:
         return roots[0]
 
 
-def simulate_usdz(usdz: Path, work_dir: Path, *, seconds: float = 3.0) -> SimulationResult:
-    """Drop an exported USDZ on a floor and report what happened."""
+def simulate_usdz(
+    usdz: Path,
+    work_dir: Path,
+    *,
+    seconds: float = 3.0,
+    fps: float = 30.0,
+    scenario: str = "drop",
+) -> SimulationResult:
+    """Run an exported USDZ on a floor and report what happened.
+
+    ``drop`` releases it just above the floor and watches it settle. ``tilt``
+    settles it first, then tips the floor until it slides, which measures the
+    friction the materials authored instead of taking it on faith.
+
+    The motion is recorded at ``fps`` so the viewer can play it back.
+    """
+
+    if scenario not in {"drop", "tilt"}:
+        raise ValueError(f"unknown scenario {scenario!r}; expected 'drop' or 'tilt'")
 
     try:
         import mujoco
@@ -148,15 +221,62 @@ def simulate_usdz(usdz: Path, work_dir: Path, *, seconds: float = 3.0) -> Simula
         for b in range(a + 1, model.nbody)
     }
 
+    root_body = 1  # the free body; MuJoCo orders bodies from the world outward
+    movable = [
+        index
+        for index in range(model.njnt)
+        if model.jnt_type[index] in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE)
+    ]
+    joint_names = tuple(
+        str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, index)) for index in movable
+    )
+
+    def frame(time: float) -> dict[str, Any]:
+        return {
+            "t": round(time, 4),
+            # MuJoCo quaternions are (w, x, y, z).
+            "root": {
+                "pos": [round(float(value), 6) for value in data.xpos[root_body]],
+                "quat": [round(float(value), 6) for value in data.xquat[root_body]],
+            },
+            "joints": [round(float(data.qpos[model.jnt_qposadr[index]]), 6) for index in movable],
+        }
+
     deepest = 0.0
     diverged = False
-    for _ in range(int(seconds / model.opt.timestep)):
+    frames = [frame(0.0)]
+    every = max(1, round(1.0 / (fps * model.opt.timestep)))
+    gravity = float(np.linalg.norm(model.opt.gravity))
+    settle_steps = int(1.0 / model.opt.timestep) if scenario == "tilt" else 0
+    slip_angle: float | None = None
+    resting = None
+    touching: float | None = None
+
+    for step in range(int(seconds / model.opt.timestep)):
+        if scenario == "tilt" and slip_angle is not None:
+            break  # the question is answered; tilting further only topples it
+        if scenario == "tilt" and step >= settle_steps:
+            # Tipping gravity is equivalent to tipping the floor, and leaves the
+            # contact geometry untouched.
+            degrees = min(MAX_TILT, TILT_RATE * (step - settle_steps) * model.opt.timestep)
+            angle = math.radians(degrees)
+            model.opt.gravity[:] = (gravity * math.sin(angle), 0.0, -gravity * math.cos(angle))
+            if resting is None:
+                resting = data.xpos[root_body].copy()
+                touching = _floor_friction(model, data)
+            elif slip_angle is None:
+                travelled = float(np.linalg.norm((data.xpos[root_body] - resting)[:2]))
+                if travelled > SLIP_DISTANCE:
+                    slip_angle = degrees
+
         mujoco.mj_step(model, data)
         if data.ncon:
             deepest = min(deepest, float(data.contact.dist[: data.ncon].min()))
         if not np.all(np.isfinite(data.qpos)):
             diverged = True
             break
+        if (step + 1) % every == 0:
+            frames.append(frame((step + 1) * model.opt.timestep))
 
     end = data.xpos[1:].copy()
     drift = max(
@@ -176,7 +296,40 @@ def simulate_usdz(usdz: Path, work_dir: Path, *, seconds: float = 3.0) -> Simula
         largest_separation_change=drift,
         residual_velocity=float(np.abs(data.qvel).max()) if model.nv else 0.0,
         diverged=diverged,
+        scenario=scenario,
+        slip_angle=slip_angle,
+        measured_friction=None if slip_angle is None else math.tan(math.radians(slip_angle)),
+        expected_friction=touching if scenario == "tilt" else _lowest_friction(model),
+        trajectory=Trajectory(
+            fps=fps,
+            root=str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, root_body)),
+            joint_names=joint_names,
+            frames=tuple(frames),
+        ),
     )
+
+
+def _floor_friction(model: Any, data: Any) -> float | None:
+    """Friction of the geoms actually resting on the floor.
+
+    A crate on rubber feet slides on rubber, whatever its body is made of, so the
+    object's minimum friction is the wrong thing to compare a slip angle against.
+    """
+
+    values = [
+        float(model.geom_friction[geom][0])
+        for index in range(data.ncon)
+        for geom in (data.contact.geom1[index], data.contact.geom2[index])
+        if geom != 0  # geom 0 is the floor
+    ]
+    return min(values) if values else None
+
+
+def _lowest_friction(model: Any) -> float | None:
+    """The least friction among the object's geoms: what slides first."""
+
+    frictions = [float(model.geom_friction[index][0]) for index in range(1, model.ngeom)]
+    return min(frictions) if frictions else None
 
 
 def write_mjcf(usdz: Path, out_dir: Path) -> Path:
@@ -198,6 +351,9 @@ def write_mjcf(usdz: Path, out_dir: Path) -> Path:
     ET.SubElement(mujoco_el, "option", timestep="0.002", integrator="implicitfast")
     asset = ET.SubElement(mujoco_el, "asset")
     world = ET.SubElement(mujoco_el, "worldbody")
+    # MuJoCo takes the elementwise MAX of the two geoms' friction, so a floor with
+    # any friction of its own would mask the material's. Zero here means the
+    # contact uses exactly what the shape's material authored.
     ET.SubElement(
         world,
         "geom",
@@ -205,7 +361,7 @@ def write_mjcf(usdz: Path, out_dir: Path) -> Path:
         type="plane",
         size="5 5 0.1",
         pos="0 0 0",
-        friction="1 0.005 0.0001",
+        friction="0 0.005 0.0001",
     )
 
     _add_body(world, asset, scene, root, np.linalg.inv(lift), stage, out_dir)
