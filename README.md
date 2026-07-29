@@ -81,7 +81,7 @@ uv run mini-articraft simulate runs/<run-id>
 
 ```
 2 bodies, 29.306 kg total
-  heights: +0.0370 -> +0.0169 m (lowest body)
+  lowest body: +0.0370 -> +0.0169 m
   contacts at rest: 8
   deepest penetration: -4.15 mm
   largest part separation change: +0.00 mm

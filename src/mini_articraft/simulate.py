@@ -87,8 +87,8 @@ class SimulationResult:
 
     bodies: tuple[str, ...]
     total_mass: float
-    start_heights: tuple[float, float]
-    end_heights: tuple[float, float]
+    start_height: float
+    end_height: float
     contacts: int
     deepest_penetration: float
     largest_separation_change: float
@@ -105,7 +105,7 @@ class SimulationResult:
 
     @property
     def fell_through_floor(self) -> bool:
-        return self.end_heights[0] < -0.05
+        return self.end_height < -0.05
 
     @property
     def parts_stayed_together(self) -> bool:
@@ -124,7 +124,7 @@ class SimulationResult:
     def summary(self) -> str:
         lines = [
             f"{len(self.bodies)} bodies, {self.total_mass:.3f} kg total",
-            f"  heights: {self.start_heights[0]:+.4f} -> {self.end_heights[0]:+.4f} m (lowest body)"
+            f"  lowest body: {self.start_height:+.4f} -> {self.end_height:+.4f} m"
             if self.scenario == "drop"
             else "  settled, then tilted until it moved",
             f"  contacts at rest: {self.contacts}",
@@ -289,8 +289,8 @@ def simulate_usdz(
     return SimulationResult(
         bodies=names,
         total_mass=float(sum(model.body_mass)),
-        start_heights=(float(start[:, 2].min()), float(start[:, 2].max())),
-        end_heights=(float(end[:, 2].min()), float(end[:, 2].max())),
+        start_height=float(start[:, 2].min()),
+        end_height=float(end[:, 2].min()),
         contacts=int(data.ncon),
         deepest_penetration=deepest,
         largest_separation_change=drift,
@@ -299,7 +299,7 @@ def simulate_usdz(
         scenario=scenario,
         slip_angle=slip_angle,
         measured_friction=None if slip_angle is None else math.tan(math.radians(slip_angle)),
-        expected_friction=touching if scenario == "tilt" else _lowest_friction(model),
+        expected_friction=touching,
         trajectory=Trajectory(
             fps=fps,
             root=str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, root_body)),
@@ -323,13 +323,6 @@ def _floor_friction(model: Any, data: Any) -> float | None:
         if geom != 0  # geom 0 is the floor
     ]
     return min(values) if values else None
-
-
-def _lowest_friction(model: Any) -> float | None:
-    """The least friction among the object's geoms: what slides first."""
-
-    frictions = [float(model.geom_friction[index][0]) for index in range(1, model.ngeom)]
-    return min(frictions) if frictions else None
 
 
 def write_mjcf(usdz: Path, out_dir: Path) -> Path:
