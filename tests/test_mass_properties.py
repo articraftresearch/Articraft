@@ -222,3 +222,19 @@ def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -
 
     assert statuses[False] == "success"
     assert statuses[True] == "error"
+
+
+def test_viewer_receives_the_mass_it_displays(tmp_path) -> None:
+    """The parts panel has shown mass since it was added, and was never given any."""
+    from mini_articraft.viewer import _read_version
+
+    model = ArticulatedObject("weighed")
+    part = model.part("body", mass_properties=MassProperties(material=MaterialDensity.STEEL))
+    part.add(BoxGeometry((0.1, 0.1, 0.1)), name="shell")
+
+    result = export_object(model, tmp_path)
+    mass = _read_version(result.usdz)["model"]["parts"][0]["mass"]  # pyright: ignore[reportIndexIssue]
+
+    assert mass is not None
+    assert mass["kilograms"] == pytest.approx(0.1**3 * 7850.0, rel=1e-3)
+    assert len(mass["center_of_mass"]) == 3
