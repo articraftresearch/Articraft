@@ -6,12 +6,12 @@ from mini_articraft.agent.tools._core import Tool, ToolContext, display_path, sc
 
 
 async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    path = workspace_path(context.workspace_dir, str(args["path"]))
+    path = workspace_path(context.workspace, str(args["path"]))
     content = str(args["content"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return {
-        "path": display_path(context.workspace_dir, path),
+        "path": display_path(context.workspace, path),
         "bytes": len(content.encode("utf-8")),
     }
 

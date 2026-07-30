@@ -15,12 +15,12 @@ async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         context.consecutive_compile_failures = 0
         return _compact_result(context.successful_compile_result)
 
-    result = await asyncio.to_thread(context.workspace.compile_path, context.run_dir)
+    result = await asyncio.to_thread(context.compiler.compile_path, context.run_dir)
     internal_result = _internal_result(context, result)
     context.compile_result = internal_result
     if result["status"] == "success":
         context.successful_compile_result = internal_result
-        context.successful_compile_digest = workspace_digest(context.workspace_dir)
+        context.successful_compile_digest = workspace_digest(context.workspace)
     return _compact_result(internal_result)
 
 

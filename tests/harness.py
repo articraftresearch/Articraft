@@ -940,7 +940,7 @@ def compile_success_tool() -> Tool:
         result = {"status": "success", "usdz": str(usdz)}
         context.compile_result = result
         context.successful_compile_result = result
-        context.successful_compile_digest = workspace_digest(context.workspace_dir)
+        context.successful_compile_digest = workspace_digest(context.workspace)
         return result
 
     return Tool("compile", stub_schema("compile"), run_compile)

@@ -277,7 +277,7 @@ def test_agent_sends_typed_image_content_but_records_only_metadata(
         )
 
     async def run_write(context, args):
-        context.workspace_dir.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
+        context.workspace.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
         return {"path": args["path"], "bytes": len(args["content"])}
 
     def inspect_image(query: ModelQuery) -> Response:
@@ -426,7 +426,7 @@ def test_agent_keeps_compile_fresh_after_read(
     tmp_path,
 ) -> None:
     async def run_write(context, args):
-        context.workspace_dir.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
+        context.workspace.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
         return {"path": args["path"], "bytes": len(args["content"])}
 
     async def run_read(context, args):
@@ -611,7 +611,7 @@ def test_agent_does_not_finalize_success_without_a_usdz_result(monkeypatch, tmp_
         result = {"status": "success"}
         context.compile_result = result
         context.successful_compile_result = result
-        context.successful_compile_digest = workspace_digest(context.workspace_dir)
+        context.successful_compile_digest = workspace_digest(context.workspace)
         return result
 
     monkeypatch.setattr(
@@ -648,7 +648,7 @@ def test_cached_success_survives_a_later_failed_compile(monkeypatch, tmp_path) -
             result = {"status": "success", "usdz": str(usdz)}
             context.compile_result = result
             context.successful_compile_result = result
-            context.successful_compile_digest = workspace_digest(context.workspace_dir)
+            context.successful_compile_digest = workspace_digest(context.workspace)
             return result
         result = {"status": "error", "error": "bad geometry"}
         context.compile_result = result
