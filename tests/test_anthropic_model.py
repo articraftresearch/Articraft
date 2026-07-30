@@ -8,14 +8,14 @@ from typing import Any
 import anthropic
 import pytest
 
-from mini_articraft.errors import ModelError
-from mini_articraft.models.anthropic import (
+from mini_articraft.agent.provider.anthropic import (
     AnthropicModel,
     _response_cost,
     _response_token_usage,
     anthropic_api_key_value,
     context_window_tokens_for,
 )
+from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_ANTHROPIC_MODEL, Settings, get_settings
 
 

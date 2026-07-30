@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-import mini_articraft.environments.worker as worker
+import mini_articraft.compiler.worker as worker
 from mini_articraft.record import Record
 from mini_articraft.sdk import ArticulatedObject, BoxGeometry
 from mini_articraft.sdk.export import TextureExportReport, export_object

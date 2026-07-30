@@ -17,8 +17,8 @@ from mini_articraft.agent.images import LIMITS, prepare_image
 from mini_articraft.agent.tools import ToolContext, get, schemas
 from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.tools._exec import ExecSessions
-from mini_articraft.compile_feedback import build_compile_report_from_payload
-from mini_articraft.environments.local import LocalEnvironment
+from mini_articraft.compiler.feedback import build_compile_report_from_payload
+from mini_articraft.compiler.runner import LocalEnvironment
 
 
 def run(awaitable):

@@ -10,10 +10,10 @@ import pytest
 from harness import GOOD_MAIN_PY
 
 from mini_articraft.agent import Agent
-from mini_articraft.environments import LocalEnvironment
+from mini_articraft.agent.provider import create_model
+from mini_articraft.agent.provider.openrouter import OpenRouterModel
+from mini_articraft.compiler import LocalEnvironment
 from mini_articraft.errors import ModelError
-from mini_articraft.models import create_model
-from mini_articraft.models.openrouter import OpenRouterModel
 from mini_articraft.settings import DEFAULT_OPENROUTER_MODEL, Settings, get_settings
 
 
@@ -419,7 +419,7 @@ def test_openrouter_model_retries_rate_limit_and_honors_retry_after(monkeypatch)
     async def sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("mini_articraft.models.openrouter.asyncio.sleep", sleep)
+    monkeypatch.setattr("mini_articraft.agent.provider.openrouter.asyncio.sleep", sleep)
     rate_limit = httpx.Response(
         429,
         headers={"Retry-After": "2"},
@@ -438,7 +438,7 @@ def test_openrouter_model_wraps_transport_error_after_retry(monkeypatch) -> None
     async def sleep(_delay: float) -> None:
         pass
 
-    monkeypatch.setattr("mini_articraft.models.openrouter.asyncio.sleep", sleep)
+    monkeypatch.setattr("mini_articraft.agent.provider.openrouter.asyncio.sleep", sleep)
     request = httpx.Request("POST", "https://openrouter.ai")
     model, _, requests = model_with_responses(
         [
@@ -479,7 +479,7 @@ def test_openrouter_model_retries_embedded_provider_error(monkeypatch) -> None:
     async def sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("mini_articraft.models.openrouter.asyncio.sleep", sleep)
+    monkeypatch.setattr("mini_articraft.agent.provider.openrouter.asyncio.sleep", sleep)
     payload = {
         "choices": [
             {

@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from mini_articraft import Model
-from mini_articraft.models.anthropic import AnthropicModel
-from mini_articraft.models.anthropic import (
+from mini_articraft.agent.provider.anthropic import AnthropicModel
+from mini_articraft.agent.provider.anthropic import (
     context_window_tokens_for as anthropic_context_window_tokens_for,
 )
-from mini_articraft.models.gemini import GeminiModel
-from mini_articraft.models.gemini import (
+from mini_articraft.agent.provider.gemini import GeminiModel
+from mini_articraft.agent.provider.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
-from mini_articraft.models.openai import OpenAIModel
-from mini_articraft.models.openai import (
+from mini_articraft.agent.provider.openai import OpenAIModel
+from mini_articraft.agent.provider.openai import (
     context_window_tokens_for as openai_context_window_tokens_for,
 )
-from mini_articraft.models.openrouter import OpenRouterModel
+from mini_articraft.agent.provider.openrouter import OpenRouterModel
 from mini_articraft.settings import Settings
 
 

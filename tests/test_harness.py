@@ -33,7 +33,7 @@ from harness import (
 
 from mini_articraft.agent.events import TurnStarted
 from mini_articraft.agent.tools import ToolContext
-from mini_articraft.environments.local import LocalEnvironment
+from mini_articraft.compiler.runner import LocalEnvironment
 from mini_articraft.record import Record
 
 

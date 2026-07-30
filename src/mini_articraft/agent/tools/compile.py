@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from mini_articraft.agent.tools._core import Tool, ToolContext, schema, workspace_digest
-from mini_articraft.compile_feedback import compile_failure_signature, render_compile_report
+from mini_articraft.compiler.feedback import compile_failure_signature, render_compile_report
 
 
 async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:

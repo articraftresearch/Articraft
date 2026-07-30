@@ -10,13 +10,13 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import mini_articraft.environments.local as local_module
-from mini_articraft.environments.local import (
+import mini_articraft.compiler.runner as local_module
+from mini_articraft.compiler.runner import (
     DEFAULT_MAIN_PY,
     LocalEnvironment,
     _run_isolated_process,
 )
-from mini_articraft.environments.worker import _merge_test_reports, _serialize_test_report
+from mini_articraft.compiler.worker import _merge_test_reports, _serialize_test_report
 from mini_articraft.record import Record, read_conversation
 from mini_articraft.sdk import TestFailure, TestReport
 

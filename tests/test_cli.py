@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 from typer.testing import CliRunner
 
 from mini_articraft.cli import mini
-from mini_articraft.environments.worker import TextureRunResult
+from mini_articraft.compiler.worker import TextureRunResult
 from mini_articraft.record import Record, append_conversation
 from mini_articraft.settings import Settings, get_settings
 
