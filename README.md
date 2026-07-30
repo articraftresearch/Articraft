@@ -117,6 +117,11 @@ Every run records its motion, so `mini-articraft view` gains a **Play
 simulation** switch that replays it in the same viewer used to pose joints.
 MuJoCo is optional, so the `sim` group is not installed by default.
 
+A passing run covers geometry, mass, joints, and sliding friction. It does not
+cover restitution: MuJoCo has no such parameter, and static friction has nowhere
+to go in its single sliding coefficient. Those values still export for engines
+that read them.
+
 ### Run the checks
 
 ```shell

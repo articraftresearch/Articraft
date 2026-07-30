@@ -10,6 +10,15 @@ translation is the part most likely to be wrong, so it is deliberately literal:
 every value comes from the schema we authored, and units are converted in exactly
 one place.
 
+What this does **not** cover. A material authors static friction, dynamic
+friction, and restitution; only dynamic friction reaches the simulation. MuJoCo
+carries a single sliding coefficient, so static friction has nowhere to go, and
+it has no restitution parameter at all -- bounce comes from contact stiffness
+(``solref``), which is not the same quantity. So a passing run says the geometry,
+mass, joints, and sliding friction behave. It says nothing about how the object
+would bounce, and slip onset is measured against the dynamic coefficient rather
+than the static one that governs it.
+
 MuJoCo is an optional dependency. Install it with ``uv sync --group sim``.
 """
 
