@@ -25,8 +25,8 @@ TOOLS: dict[str, Tool[Any]] = {
 }
 
 
-def schemas() -> list[dict[str, Any]]:
-    return [tool.schema for tool in TOOLS.values()]
+def schemas(*, include_images: bool = True) -> list[dict[str, Any]]:
+    return [tool.schema for tool in TOOLS.values() if include_images or tool.name != "view_image"]
 
 
 @overload

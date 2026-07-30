@@ -44,6 +44,7 @@ class Agent:
         self.env = env
         self.messages: list[dict[str, Any]] = []
         self._on_event = on_event
+        self._enabled_tool_names = set(tools.TOOLS)
 
     def _emit(self, event: events.Event) -> None:
         if self._on_event is not None:
@@ -56,7 +57,12 @@ class Agent:
         run_id: str | None = None,
         image_path: Path | None = None,
     ) -> dict[str, Any]:
+        supports_images = bool(getattr(self.model, "supports_images", True))
+        if image_path is not None and not supports_images:
+            raise ValueError("The selected model does not support reference images.")
         image = prepare_image(image_path) if image_path is not None else None
+        tool_schemas = tools.schemas(include_images=supports_images)
+        self._enabled_tool_names = {str(schema["name"]) for schema in tool_schemas}
         run_id = run_id or _run_id_for_prompt(prompt)
         run_dir = self.env.create_run(run_id)
         context = ToolContext(self.env, run_dir, run_dir / "workspace")
@@ -68,7 +74,9 @@ class Agent:
         record.result = ""
         record.save(record_path)
 
-        task = _read_prompt("task.md").replace("{{ prompt }}", prompt)
+        task = _read_prompt("task.md", include_images=supports_images).replace(
+            "{{ prompt }}", prompt
+        )
         task_message: dict[str, Any] = {"role": "user", "content": task}
         recorded_task = task_message
         if image is not None:
@@ -89,11 +97,11 @@ class Agent:
         self.messages = [
             {
                 "role": "system",
-                "content": _read_prompt("system.md"),
+                "content": _read_prompt("system.md", include_images=supports_images),
             },
             {
                 "role": "user",
-                "content": _read_sdk_quickstart(),
+                "content": _read_sdk_quickstart(include_images=supports_images),
             },
             task_message,
         ]
@@ -165,7 +173,7 @@ class Agent:
                     )
                     self._emit(events.ContextCompacted(plan.tokens_before))
                 try:
-                    response = await self.model.query(self.messages, tools=tools.schemas())
+                    response = await self.model.query(self.messages, tools=tool_schemas)
                 except Exception as exc:
                     termination_error = f"model query failed: {type(exc).__name__}: {exc}"
                     break
@@ -364,6 +372,8 @@ class Agent:
         name = str(call["name"])
         call_id = str(call["id"])
         try:
+            if name not in self._enabled_tool_names:
+                raise ValueError(f"tool is not available for this model: {name}")
             live_sessions = context.exec_sessions.live_ids()
             if live_sessions and name != "write_stdin":
                 raise ValueError(
@@ -531,8 +541,11 @@ def _add_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, i
     return {key: left.get(key, 0) + right.get(key, 0) for key in keys}
 
 
-def _read_prompt(name: str) -> str:
-    return (package_dir / "prompts" / name).read_text(encoding="utf-8")
+def _read_prompt(name: str, *, include_images: bool = True) -> str:
+    prompt = (package_dir / "prompts" / name).read_text(encoding="utf-8")
+    if include_images:
+        return prompt.replace("<image_prompt>\n", "").replace("</image_prompt>\n", "")
+    return re.sub(r"<image_prompt>\n.*?</image_prompt>\n?", "", prompt, flags=re.DOTALL)
 
 
 def _save_input_image(run_dir: Path, image: PreparedImage) -> str:
@@ -543,10 +556,15 @@ def _save_input_image(run_dir: Path, image: PreparedImage) -> str:
     return relative.as_posix()
 
 
-def _read_sdk_quickstart() -> str:
+def _read_sdk_quickstart(*, include_images: bool = True) -> str:
     quickstart = (package_dir / "sdk" / "docs" / "common" / "00_quickstart.md").read_text(
         encoding="utf-8"
     )
+    if not include_images:
+        quickstart = quickstart.replace(
+            "- Visual views and report artifacts: `docs/sdk/common/45_visual_evidence.md`.\n",
+            "",
+        )
     return (
         "<sdk_quickstart>\n"
         "This SDK quickstart is preloaded for the run. Use it as the first "

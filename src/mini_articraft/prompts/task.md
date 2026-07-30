@@ -15,8 +15,11 @@ object with `Part.add(shape, name=..., material=...)` for known physical surface
 or `color=...` for plain matte ones, add prompt-specific checks, and run `compile`.
 
 Treat every compile signal as design evidence. Preserve prompt-critical visible
-geometry while you repair named defects. After a successful compile, review the
-visual representation separately and improve any major form that uses a crude
-substitute when a public authoring method would fit it better. Then return a short
-visible summary of the object and its main motion.
+geometry while you repair named defects.
+<image_prompt>
+After a successful compile, review the visual representation separately and
+improve any major form that uses a crude substitute when a public authoring
+method would fit it better.
+</image_prompt>
+Then return a short visible summary of the object and its main motion.
 </task>

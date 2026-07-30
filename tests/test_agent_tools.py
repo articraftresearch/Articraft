@@ -55,6 +55,11 @@ def test_tool_schemas_include_prompting_guidance() -> None:
     assert get("exec_command").supports_parallel is False
 
 
+def test_tool_schemas_can_exclude_images() -> None:
+    assert "view_image" in {tool["name"] for tool in schemas()}
+    assert "view_image" not in {tool["name"] for tool in schemas(include_images=False)}
+
+
 def test_read_rejects_path_escape(tmp_path) -> None:
     ctx = context(tmp_path)
 

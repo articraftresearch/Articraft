@@ -20,6 +20,9 @@ DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_SECONDS = 3600.0
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 DEFAULT_GEMINI_MAX_ATTEMPTS = 4
 DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS = 900.0
+DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+DEFAULT_OPENROUTER_MAX_ATTEMPTS = 4
+DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS = 900.0
 
 
 class Settings(BaseSettings):
@@ -34,7 +37,7 @@ class Settings(BaseSettings):
         default=DEFAULT_OUTPUT_DIR,
         validation_alias="MINI_ARTICRAFT_OUTPUT_DIR",
     )
-    provider: Literal["openai", "gemini", "anthropic"] = Field(
+    provider: Literal["openai", "gemini", "anthropic", "openrouter"] = Field(
         default=DEFAULT_PROVIDER,
         validation_alias="MINI_ARTICRAFT_PROVIDER",
     )
@@ -93,6 +96,32 @@ class Settings(BaseSettings):
         gt=0.0,
         validation_alias="MINI_ARTICRAFT_GEMINI_REQUEST_TIMEOUT_SECONDS",
     )
+    openrouter_model: str = Field(
+        default=DEFAULT_OPENROUTER_MODEL,
+        validation_alias="MINI_ARTICRAFT_OPENROUTER_MODEL",
+    )
+    openrouter_api_key: str | None = Field(
+        default=None,
+        validation_alias="OPENROUTER_API_KEY",
+    )
+    openrouter_max_attempts: int = Field(
+        default=DEFAULT_OPENROUTER_MAX_ATTEMPTS,
+        ge=1,
+        validation_alias="MINI_ARTICRAFT_OPENROUTER_MAX_ATTEMPTS",
+    )
+    openrouter_request_timeout_seconds: float = Field(
+        default=DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS,
+        gt=0.0,
+        validation_alias="MINI_ARTICRAFT_OPENROUTER_REQUEST_TIMEOUT_SECONDS",
+    )
+    openrouter_http_referer: str | None = Field(
+        default=None,
+        validation_alias="OPENROUTER_HTTP_REFERER",
+    )
+    openrouter_app_title: str | None = Field(
+        default=None,
+        validation_alias="OPENROUTER_APP_TITLE",
+    )
     max_turns: int = Field(default=DEFAULT_MAX_TURNS, validation_alias="MINI_ARTICRAFT_MAX_TURNS")
     physics_enabled: bool = Field(
         default=False,
@@ -106,6 +135,8 @@ class Settings(BaseSettings):
 
     @property
     def selected_model(self) -> str:
+        if self.provider == "openrouter":
+            return self.openrouter_model
         if self.provider == "anthropic":
             return self.anthropic_model
         if self.provider == "gemini":

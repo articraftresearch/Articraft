@@ -204,6 +204,7 @@ class QueuedModel(Generic[Item]):
     """
 
     noun: ClassVar[str] = "item"
+    supports_images: bool = True
 
     def __init__(
         self,
