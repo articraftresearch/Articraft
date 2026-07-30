@@ -57,7 +57,7 @@ class OpenRouterModel:
         response = await self._send_with_retries(request)
         payload = _response_payload(response)
         _raise_for_provider_error(response.status_code, payload)
-        text, tool_calls = _assistant_output(payload)
+        text, tool_calls, provider_content = _assistant_output(payload)
         if not text and not tool_calls:
             raise ModelError("OpenRouter response did not contain text or tool calls")
 
@@ -66,6 +66,7 @@ class OpenRouterModel:
             "tool_calls": tool_calls,
             "token_usage": _response_token_usage(payload),
             "cost": _response_cost(payload),
+            "provider_content": provider_content,
             "response": payload,
         }
 
@@ -183,6 +184,15 @@ def _assistant_message(message: dict[str, Any]) -> dict[str, Any]:
     ]
     if tool_calls:
         converted["tool_calls"] = tool_calls
+    for item in message.get("provider_content") or []:
+        if not isinstance(item, dict) or item.get("type") != "openrouter_reasoning":
+            continue
+        reasoning = item.get("reasoning")
+        if isinstance(reasoning, str):
+            converted["reasoning"] = reasoning
+        reasoning_details = item.get("reasoning_details")
+        if isinstance(reasoning_details, list):
+            converted["reasoning_details"] = reasoning_details
     return converted
 
 
@@ -287,7 +297,9 @@ def _provider_error(status: int, payload: dict[str, Any]) -> str:
     return f"OpenRouter request failed (HTTP {status}{code_detail}): {detail}"
 
 
-def _assistant_output(payload: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+def _assistant_output(
+    payload: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
         raise ModelError("OpenRouter response did not contain a valid choice")
@@ -316,7 +328,17 @@ def _assistant_output(payload: dict[str, Any]) -> tuple[str, list[dict[str, Any]
                 "arguments": _arguments_text(function.get("arguments")),
             }
         )
-    return text, calls
+    provider_content: list[dict[str, Any]] = []
+    reasoning: dict[str, Any] = {"type": "openrouter_reasoning"}
+    raw_reasoning = message.get("reasoning")
+    if isinstance(raw_reasoning, str):
+        reasoning["reasoning"] = raw_reasoning
+    reasoning_details = message.get("reasoning_details")
+    if isinstance(reasoning_details, list):
+        reasoning["reasoning_details"] = reasoning_details
+    if len(reasoning) > 1:
+        provider_content.append(reasoning)
+    return text, calls, provider_content
 
 
 def _response_token_usage(payload: dict[str, Any]) -> dict[str, int]:

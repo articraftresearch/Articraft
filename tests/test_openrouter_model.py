@@ -26,6 +26,8 @@ def response(
     text: str | None = None,
     tool_calls: list[dict[str, Any]] | None = None,
     usage: dict[str, Any] | None = None,
+    reasoning: str | None = None,
+    reasoning_details: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": "gen-test",
@@ -37,6 +39,12 @@ def response(
                     "role": "assistant",
                     "content": text,
                     "tool_calls": tool_calls or [],
+                    **({"reasoning": reasoning} if reasoning is not None else {}),
+                    **(
+                        {"reasoning_details": reasoning_details}
+                        if reasoning_details is not None
+                        else {}
+                    ),
                 },
                 "finish_reason": "tool_calls" if tool_calls else "stop",
             }
@@ -161,13 +169,26 @@ def test_openrouter_model_sends_messages_tools_and_returns_usage_and_cost() -> N
 
 
 def test_openrouter_model_converts_multiple_tool_calls_and_results() -> None:
+    reasoning_details = [
+        {
+            "type": "reasoning.text",
+            "text": "I should write the file first.",
+            "id": "reasoning-1",
+            "format": "unknown",
+            "index": 0,
+        }
+    ]
     first_calls = [
         function_call("write", {"path": "main.py"}, call_id="call_write"),
         function_call("compile", {}, call_id="call_compile"),
     ]
     model, _, requests = model_with_responses(
         [
-            response(tool_calls=first_calls),
+            response(
+                tool_calls=first_calls,
+                reasoning="I should write the file first.",
+                reasoning_details=reasoning_details,
+            ),
             response(text="done"),
         ]
     )
@@ -178,10 +199,22 @@ def test_openrouter_model_converts_multiple_tool_calls_and_results() -> None:
         {"id": "call_write", "name": "write", "arguments": '{"path": "main.py"}'},
         {"id": "call_compile", "name": "compile", "arguments": "{}"},
     ]
+    assert first["provider_content"] == [
+        {
+            "type": "openrouter_reasoning",
+            "reasoning": "I should write the file first.",
+            "reasoning_details": reasoning_details,
+        }
+    ]
 
     messages.extend(
         [
-            {"role": "assistant", "content": "", "tool_calls": first["tool_calls"]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": first["tool_calls"],
+                "provider_content": first["provider_content"],
+            },
             {
                 "type": "function_call_output",
                 "call_id": "call_write",
@@ -203,6 +236,8 @@ def test_openrouter_model_converts_multiple_tool_calls_and_results() -> None:
             "role": "assistant",
             "content": None,
             "tool_calls": first_calls,
+            "reasoning": "I should write the file first.",
+            "reasoning_details": reasoning_details,
         },
         {
             "role": "tool",
