@@ -2,6 +2,11 @@
 
 mini-articraft is a small agent that turns a prompt into an articulated 3D object.
 
+> [!NOTE]
+> mini-articraft is the supported successor to the
+> [original Articraft harness](https://github.com/mattzh72/articraft).
+> Researchers and engineers from academia and industry maintain and support this project.
+
 > [!IMPORTANT]
 > mini-articraft is under active development. Expect changes before version 1.0.
 
