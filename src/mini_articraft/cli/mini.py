@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -136,11 +137,19 @@ def simulate(
     ),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
     seconds: float = typer.Option(3.0, "--seconds", help="How long to simulate."),
+    scenario: str = typer.Option(
+        "drop",
+        "--scenario",
+        help="'drop' to settle on a floor, 'tilt' to find where it slides, "
+        "'release' to let the joints fall.",
+    ),
 ) -> None:
-    """Drop a run's latest USDZ on a floor and report whether it behaves.
+    """Run a run's latest USDZ in a physics engine and report whether it behaves.
 
     OpenUSD validation says the stage is well formed; this says whether the
-    object stands up, stays together, and settles.
+    object stands up, stays together, and settles. 'tilt' tips the floor until it
+    slides, which measures the friction its materials authored. 'release' lets
+    every joint fall from mid-travel, which is the motion worth watching.
     """
     from mini_articraft.simulate import SimulationUnavailable, simulate_usdz
 
@@ -153,13 +162,21 @@ def simulate(
         raise typer.Exit(1) from None
 
     try:
-        result = simulate_usdz(usdz, run_dir / "result" / "simulation", seconds=seconds)
+        simulation_dir = run_dir / "result" / "simulation"
+        result = simulate_usdz(usdz, simulation_dir, seconds=seconds, scenario=scenario)
     except SimulationUnavailable as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
     except ValueError as exc:
         typer.echo(f"could not simulate {usdz.name}: {exc}", err=True)
         raise typer.Exit(1) from None
+
+    if result.trajectory is not None:
+        # Keyed by USDZ so the viewer plays the motion belonging to the version
+        # it is showing.
+        record = simulation_dir / f"{usdz.stem}.trajectory.json"
+        record.write_text(json.dumps(result.trajectory.to_payload()), encoding="utf-8")
+        typer.echo(f"recorded motion for the viewer: {record}")
 
     typer.echo(result.summary())
     if not result.stood_up:

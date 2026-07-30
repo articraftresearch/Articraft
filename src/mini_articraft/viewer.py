@@ -34,9 +34,21 @@ def load_viewer_run(run_dir: Path | str) -> ViewerRun:
     if not paths:
         raise ValueError(f"no numbered USDZ files found in {usdz_dir}")
 
-    versions = tuple(_read_version(path) for path in paths)
+    versions = tuple(_read_version(path) | _read_trajectory(run_dir, path) for path in paths)
     files = {str(version["id"]): path for version, path in zip(versions, paths, strict=True)}
     return ViewerRun(versions=versions, files=files)
+
+
+def _read_trajectory(run_dir: Path, usdz: Path) -> dict[str, object]:
+    """The recorded simulation for this USDZ, if `mini-articraft simulate` has run."""
+
+    record = run_dir / "result" / "simulation" / f"{usdz.stem}.trajectory.json"
+    if not record.is_file():
+        return {}
+    try:
+        return {"trajectory": json.loads(record.read_text(encoding="utf-8"))}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def serve_viewer(run_dir: Path | str, *, open_browser: bool = True) -> None:
