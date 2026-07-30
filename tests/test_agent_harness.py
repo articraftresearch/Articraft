@@ -136,6 +136,56 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
     }
 
 
+def test_agent_removes_image_tools_and_prompting_for_text_only_model(tmp_path) -> None:
+    def inspect_text_only_query(query: ModelQuery) -> Response:
+        prompt = "\n".join(str(message.get("content") or "") for message in query.messages)
+        assert "view_image" not in prompt
+        assert "previews.py" not in prompt
+        assert "render_view" not in prompt
+        assert "45_visual_evidence" not in prompt
+        assert "view_image" not in {tool["name"] for tool in query.tools}
+        return calls(
+            tool_call(
+                "write",
+                {"path": "main.py", "content": GOOD_MAIN_PY},
+                call_id="call_write",
+            )
+        )
+
+    model = ScriptedModel(
+        [
+            inspect_text_only_query,
+            calls(tool_call("compile", {}, call_id="call_compile")),
+            text("done"),
+        ]
+    )
+    model.supports_images = False
+
+    result = run(
+        Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run(
+            "a box",
+            run_id="box",
+        )
+    )
+
+    assert result["status"] == "success"
+
+
+def test_agent_rejects_reference_image_for_text_only_model(tmp_path) -> None:
+    image_path = tmp_path / "reference.png"
+    Image.new("RGB", (12, 8), color="white").save(image_path)
+    model = ScriptedModel([])
+    model.supports_images = False
+
+    with pytest.raises(ValueError, match="does not support reference images"):
+        run(
+            Agent(model, LocalEnvironment(output_dir=tmp_path)).run(
+                "a box",
+                image_path=image_path,
+            )
+        )
+
+
 def test_agent_sends_typed_image_content_but_records_only_metadata(
     monkeypatch,
     tmp_path,

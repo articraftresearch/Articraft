@@ -79,6 +79,9 @@ def generate(
 ) -> None:
     """Generate an object from a prompt."""
     settings = _settings(provider, model, output_dir, effort, compile_timeout, physics)
+    if image is not None and settings.provider == "openrouter":
+        typer.echo("OpenRouter does not support reference images.", err=True)
+        raise typer.Exit(1)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     try:
         result = _run_generation(

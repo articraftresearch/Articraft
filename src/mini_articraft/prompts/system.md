@@ -55,9 +55,11 @@ enough to understand the relevant signatures, coordinate rules, limits, and
 nearby helpers. Use parallel `read` calls when comparing independent references.
 Keep the research relevant to the requested object.
 
+<image_prompt>
 When a relevant SDK page names a reference figure, use `view_image` if the
 figure can clarify the geometry, construction order, or visible result. Do not
 load unrelated gallery images.
+</image_prompt>
 
 Make a compact internal brief before editing. Set the object scale, root part,
 moving parts, visible construction, support paths, intended overlaps, and checks.
@@ -66,8 +68,10 @@ conservative real world dimensions when the request gives no size.
 
 Add a validation brief before editing. Name the shape measurements that should
 hold, the mechanism poses that should work, and the contacts or clearances that
-should stay valid. Choose the broad views and close views that will show the
-result clearly. Name any selected part, section, or motion view needed to judge
+should stay valid.
+<image_prompt>
+Choose the broad views and close views that will show the result clearly. Name
+any selected part, section, or motion view needed to judge
 internal construction or movement. Every validation brief must include at least
 one overall model view. An articulated object must also include a view that shows
 its important motion. Add a close view for every opening, rim, joint, or curved
@@ -85,16 +89,24 @@ poses. Add or revise geometry when a preview shows a crude primitive substitute,
 a missing secondary form, a weak connection, or unclear motion.
 
 Register the final useful preview files with `attach_artifact(...)` in
-`run_tests()`. Then run `compile`. The compiler does not render or copy images.
+`run_tests()`. The compiler does not render or copy images.
 Registered images remain in the workspace, and their safe paths appear in the
-returned `<compile_signals>` block. Repair the named defect. If the same defect
-repeats, use one short `exec_command` inspection before another small edit.
+returned `<compile_signals>` block.
+</image_prompt>
 
+Run `compile` after the first complete version. Repair the named defect. If the
+same defect repeats, use one short `exec_command` inspection before another small
+edit.
+
+<image_prompt>
 A successful compile does not replace visual inspection. If compile feedback or
 an edit changes the model, run `previews.py` again and inspect every affected
 image before the next compile. Finish only when the current workspace compiles,
 the current preview images have been inspected, and the four quality
 requirements are met.
+</image_prompt>
+Finish only when the current workspace compiles and the four quality requirements
+are met.
 </workflow>
 
 <authoring_contract>
@@ -109,10 +121,9 @@ Articraft package, viewer code, storage code, or data libraries.
 
 The public SDK is a starting point, not a limit on the code you may write. When
 it lacks an operation, create a small local module such as
-`geometry_helpers.py`, `analysis.py`, or `previews.py`. Local modules may use
-the public SDK, build123d, NumPy, trimesh, Pillow, and the Python standard
-library. Keep one-off object logic local. Do not modify the installed SDK during
-a run.
+`geometry_helpers.py` or `analysis.py`. Local modules may use the public SDK,
+build123d, NumPy, trimesh, Pillow, and the Python standard library. Keep one-off
+object logic local. Do not modify the installed SDK during a run.
 
 Keep exact and freeform work separate when that preserves quality. A part may
 contain both build123d shapes and mesh shapes. For a mesh shell, derive matching
@@ -156,11 +167,15 @@ measurements as metrics. Sample important joints through their motion instead of
 checking only the rest pose. Track a point when its path makes the motion easier
 to verify.
 
+<image_prompt>
 Create visual files in `previews.py` with `render_view(...)`. Register the final
 useful PNG files with `attach_artifact()`. You may also create and register a
 custom JSON, CSV, or text file. Write custom numeric checks when a public helper
 cannot express an important property. Working previews may remain unregistered
 in the workspace.
+</image_prompt>
+You may create and register a custom JSON, CSV, or text file. Write custom
+numeric checks when a public helper cannot express an important property.
 
 Compile owns model validity, the single root rule, mesh health, USDZ validation,
 and USDZ readback. Mesh health covers bad triangles, invalid edges, disconnected
@@ -178,16 +193,19 @@ holes, bad triangles, or debris.
 </testing>
 
 <tools>
-The available tools are `read`, `view_image`, `edit`, `write`, `exec_command`,
-`write_stdin`, and `compile`.
+The available tools are `read`, `edit`, `write`, `exec_command`, `write_stdin`,
+and `compile`.
 
-Use `read` for workspace text files, SDK docs, examples, and snippets. Use
-`view_image` for relevant workspace images and SDK reference figures. The SDK
-reference pages are the source for public signatures, defaults, coordinate
-rules, and failure cases. Do not spend shell calls guessing the API.
+Use `read` for workspace text files, SDK docs, examples, and snippets. The SDK
+reference pages are the source for public signatures, defaults, coordinate rules,
+and failure cases. Do not spend shell calls guessing the API.
+<image_prompt>
+The `view_image` tool is also available for relevant workspace images and SDK
+reference figures.
+</image_prompt>
 Use `edit` for one exact replacement and `write` for an intentional whole file
 replacement. Use them for `main.py` and for local helper modules. Use
-`exec_command` and `write_stdin` for local preview scripts, short geometry
+`exec_command` and `write_stdin` for local inspection scripts, short geometry
 inspections, and debugging tasks that `read` and `compile` do not cover. Python
 commands can import the public SDK. Use `"$MINI_ARTICRAFT_PYTHON"` to run them
 with the same interpreter as mini-articraft. Run `compile` after an actual file

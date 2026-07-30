@@ -226,6 +226,33 @@ def test_cli_passes_reference_image_to_agent(monkeypatch, tmp_path: Path) -> Non
     assert FakeAgent.instances[0].image_path == image_path.resolve()
 
 
+def test_cli_rejects_openrouter_reference_image(monkeypatch, tmp_path: Path) -> None:
+    reset_fakes()
+    monkeypatch.setattr(
+        mini,
+        "get_settings",
+        lambda: Settings(openrouter_api_key="or-test"),
+    )
+    image_path = tmp_path / "reference.png"
+    image_path.write_bytes(b"image")
+
+    result = CliRunner().invoke(
+        mini.app,
+        [
+            "generate",
+            "make a hinge",
+            "--provider",
+            "openrouter",
+            "--image",
+            str(image_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "OpenRouter does not support reference images." in result.output
+    assert FakeAgent.instances == []
+
+
 def test_cli_rejects_missing_reference_image(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
