@@ -30,7 +30,7 @@ from mini_articraft.agent.harness import (
 )
 from mini_articraft.agent.tools import Tool, ToolContext, ToolResult
 from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.environments.local import DEFAULT_MAIN_PY, LocalEnvironment
+from mini_articraft.compiler.runner import DEFAULT_MAIN_PY, LocalEnvironment
 from mini_articraft.record import Record, read_conversation
 
 

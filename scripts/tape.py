@@ -75,8 +75,8 @@ def record(
 ) -> None:
     """Run a live generation and record it as a tape (pays for model calls)."""
     from mini_articraft.agent import Agent
-    from mini_articraft.environments.local import LocalEnvironment
-    from mini_articraft.models.openai import OpenAIModel
+    from mini_articraft.agent.provider.openai import OpenAIModel
+    from mini_articraft.compiler.runner import LocalEnvironment
     from mini_articraft.settings import get_settings
 
     settings = get_settings()

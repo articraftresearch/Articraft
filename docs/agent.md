@@ -91,8 +91,9 @@ contains the numbered export files.
 ## Main parts of the code
 
 - [`agent/`](../src/mini_articraft/agent) contains the turn loop and tools.
-- [`models/`](../src/mini_articraft/models) contains model adapters.
-- [`environments/`](../src/mini_articraft/environments) creates runs and compiles workspaces.
+- [`agent/provider/`](../src/mini_articraft/agent/provider) contains the model adapters.
+- [`compiler/`](../src/mini_articraft/compiler) creates runs, compiles workspaces, and turns
+  the result into signals the agent reads.
 - [`sdk/`](../src/mini_articraft/sdk) contains object authoring, tests, and export code.
 - [`record.py`](../src/mini_articraft/record.py) saves the run record and conversation log.
 - [`prompts/`](../src/mini_articraft/prompts) contains the model instructions.

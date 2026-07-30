@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
-from mini_articraft.compile_result import CompileResult
+from mini_articraft.compiler.result import CompileResult
 from mini_articraft.record import Record
 from mini_articraft.sdk import (
     ArticulatedObject,

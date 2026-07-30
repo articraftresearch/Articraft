@@ -5,7 +5,7 @@ hinge axis sits exactly on the edge where the lid meets the base, so the
 parts stay in contact through the whole motion range -- the property the
 compiler's articulation-separation check verifies.
 
-Compile it:  python -m mini_articraft.environments.worker <run_dir>
+Compile it:  python -m mini_articraft.compiler.worker <run_dir>
 """
 
 from __future__ import annotations

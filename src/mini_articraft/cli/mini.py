@@ -11,18 +11,18 @@ import typer
 from pydantic import ValidationError
 
 from mini_articraft.agent import Agent, events
-from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
-from mini_articraft.environments import LocalEnvironment
-from mini_articraft.environments.worker import texture_run
-from mini_articraft.models import create_model
-from mini_articraft.models.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
-from mini_articraft.models.anthropic import anthropic_api_key_value
-from mini_articraft.models.anthropic import (
+from mini_articraft.agent.provider import create_model
+from mini_articraft.agent.provider.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
+from mini_articraft.agent.provider.anthropic import anthropic_api_key_value
+from mini_articraft.agent.provider.anthropic import (
     context_window_tokens_for as anthropic_context_window_tokens_for,
 )
-from mini_articraft.models.gemini import (
+from mini_articraft.agent.provider.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
+from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
+from mini_articraft.compiler import LocalEnvironment
+from mini_articraft.compiler.worker import texture_run
 from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
 from mini_articraft.viewer import load_viewer_run, serve_viewer
 

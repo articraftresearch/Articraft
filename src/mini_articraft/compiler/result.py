@@ -49,7 +49,7 @@ class CompileResult:
         if self.compile_stats is None:
             payload.pop("compile_stats")
         if include_report:
-            from mini_articraft.compile_feedback import build_compile_report_from_payload
+            from mini_articraft.compiler.feedback import build_compile_report_from_payload
 
             payload["compile_report"] = build_compile_report_from_payload(payload)
         return payload

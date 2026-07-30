@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from mini_articraft.compile_result import CompileResult
+from mini_articraft.compiler.result import CompileResult
 from mini_articraft.sdk import FailureKind, TestReport
 
 Severity = Literal["failure", "warning", "note"]

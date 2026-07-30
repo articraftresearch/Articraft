@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from mini_articraft import package_dir
 from mini_articraft._child_process import child_environment
-from mini_articraft.compile_result import CompileResult
+from mini_articraft.compiler.result import CompileResult
 from mini_articraft.record import Record
 from mini_articraft.settings import DEFAULT_COMPILE_TIMEOUT_SECONDS, DEFAULT_OUTPUT_DIR
 
@@ -83,7 +83,7 @@ class LocalEnvironment:
         args = [
             sys.executable,
             "-m",
-            "mini_articraft.environments.worker",
+            "mini_articraft.compiler.worker",
             "--raw",
             str(run_dir.resolve()),
         ]

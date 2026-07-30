@@ -24,7 +24,7 @@ from rich.spinner import Spinner
 from rich.text import Text
 
 from mini_articraft.agent import events
-from mini_articraft.models import context_window_tokens_for
+from mini_articraft.agent.provider import context_window_tokens_for
 from mini_articraft.record import Record, read_conversation
 
 EventHandler = Callable[[events.Event], None]

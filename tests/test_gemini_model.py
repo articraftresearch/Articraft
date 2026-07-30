@@ -9,8 +9,8 @@ import pytest
 from google.genai import interactions
 from pydantic import TypeAdapter
 
+from mini_articraft.agent.provider.gemini import GeminiModel, context_window_tokens_for
 from mini_articraft.errors import ModelError
-from mini_articraft.models.gemini import GeminiModel, context_window_tokens_for
 from mini_articraft.settings import DEFAULT_GEMINI_MODEL, Settings, get_settings
 
 

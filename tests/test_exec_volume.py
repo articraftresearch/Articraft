@@ -19,7 +19,7 @@ import asyncio
 import pytest
 
 from mini_articraft.agent.tools import ToolContext, get
-from mini_articraft.environments.local import LocalEnvironment
+from mini_articraft.compiler.runner import LocalEnvironment
 
 SEQUENTIAL_CALLS = 250
 CONCURRENT_BATCH = 60

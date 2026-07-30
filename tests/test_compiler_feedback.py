@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from mini_articraft.compile_feedback import (
+from mini_articraft.compiler.feedback import (
     build_compile_report,
     compile_failure_signature,
     render_compile_report,
@@ -126,7 +126,7 @@ def test_runtime_signal_includes_one_sanitized_workspace_frame() -> None:
         error="NameError: name 'missing' is not defined",
         traceback_text=(
             "Traceback (most recent call last):\n"
-            '  File "/private/repo/src/mini_articraft/environments/worker.py", line 1, in run\n'
+            '  File "/private/repo/src/mini_articraft/compiler/worker.py", line 1, in run\n'
             "    runpy.run_path(path)\n"
             '  File "/private/runs/demo/workspace/helpers/body.py", line 12, in build\n'
             "    return missing\n"

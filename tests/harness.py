@@ -51,7 +51,7 @@ from mini_articraft.agent import Agent, events
 from mini_articraft.agent.tools import Tool, ToolContext
 from mini_articraft.agent.tools._core import schema as _tool_schema
 from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.environments.local import LocalEnvironment, _error_result, _finalize_payload
+from mini_articraft.compiler.runner import LocalEnvironment, _error_result, _finalize_payload
 from mini_articraft.record import Record, read_conversation
 
 T = TypeVar("T")
