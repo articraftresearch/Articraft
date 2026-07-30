@@ -467,7 +467,35 @@ def test_openrouter_model_reports_embedded_provider_error() -> None:
             }
         ]
     }
-    model, _, _ = model_with_responses([payload])
+    model, _, _ = model_with_responses([payload], openrouter_max_attempts=1)
 
     with pytest.raises(ModelError, match=r"provider code 502.*upstream disconnected"):
         run(model.query([{"role": "user", "content": "build"}]))
+
+
+def test_openrouter_model_retries_embedded_provider_error(monkeypatch) -> None:
+    delays: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("mini_articraft.models.openrouter.asyncio.sleep", sleep)
+    payload = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": ""},
+                "finish_reason": "error",
+                "error": {
+                    "code": 504,
+                    "message": "upstream idle timeout exceeded",
+                },
+            }
+        ]
+    }
+    model, _, requests = model_with_responses([payload, response(text="done")])
+
+    result = run(model.query([{"role": "user", "content": "build"}]))
+
+    assert result["text"] == "done"
+    assert len(requests) == 2
+    assert delays == [0.5]

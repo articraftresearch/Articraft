@@ -103,6 +103,24 @@ class OpenRouterModel:
                 continue
 
             if response.status_code < 400:
+                payload = _response_payload(response)
+                provider_status = _embedded_provider_status(payload)
+                if (
+                    provider_status is not None
+                    and _retryable_status(provider_status)
+                    and attempt < self.config.openrouter_max_attempts
+                ):
+                    delay = _retry_delay(attempt, response.headers.get("Retry-After"))
+                    logger.warning(
+                        "OpenRouter provider failed (attempt %s/%s), retrying in %.2fs: "
+                        "provider code %s",
+                        attempt,
+                        self.config.openrouter_max_attempts,
+                        delay,
+                        provider_status,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 return response
 
             if _retryable_status(response.status_code) and (
@@ -280,6 +298,28 @@ def _raise_for_provider_error(status: int, payload: dict[str, Any]) -> None:
         raise ModelError(f"OpenRouter response contained an invalid choice (HTTP {status})")
     if isinstance(first.get("error"), dict) or first.get("finish_reason") == "error":
         raise ModelError(_provider_error(status, first))
+
+
+def _embedded_provider_status(payload: dict[str, Any]) -> int | None:
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return _status_code(error.get("code"))
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+    choice_error = choices[0].get("error")
+    if isinstance(choice_error, dict):
+        return _status_code(choice_error.get("code"))
+    return None
+
+
+def _status_code(value: Any) -> int | None:
+    try:
+        status = int(value)
+    except (TypeError, ValueError):
+        return None
+    return status if status > 0 else None
 
 
 def _provider_error(status: int, payload: dict[str, Any]) -> str:
