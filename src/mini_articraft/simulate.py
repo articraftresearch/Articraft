@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 from pxr import Usd, UsdGeom, UsdPhysics, UsdShade  # pyright: ignore[reportAttributeAccessIssue]
+from scipy.spatial.transform import Rotation  # pyright: ignore[reportMissingTypeStubs]
 
 # USD joint prim type -> MJCF joint type. A fixed joint welds the bodies, which
 # MuJoCo expresses by nesting them with no joint element at all.
@@ -100,6 +101,8 @@ class SimulationResult:
     """Degrees of tilt at which the object started sliding, in the tilt scenario."""
     measured_friction: float | None = None
     """The coefficient implied by that slip angle: tan(slip)."""
+    peak_joint_speed: float | None = None
+    """Fastest joint motion seen, in rad/s or m/s. How hard a released joint slams."""
     expected_friction: float | None = None
     """The lowest friction authored on a shape that touches the floor."""
 
@@ -113,25 +116,29 @@ class SimulationResult:
 
     @property
     def stood_up(self) -> bool:
-        """Whether the object behaved. A tilt run is judged on staying whole."""
+        """Whether the object behaved.
+
+        Only ``drop`` is judged on resting quietly. ``tilt`` and ``release`` are
+        deliberately violent, so they are judged on staying whole.
+        """
 
         if self.diverged or not self.parts_stayed_together:
             return False
-        if self.scenario == "tilt":
+        if self.scenario != "drop":
             return True
-        return self.fell_through_floor is False and self.deepest_penetration > -0.01
+        return not self.fell_through_floor and self.deepest_penetration > -0.01
 
     def summary(self) -> str:
         lines = [
             f"{len(self.bodies)} bodies, {self.total_mass:.3f} kg total",
-            f"  lowest body: {self.start_height:+.4f} -> {self.end_height:+.4f} m"
-            if self.scenario == "drop"
-            else "  settled, then tilted until it moved",
+            _headline(self.scenario, self.start_height, self.end_height),
             f"  contacts at rest: {self.contacts}",
             f"  deepest penetration: {self.deepest_penetration * 1000:+.2f} mm",
             f"  largest part separation change: {self.largest_separation_change * 1000:+.2f} mm",
             f"  residual velocity: {self.residual_velocity:.4f}",
         ]
+        if self.scenario == "release" and self.peak_joint_speed is not None:
+            lines.append(f"  peak joint speed: {self.peak_joint_speed:.2f} per second")
         if self.scenario == "tilt":
             if self.slip_angle is None:
                 lines.append("  never slipped: it held to the end of the tilt")
@@ -149,6 +156,14 @@ class SimulationResult:
             lines.append("  DIVERGED: the solver produced non-finite state")
         lines.append(f"  verdict: {'stands up' if self.stood_up else 'FAILED'}")
         return "\n".join(lines)
+
+
+def _headline(scenario: str, start: float, end: float) -> str:
+    if scenario == "drop":
+        return f"  lowest body: {start:+.4f} -> {end:+.4f} m"
+    if scenario == "tilt":
+        return "  settled, then tilted until it moved"
+    return "  joints released from mid-travel"
 
 
 @dataclass
@@ -190,13 +205,15 @@ def simulate_usdz(
 
     ``drop`` releases it just above the floor and watches it settle. ``tilt``
     settles it first, then tips the floor until it slides, which measures the
-    friction the materials authored instead of taking it on faith.
+    friction the materials authored. ``release`` opens every joint to its limit
+    and lets go, which is the motion an articulated object is actually for --
+    and, until joints have drives, the motion that shows they hold nothing.
 
     The motion is recorded at ``fps`` so the viewer can play it back.
     """
 
-    if scenario not in {"drop", "tilt"}:
-        raise ValueError(f"unknown scenario {scenario!r}; expected 'drop' or 'tilt'")
+    if scenario not in {"drop", "tilt", "release"}:
+        raise ValueError(f"unknown scenario {scenario!r}; expected 'drop', 'tilt', or 'release'")
 
     try:
         import mujoco
@@ -231,6 +248,20 @@ def simulate_usdz(
         str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, index)) for index in movable
     )
 
+    if scenario == "release":
+        for index in range(model.njnt):
+            if model.jnt_type[index] not in (
+                mujoco.mjtJoint.mjJNT_HINGE,
+                mujoco.mjtJoint.mjJNT_SLIDE,
+            ):
+                continue
+            lower, upper = (float(value) for value in model.jnt_range[index])
+            # Halfway through travel, which is where letting go of a door leaves it.
+            # Releasing at a limit can rest against the stop and never move: a lid
+            # opened past vertical is held open by its own weight.
+            data.qpos[model.jnt_qposadr[index]] = (lower + upper) / 2.0
+        mujoco.mj_forward(model, data)
+
     def frame(time: float) -> dict[str, Any]:
         return {
             "t": round(time, 4),
@@ -244,6 +275,7 @@ def simulate_usdz(
 
     deepest = 0.0
     diverged = False
+    peak_joint_speed = 0.0
     frames = [frame(0.0)]
     every = max(1, round(1.0 / (fps * model.opt.timestep)))
     gravity = float(np.linalg.norm(model.opt.gravity))
@@ -272,6 +304,9 @@ def simulate_usdz(
         mujoco.mj_step(model, data)
         if data.ncon:
             deepest = min(deepest, float(data.contact.dist[: data.ncon].min()))
+        for index in movable:
+            speed = abs(float(data.qvel[model.jnt_dofadr[index]]))
+            peak_joint_speed = max(peak_joint_speed, speed)
         if not np.all(np.isfinite(data.qpos)):
             diverged = True
             break
@@ -299,6 +334,7 @@ def simulate_usdz(
         scenario=scenario,
         slip_angle=slip_angle,
         measured_friction=None if slip_angle is None else math.tan(math.radians(slip_angle)),
+        peak_joint_speed=peak_joint_speed if movable else None,
         expected_friction=touching,
         trajectory=Trajectory(
             fps=fps,
@@ -408,7 +444,11 @@ def _add_body(
     prim = scene.parts[part_name]
     world = _world_transform(prim)
     relative = np.linalg.inv(parent_world) @ world
-    body = ET.SubElement(parent_el, "body", name=part_name, pos=_vector(relative[:3, 3]))
+    placement = {"name": part_name, "pos": _vector(relative[:3, 3])}
+    orientation = _quaternion(relative[:3, :3])
+    if orientation is not None:
+        placement["quat"] = _vector(orientation)
+    body = ET.SubElement(parent_el, "body", placement)
 
     joint = next((item for item in scene.joints if item.child == part_name), None)
     if joint is None:
@@ -481,6 +521,18 @@ def _lowest_point(scene: _Scene) -> float:
     if not math.isfinite(lowest):
         raise ValueError("stage has no collidable geometry to place on the floor")
     return lowest
+
+
+def _quaternion(rotation: np.ndarray) -> tuple[float, float, float, float] | None:
+    """A rest rotation as an MJCF ``(w, x, y, z)`` quaternion, or None if upright.
+
+    Dropping this silently misplaces any part whose joint carries an ``rpy``.
+    """
+
+    if np.allclose(rotation, np.eye(3), atol=1e-9):
+        return None
+    x, y, z, w = Rotation.from_matrix(rotation).as_quat()
+    return (float(w), float(x), float(y), float(z))
 
 
 def _world_transform(prim: Usd.Prim) -> np.ndarray:

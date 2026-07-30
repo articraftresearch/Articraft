@@ -132,7 +132,7 @@
     function setPartColors(enabled){state.partColors=enabled;if(!enabled)state.selected=null;renderParts();paint();syncOptions();}
     function setPreviewMotion(enabled){state.previewMotion=enabled;if(enabled)setPlayingSimulationOff();state.previewStartedAt=performance.now();if(!enabled)state.joints.forEach((joint,name)=>move(name,joint.value));renderTree();syncOptions();}
     function reset(){setPreviewMotion(false);state.joints.forEach((joint,name)=>{joint.value=0;move(name,0);});renderTree();}
-    function fit(){if(!state.root)return;const box=new THREE.Box3().setFromObject(state.root),center=box.getCenter(new THREE.Vector3()),span=Math.max(box.getSize(new THREE.Vector3()).length(),.1);camera.near=span/1000;camera.far=span*100;camera.position.copy(center).add(new THREE.Vector3(span*.95,-span*1.15,span*.8));camera.updateProjectionMatrix();controls.target.copy(center);controls.update();grid.position.z=box.min.z-span*.01;grid.scale.setScalar(Math.max(span/5,.02));}
+    function fit(){if(!state.root)return;const box=new THREE.Box3().setFromObject(state.root),center=box.getCenter(new THREE.Vector3()),span=Math.max(box.getSize(new THREE.Vector3()).length(),.1);camera.near=span/1000;camera.far=span*100;camera.position.copy(center).add(new THREE.Vector3(span*.95,-span*1.15,span*.8));camera.updateProjectionMatrix();controls.target.copy(center);controls.update();grid.position.z=state.simulation?0:box.min.z-span*.01;grid.scale.setScalar(Math.max(span/5,.02));}
     function dispose(root){root.traverse(object=>{if(object.geometry)object.geometry.dispose();if(object.material)materials(object).forEach(material=>material.dispose());});}
     function status(text){document.querySelector("#status").textContent=text;}
 

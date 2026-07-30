@@ -138,14 +138,18 @@ def simulate(
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
     seconds: float = typer.Option(3.0, "--seconds", help="How long to simulate."),
     scenario: str = typer.Option(
-        "drop", "--scenario", help="'drop' to settle on a floor, 'tilt' to find where it slides."
+        "drop",
+        "--scenario",
+        help="'drop' to settle on a floor, 'tilt' to find where it slides, "
+        "'release' to let the joints fall.",
     ),
 ) -> None:
     """Run a run's latest USDZ in a physics engine and report whether it behaves.
 
     OpenUSD validation says the stage is well formed; this says whether the
-    object stands up, stays together, and settles. The 'tilt' scenario tips the
-    floor until it slides, which measures the friction its materials authored.
+    object stands up, stays together, and settles. 'tilt' tips the floor until it
+    slides, which measures the friction its materials authored. 'release' lets
+    every joint fall from mid-travel, which is the motion worth watching.
     """
     from mini_articraft.simulate import SimulationUnavailable, simulate_usdz
 

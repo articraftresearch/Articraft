@@ -101,6 +101,18 @@ uv run mini-articraft simulate runs/<run-id> --scenario tilt --seconds 8
   friction: measured 0.91, authored 0.85
 ```
 
+Let the joints fall from mid-travel, which is the motion an articulated object is
+actually for:
+
+```shell
+uv run mini-articraft simulate runs/<run-id> --scenario release
+```
+
+```
+  joints released from mid-travel
+  peak joint speed: 6.20 per second
+```
+
 Every run records its motion, so `mini-articraft view` gains a **Play
 simulation** switch that replays it in the same viewer used to pose joints.
 MuJoCo is optional, so the `sim` group is not installed by default.

@@ -164,3 +164,42 @@ def test_a_tilt_run_stops_once_it_slips(tmp_path: Path) -> None:
 def test_an_unknown_scenario_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unknown scenario"):
         simulate_usdz(_export(_hinged_box(), tmp_path), tmp_path / "sim", scenario="wobble")
+
+
+def test_a_rotated_rest_pose_survives_the_translation(tmp_path: Path) -> None:
+    """A joint with an rpy rotates its child; dropping that misplaces the part."""
+    model = ArticulatedObject("tilted")
+    base = model.part("base")
+    base.add(BoxGeometry((0.2, 0.2, 0.05)), name="plate", material=Material.STEEL)
+    arm = model.part("arm")
+    arm.add(BoxGeometry((0.02, 0.02, 0.20)), name="post", material=Material.STEEL)
+    model.articulation(
+        "mount",
+        ArticulationType.FIXED,
+        base,
+        arm,
+        origin=Origin(xyz=(0.0, 0.0, 0.05), rpy=(0.0, math.pi / 4, 0.0)),
+    )
+
+    write_mjcf(_export(model, tmp_path), tmp_path / "sim")
+    arm_body = ET.parse(tmp_path / "sim" / "model.xml").getroot().find(".//body/body")
+
+    assert arm_body is not None
+    quaternion = arm_body.get("quat")
+    assert quaternion is not None, "a rotated part must carry its orientation"
+    w, _, y, _ = (float(value) for value in quaternion.split())
+    # 45 degrees about Y: w = cos(22.5 deg), y = sin(22.5 deg).
+    assert w == pytest.approx(math.cos(math.pi / 8), abs=1e-4)
+    assert abs(y) == pytest.approx(math.sin(math.pi / 8), abs=1e-4)
+
+
+def test_releasing_a_joint_produces_motion_worth_watching(tmp_path: Path) -> None:
+    """Released at a limit a lid can rest against the stop; from mid-travel it swings."""
+    result = simulate_usdz(
+        _export(_hinged_box(), tmp_path), tmp_path / "sim", seconds=2.0, scenario="release"
+    )
+
+    assert result.trajectory is not None
+    angles = [frame["joints"][0] for frame in result.trajectory.frames]
+    assert max(angles) - min(angles) > 0.5  # radians
+    assert result.peak_joint_speed is not None and result.peak_joint_speed > 1.0
