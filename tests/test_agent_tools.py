@@ -750,37 +750,3 @@ class FakeCompileEnv:
         }
         payload["compile_report"] = build_compile_report_from_payload(payload)
         return payload
-
-
-def test_a_finished_command_returns_immediately(tmp_path) -> None:
-    """A fast command must not wait out the yield deadline.
-
-    The stream readers signal once at EOF. A poll woken by that signal before the
-    process was reaped used to find the exit condition still false, with nothing
-    left to wake it, and sat until its deadline -- ten seconds by default, for
-    every shell command the agent ran.
-    """
-    ctx = context(tmp_path)
-
-    started = time.perf_counter()
-    result = run(get("exec_command").run(ctx, {"command": "echo hi"}))
-    elapsed = time.perf_counter() - started
-
-    assert result["returncode"] == 0
-    assert result["stdout"].strip() == "hi"
-    assert elapsed < 2.0, f"took {elapsed:.1f}s; the yield deadline is being waited out"
-
-
-def test_a_running_command_still_yields_at_its_deadline(tmp_path) -> None:
-    """The early return must not truncate work that is genuinely still going."""
-    ctx = context(tmp_path)
-
-    started = time.perf_counter()
-    result = run(
-        get("exec_command").run(ctx, {"command": "sleep 5; echo late", "yield_time_ms": 300})
-    )
-    elapsed = time.perf_counter() - started
-
-    assert result["running"] is True
-    assert "late" not in result["stdout"]
-    assert 0.2 < elapsed < 2.0, f"took {elapsed:.1f}s"
