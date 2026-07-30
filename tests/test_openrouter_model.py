@@ -14,7 +14,7 @@ from mini_articraft.environments import LocalEnvironment
 from mini_articraft.errors import ModelError
 from mini_articraft.models import create_model
 from mini_articraft.models.openrouter import OpenRouterModel
-from mini_articraft.settings import Settings, get_settings
+from mini_articraft.settings import DEFAULT_OPENROUTER_MODEL, Settings, get_settings
 
 
 def run(awaitable):
@@ -266,6 +266,18 @@ def test_openrouter_model_accepts_unknown_model_and_has_unknown_context() -> Non
     result = run(model.query([{"role": "user", "content": "build"}]))
     assert result["token_usage"] == {}
     assert result["cost"] == 0.0
+
+
+def test_openrouter_model_uses_default_model() -> None:
+    model = OpenRouterModel(
+        Settings(
+            provider="openrouter",
+            openrouter_api_key="or-test",
+        )
+    )
+
+    assert model.config.openrouter_model == DEFAULT_OPENROUTER_MODEL
+    run(model.close())
 
 
 def test_model_factory_selects_openrouter() -> None:

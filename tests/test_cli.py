@@ -414,7 +414,10 @@ def test_cli_warns_on_missing_anthropic_key(monkeypatch, tmp_path: Path) -> None
     assert "Traceback" not in result.output
 
 
-def test_cli_warns_on_missing_openrouter_key_and_model(monkeypatch, tmp_path: Path) -> None:
+def test_cli_uses_default_openrouter_model_and_warns_on_missing_key(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -428,7 +431,7 @@ def test_cli_warns_on_missing_openrouter_key_and_model(monkeypatch, tmp_path: Pa
 
     assert result.exit_code == 1
     assert "OPENROUTER_API_KEY" in result.output
-    assert "MINI_ARTICRAFT_OPENROUTER_MODEL or --model" in result.output
+    assert "MINI_ARTICRAFT_OPENROUTER_MODEL or --model" not in result.output
     assert "Traceback" not in result.output
 
 

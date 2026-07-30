@@ -61,14 +61,16 @@ ANTHROPIC_API_KEY=your_key_here uv run mini-articraft \
 The Anthropic provider supports `claude-sonnet-5` and `claude-opus-5`.
 Each run keeps the complete Anthropic response blocks in `conversation.jsonl`.
 
-To use OpenRouter, provide an API key and an explicit OpenRouter model identifier:
+To use OpenRouter, provide an API key:
 
 ```shell
 OPENROUTER_API_KEY=your_key_here uv run mini-articraft \
-  --provider openrouter --model tencent/hy3-preview "make a folding chair"
+  --provider openrouter "make a folding chair"
 ```
 
-You can set the model with `MINI_ARTICRAFT_OPENROUTER_MODEL` instead of `--model`.
+OpenRouter defaults to `nvidia/nemotron-3-ultra-550b-a55b:free`. You can select another model
+with `--model` or `MINI_ARTICRAFT_OPENROUTER_MODEL`.
+The OpenRouter lane is text-only, so it omits image tools and related agent instructions.
 Optional `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` values enable OpenRouter app
 attribution. OpenRouter reports token usage and request cost when available. Because arbitrary
 model identifiers are accepted without a local model catalog, their context window is reported as

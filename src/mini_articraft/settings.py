@@ -20,6 +20,7 @@ DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_SECONDS = 3600.0
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 DEFAULT_GEMINI_MAX_ATTEMPTS = 4
 DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS = 900.0
+DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 DEFAULT_OPENROUTER_MAX_ATTEMPTS = 4
 DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS = 900.0
 
@@ -96,7 +97,7 @@ class Settings(BaseSettings):
         validation_alias="MINI_ARTICRAFT_GEMINI_REQUEST_TIMEOUT_SECONDS",
     )
     openrouter_model: str = Field(
-        default="",
+        default=DEFAULT_OPENROUTER_MODEL,
         validation_alias="MINI_ARTICRAFT_OPENROUTER_MODEL",
     )
     openrouter_api_key: str | None = Field(
