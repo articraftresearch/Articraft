@@ -145,6 +145,13 @@ class ExecSession:
             if remaining <= 0:
                 break
             self.output_event.clear()
+            # Re-check after clearing: the readers set this event when they hit
+            # EOF, and a set landing between the drain above and this clear would
+            # otherwise be discarded, leaving nothing to wake us before the
+            # deadline. The condition only ever goes from false to true, so
+            # testing it here closes that window rather than narrowing it.
+            if not self.alive and self._streams_closed:
+                break
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.output_event.wait(), timeout=remaining)
 
@@ -207,6 +214,11 @@ class ExecSession:
     async def _reap_descendants_after_exit(self) -> None:
         await self.proc.wait()
         _signal_process_group(self.proc, signal.SIGKILL)
+        # Wake any poll that is waiting. The stream readers signal once at EOF,
+        # and a poll that woke on that signal before this task finished would
+        # find the exit condition still false with nothing left to wake it, so
+        # it would wait out its whole deadline for a command already done.
+        self.output_event.set()
 
     async def _read_stream(self, stream: asyncio.StreamReader, buffer: OutputBuffer) -> None:
         try:
