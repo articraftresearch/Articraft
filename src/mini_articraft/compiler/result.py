@@ -39,7 +39,6 @@ class CompileResult:
     def to_payload(
         self,
         *,
-        include_report: bool = False,
         include_returncode: bool = False,
         returncode: int | None = None,
     ) -> dict[str, Any]:
@@ -48,8 +47,4 @@ class CompileResult:
             payload["returncode"] = returncode
         if self.compile_stats is None:
             payload.pop("compile_stats")
-        if include_report:
-            from mini_articraft.compiler.feedback import build_compile_report_from_payload
-
-            payload["compile_report"] = build_compile_report_from_payload(payload)
         return payload

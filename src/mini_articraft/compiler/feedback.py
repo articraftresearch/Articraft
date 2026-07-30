@@ -58,6 +58,17 @@ def empty_compile_payload(*, error: str = "", stdout: str = "", stderr: str = ""
     return CompileResult(error=error, stdout=stdout, stderr=stderr).to_payload()
 
 
+def with_compile_report(payload: dict[str, Any]) -> dict[str, Any]:
+    """Attach the agent-facing report to a compile payload.
+
+    Callers add this rather than ``CompileResult`` building its own report: the
+    result is data, this is presentation, and the dependency only runs one way.
+    """
+
+    payload["compile_report"] = build_compile_report_from_payload(payload)
+    return payload
+
+
 def build_compile_report_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     status: Status = "success" if payload["status"] == "success" else "failure"
     return build_compile_report(

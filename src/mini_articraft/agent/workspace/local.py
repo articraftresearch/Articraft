@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from mini_articraft import package_dir
 from mini_articraft._child_process import child_environment
+from mini_articraft.compiler.feedback import with_compile_report
 from mini_articraft.compiler.result import CompileResult
 from mini_articraft.record import Record
 from mini_articraft.settings import DEFAULT_COMPILE_TIMEOUT_SECONDS, DEFAULT_OUTPUT_DIR
@@ -243,11 +244,7 @@ def _finalize_result(
     result: CompileResult,
     returncode: int | None,
 ) -> dict[str, Any]:
-    payload = result.to_payload(
-        include_report=True,
-        include_returncode=True,
-        returncode=returncode,
-    )
+    payload = with_compile_report(result.to_payload(include_returncode=True, returncode=returncode))
     return _with_paths(run_dir, payload)
 
 
