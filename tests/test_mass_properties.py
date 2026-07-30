@@ -206,7 +206,7 @@ def test_open_shapes_fail_instead_of_being_dropped() -> None:
 def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -> None:
     # The gate is only useful if it stops the compile; most baseline checks report as
     # non-blocking diagnostics, so this guards that missing mass is not one of them.
-    from mini_articraft.compiler.runner import LocalEnvironment
+    from mini_articraft.agent.workspace.local import LocalWorkspace
 
     source = (
         "from mini_articraft.sdk import ArticulatedObject, BoxGeometry, TestContext, TestReport\n"
@@ -224,7 +224,7 @@ def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -
 
     statuses = {}
     for physics in (False, True):
-        env = LocalEnvironment(output_dir=tmp_path / str(physics), physics_enabled=physics)
+        env = LocalWorkspace(output_dir=tmp_path / str(physics), physics_enabled=physics)
         run_dir = env.create_run(f"run_{physics}")
         (run_dir / "workspace" / "main.py").write_text(source)
         statuses[physics] = env.compile_path(run_dir)["status"]

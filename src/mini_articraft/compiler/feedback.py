@@ -58,6 +58,17 @@ def empty_compile_payload(*, error: str = "", stdout: str = "", stderr: str = ""
     return CompileResult(error=error, stdout=stdout, stderr=stderr).to_payload()
 
 
+def with_compile_report(payload: dict[str, Any]) -> dict[str, Any]:
+    """Attach the agent-facing report to a compile payload.
+
+    Callers add this rather than ``CompileResult`` building its own report: the
+    result is data, this is presentation, and the dependency only runs one way.
+    """
+
+    payload["compile_report"] = build_compile_report_from_payload(payload)
+    return payload
+
+
 def build_compile_report_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     status: Status = "success" if payload["status"] == "success" else "failure"
     return build_compile_report(
@@ -482,7 +493,11 @@ def _runtime_signal(error: str, *, traceback_text: str = "") -> CompileSignal:
         )
     if any(
         marker in lower
-        for marker in ("unknown shape", "missing named geometry", "missing exact geometry")
+        for marker in (
+            "unknown shape",
+            "missing named geometry",
+            "missing exact geometry",
+        )
     ):
         return CompileSignal(
             "failure",
@@ -697,7 +712,13 @@ def _inspection_advice(kind: str) -> str:
 
 def _add_section(parts: list[str], tag: str, title: str, signals: list[CompileSignal]) -> None:
     if signals:
-        parts += ["", f"<{tag}>", title, *[_signal_line(s) for s in signals], f"</{tag}>"]
+        parts += [
+            "",
+            f"<{tag}>",
+            title,
+            *[_signal_line(s) for s in signals],
+            f"</{tag}>",
+        ]
 
 
 def _signal_line(signal: CompileSignal) -> str:
@@ -709,7 +730,9 @@ def _signal_line(signal: CompileSignal) -> str:
     return line
 
 
-def _failures(signals: list[CompileSignal] | tuple[CompileSignal, ...]) -> list[CompileSignal]:
+def _failures(
+    signals: list[CompileSignal] | tuple[CompileSignal, ...],
+) -> list[CompileSignal]:
     return _ordered_signals(signals, "failure")
 
 

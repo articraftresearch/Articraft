@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import BaseModel
 
 import mini_articraft.agent.tools as tools
-from mini_articraft import ContextSummarizer, Environment, Model, package_dir
+from mini_articraft import ContextSummarizer, Model, Workspace, package_dir
 from mini_articraft.agent import events
 from mini_articraft.agent.compaction import SUMMARY_MAX_OUTPUT_TOKENS, prepare_compaction
 from mini_articraft.agent.images import PreparedImage, prepare_image
@@ -34,14 +34,14 @@ class Agent:
     def __init__(
         self,
         model: Model,
-        env: Environment,
+        workspace: Workspace,
         *,
         on_event: Callable[[events.Event], None] | None = None,
         **kwargs: Any,
     ):
         self.config = AgentConfig(**kwargs)
         self.model = model
-        self.env = env
+        self.workspace = workspace
         self.messages: list[dict[str, Any]] = []
         self._on_event = on_event
         self._enabled_tool_names = set(tools.TOOLS)
@@ -64,8 +64,8 @@ class Agent:
         tool_schemas = tools.schemas(include_images=supports_images)
         self._enabled_tool_names = {str(schema["name"]) for schema in tool_schemas}
         run_id = run_id or _run_id_for_prompt(prompt)
-        run_dir = self.env.create_run(run_id)
-        context = ToolContext(self.env, run_dir, run_dir / "workspace")
+        run_dir = self.workspace.create_run(run_id)
+        context = ToolContext(self.workspace, run_dir, run_dir / "workspace")
         conversation_path = run_dir / "conversation.jsonl"
         record_path = run_dir / "record.json"
         record = Record.load(record_path)

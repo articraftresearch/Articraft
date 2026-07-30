@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
+from mini_articraft.compiler.feedback import with_compile_report
 from mini_articraft.compiler.result import CompileResult
 from mini_articraft.record import Record
 from mini_articraft.sdk import (
@@ -92,7 +93,8 @@ def compile_run(
     )
     result.compile_stats = tracker.finish()
     tracker.remove()
-    return result.to_payload(include_report=include_report)
+    payload = result.to_payload()
+    return with_compile_report(payload) if include_report else payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,9 +444,9 @@ def main(argv: list[str] | None = None) -> int:
     physics = "--physics" in args
     args = [arg for arg in args if arg not in {"--raw", "--physics"}]
     if len(args) != 1:
-        payload = CompileResult(error="Usage: mini-articraft-compile-run <run_dir>").to_payload(
-            include_report=not raw
-        )
+        payload = CompileResult(error="Usage: mini-articraft-compile-run <run_dir>").to_payload()
+        if not raw:
+            payload = with_compile_report(payload)
         print(json.dumps(payload))
         return 2
 

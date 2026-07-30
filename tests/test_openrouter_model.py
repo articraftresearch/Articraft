@@ -12,7 +12,7 @@ from harness import GOOD_MAIN_PY
 from mini_articraft.agent import Agent
 from mini_articraft.agent.provider import create_model
 from mini_articraft.agent.provider.openrouter import OpenRouterModel
-from mini_articraft.compiler import LocalEnvironment
+from mini_articraft.agent.workspace import LocalWorkspace
 from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_OPENROUTER_MODEL, Settings, get_settings
 
@@ -275,7 +275,7 @@ def test_openrouter_model_runs_full_generate_compile_loop(tmp_path: Path) -> Non
             ),
         ]
     )
-    agent = Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3)
+    agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3)
 
     result = run(agent.run("a box", run_id="openrouter-box"))
 

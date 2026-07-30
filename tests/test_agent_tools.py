@@ -9,6 +9,8 @@ import os
 import shlex
 import sys
 import time
+from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -17,8 +19,8 @@ from mini_articraft.agent.images import LIMITS, prepare_image
 from mini_articraft.agent.tools import ToolContext, get, schemas
 from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.tools._exec import ExecSessions
+from mini_articraft.agent.workspace.local import LocalWorkspace
 from mini_articraft.compiler.feedback import build_compile_report_from_payload
-from mini_articraft.compiler.runner import LocalEnvironment
 
 
 def run(awaitable):
@@ -26,7 +28,7 @@ def run(awaitable):
 
 
 def context(tmp_path) -> ToolContext:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("tools")
     return ToolContext(env, run_dir, run_dir / "workspace")
 
@@ -78,7 +80,7 @@ def test_read_text_with_offset_and_limit(tmp_path) -> None:
 
 def test_workspace_tools_handle_default_relative_run_dir(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    env = LocalEnvironment()
+    env = LocalWorkspace()
     run_dir = env.create_run("relative")
     ctx = ToolContext(env, run_dir, run_dir / "workspace")
 
@@ -735,7 +737,7 @@ class FakeCompileEnv:
     def __init__(self, *statuses: str) -> None:
         self.statuses = list(statuses)
 
-    def compile_path(self, _run_dir):
+    def compile_path(self, run_dir: Path | str) -> dict[str, Any]:
         status = self.statuses.pop(0)
         payload = {
             "status": status,

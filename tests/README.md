@@ -32,14 +32,14 @@ A scripted step can also be a callable `(ModelQuery) -> Response`, so the
 See `tests/test_agent_scenarios.py` for end-to-end examples (repair loops,
 repeat-failure guidance, allowances).
 
-## WarmEnvironment vs LocalEnvironment
+## WarmEnvironment vs LocalWorkspace
 
 Both lanes run every compile in a worker subprocess with the same timeout,
 cleanup, and result-assembly contract (shared in
 `src/mini_articraft/compiler/runner.py`). They differ only in the worker
 lifecycle:
 
-- `LocalEnvironment` (cold) spawns a fresh interpreter per compile (~3s).
+- `LocalWorkspace` (cold) spawns a fresh interpreter per compile (~3s).
   It owns the fresh-interpreter, process-cleanup, and installed-wheel
   contracts (`test_compile.py`).
 - `WarmEnvironment` (warm) keeps one worker (`tests/_compile_server.py`)

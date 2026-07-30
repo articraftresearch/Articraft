@@ -28,9 +28,15 @@ class ContextSummarizer(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class Environment(Protocol):
+class Workspace(Protocol):
+    """Where the agent's work lives, and therefore where it runs.
+
+    Both halves vary together: whatever machine holds the run directory is the
+    machine that has to compile it.
+    """
+
     def create_run(self, run_id: str) -> Path: ...
     def compile_path(self, run_dir: Path | str) -> dict[str, Any]: ...
 
 
-__all__ = ["ContextSummarizer", "Environment", "Model", "__version__", "package_dir"]
+__all__ = ["ContextSummarizer", "Model", "Workspace", "__version__", "package_dir"]
