@@ -7,7 +7,7 @@ lanes, cheapest first:
    no harness needed.
 2. Warm compile lane -- :class:`WarmEnvironment` keeps one compile worker
    subprocess alive for the whole test session: the same isolation, timeout,
-   and cleanup contract as ``LocalEnvironment``, but the geometry imports are
+   and cleanup contract as ``LocalWorkspace``, but the geometry imports are
    paid once instead of once per compile (~3s -> ~0.1s).
 3. Scripted agent lane -- :class:`ScriptedModel` plus :func:`run_scenario`
    drive the full agent loop (tools, reminders, compile freshness, record)
@@ -17,7 +17,7 @@ lanes, cheapest first:
    scripted model for free, or install one by hand; then plug any of them
    into :func:`run_scenario` by name for offline regression runs.
 
-The cold lane (``LocalEnvironment``, fresh worker per compile) stays the
+The cold lane (``LocalWorkspace``, fresh worker per compile) stays the
 reference for the fresh-interpreter and installed-wheel contracts; both
 lanes share the worker payload shape and ``local.py``'s result assembly, so
 behavior differences between them are bugs, not semantics.
@@ -51,7 +51,7 @@ from mini_articraft.agent import Agent, events
 from mini_articraft.agent.tools import Tool, ToolContext
 from mini_articraft.agent.tools._core import schema as _tool_schema
 from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.compiler.runner import LocalEnvironment, _error_result, _finalize_payload
+from mini_articraft.agent.workspace.local import LocalWorkspace, _error_result, _finalize_payload
 from mini_articraft.record import Record, read_conversation
 
 T = TypeVar("T")
@@ -753,12 +753,12 @@ class _CompileServer:
             proc.wait()
 
 
-class WarmEnvironment(LocalEnvironment):
-    """A ``LocalEnvironment`` that compiles through one shared warm worker.
+class WarmEnvironment(LocalWorkspace):
+    """A ``LocalWorkspace`` that compiles through one shared warm worker.
 
     Same contract as the cold lane -- every compile runs in a worker
     subprocess with the same timeout and cleanup semantics, and result
-    assembly is shared with ``LocalEnvironment`` -- but the worker
+    assembly is shared with ``LocalWorkspace`` -- but the worker
     (``tests/_compile_server.py``) stays alive between compiles, so the
     geometry imports are paid once per test session instead of once per
     compile (~3s -> ~0.1s each). A compile that times out or crashes the
@@ -868,7 +868,7 @@ def run_scenario(
     script: Iterable[Step] | None = None,
     *,
     model: ScenarioModel | Model | None = None,
-    env: LocalEnvironment | None = None,
+    env: LocalWorkspace | None = None,
     tmp_path: Path | None = None,
     run_id: str = "scenario",
     max_turns: int = 10,
@@ -881,7 +881,7 @@ def run_scenario(
     ``model=`` plugs in something else -- e.g. one recording from a
     :class:`ReplayHarness`, or a live :class:`~mini_articraft.Model`. Pass
     ``env`` to choose the compile lane (:class:`WarmEnvironment` for speed)
-    or ``tmp_path`` for a plain subprocess ``LocalEnvironment``. By default
+    or ``tmp_path`` for a plain subprocess ``LocalWorkspace``. By default
     finite harness models must be consumed exactly; pass
     ``assert_exhausted=False`` for open-ended or live runs. Every event also
     flows to ``on_event`` when given (the artifacts recorder always sees it
@@ -896,7 +896,7 @@ def run_scenario(
     if env is None:
         if tmp_path is None:
             raise ValueError("run_scenario needs env= or tmp_path=")
-        env = LocalEnvironment(output_dir=tmp_path)
+        env = LocalWorkspace(output_dir=tmp_path)
     recorder = EventRecorder()
 
     def callback(event: events.Event) -> None:
@@ -940,7 +940,7 @@ def compile_success_tool() -> Tool:
         result = {"status": "success", "usdz": str(usdz)}
         context.compile_result = result
         context.successful_compile_result = result
-        context.successful_compile_digest = workspace_digest(context.workspace)
+        context.successful_compile_digest = workspace_digest(context.workspace_dir)
         return result
 
     return Tool("compile", stub_schema("compile"), run_compile)

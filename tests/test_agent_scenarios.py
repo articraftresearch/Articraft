@@ -1,7 +1,7 @@
 """Deep agent-loop scenarios: the full pipeline with a scripted model, for $0.
 
 Every scenario runs the real tools and the real compile worker (via
-``LocalEnvironment``), so the model-facing machinery --
+``LocalWorkspace``), so the model-facing machinery --
 compile signals, repeat-failure guidance, allowances, reminders, the run
 record, the event stream -- is exercised end to end without a paid
 generation.

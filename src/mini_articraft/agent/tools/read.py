@@ -7,9 +7,9 @@ from mini_articraft.agent.tools._core import Tool, ToolContext, display_path, re
 
 
 async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    path = readable_path(context.workspace, str(args["path"]))
+    path = readable_path(context.workspace_dir, str(args["path"]))
     data = path.read_bytes()
-    path_label = display_path(context.workspace, path)
+    path_label = display_path(context.workspace_dir, path)
     mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     if mime_type.startswith("image/"):
         raise ValueError(f"{path_label} is an image; use view_image")

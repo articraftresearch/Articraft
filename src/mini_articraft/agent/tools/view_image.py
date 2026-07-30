@@ -19,11 +19,11 @@ async def run(context: ToolContext, args: dict[str, Any]) -> ToolResult:
     if detail not in LIMITS:
         raise ValueError("detail must be high or original")
 
-    requested_path = readable_path(context.workspace, str(args["path"]))
+    requested_path = readable_path(context.workspace_dir, str(args["path"]))
     raster_path = _raster_path(requested_path)
     image = prepare_image(raster_path, detail=detail)
-    requested_label = display_path(context.workspace, requested_path)
-    raster_label = display_path(context.workspace, raster_path)
+    requested_label = display_path(context.workspace_dir, requested_path)
+    raster_label = display_path(context.workspace_dir, raster_path)
     result = image.metadata(requested_label)
     if raster_path != requested_path:
         result["raster_path"] = raster_label

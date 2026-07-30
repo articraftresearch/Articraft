@@ -17,8 +17,8 @@ from mini_articraft.agent.images import LIMITS, prepare_image
 from mini_articraft.agent.tools import ToolContext, get, schemas
 from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.tools._exec import ExecSessions
+from mini_articraft.agent.workspace.local import LocalWorkspace
 from mini_articraft.compiler.feedback import build_compile_report_from_payload
-from mini_articraft.compiler.runner import LocalEnvironment
 
 
 def run(awaitable):
@@ -26,7 +26,7 @@ def run(awaitable):
 
 
 def context(tmp_path) -> ToolContext:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("tools")
     return ToolContext(env, run_dir, run_dir / "workspace")
 
@@ -69,7 +69,7 @@ def test_read_rejects_path_escape(tmp_path) -> None:
 
 def test_read_text_with_offset_and_limit(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.workspace.joinpath("notes.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    ctx.workspace_dir.joinpath("notes.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
 
     result = run(get("read").run(ctx, {"path": "notes.txt", "offset": 2, "limit": 1}))
 
@@ -78,7 +78,7 @@ def test_read_text_with_offset_and_limit(tmp_path) -> None:
 
 def test_workspace_tools_handle_default_relative_run_dir(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    env = LocalEnvironment()
+    env = LocalWorkspace()
     run_dir = env.create_run("relative")
     ctx = ToolContext(env, run_dir, run_dir / "workspace")
 
@@ -147,7 +147,7 @@ def test_read_rejects_images_and_view_image_returns_typed_content(tmp_path) -> N
     image_bytes = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
     )
-    ctx.workspace.joinpath("image.png").write_bytes(image_bytes)
+    ctx.workspace_dir.joinpath("image.png").write_bytes(image_bytes)
 
     with pytest.raises(ValueError, match="use view_image"):
         run(get("read").run(ctx, {"path": "image.png"}))
@@ -184,7 +184,7 @@ def test_view_image_never_enlarges_or_exceeds_the_patch_limit(tmp_path) -> None:
     ctx = context(tmp_path)
     source_size = (1_249, 1_985)
     image = Image.new("RGB", source_size, color="white")
-    image.save(ctx.workspace / "near-limit.png")
+    image.save(ctx.workspace_dir / "near-limit.png")
 
     result = run(get("view_image").run(ctx, {"path": "near-limit.png"}))
 
@@ -243,7 +243,7 @@ def test_prepare_image_rejects_animated_and_oversized_files(monkeypatch, tmp_pat
 
 def test_edit_replaces_unique_text(tmp_path) -> None:
     ctx = context(tmp_path)
-    path = ctx.workspace / "main.py"
+    path = ctx.workspace_dir / "main.py"
     path.write_text("old\n", encoding="utf-8")
 
     result = run(get("edit").run(ctx, {"path": "main.py", "old_text": "old", "new_text": "new"}))
@@ -254,7 +254,7 @@ def test_edit_replaces_unique_text(tmp_path) -> None:
 
 def test_edit_fails_when_text_is_not_unique(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.workspace.joinpath("main.py").write_text("x\nx\n", encoding="utf-8")
+    ctx.workspace_dir.joinpath("main.py").write_text("x\nx\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="2 times"):
         run(get("edit").run(ctx, {"path": "main.py", "old_text": "x", "new_text": "y"}))
@@ -282,7 +282,7 @@ def test_write_creates_parent_dirs(tmp_path) -> None:
     result = run(get("write").run(ctx, {"path": "parts/main.py", "content": "x"}))
 
     assert result == {"path": "parts/main.py", "bytes": 1}
-    assert ctx.workspace.joinpath("parts", "main.py").read_text(encoding="utf-8") == "x"
+    assert ctx.workspace_dir.joinpath("parts", "main.py").read_text(encoding="utf-8") == "x"
 
 
 def test_write_rejects_symlinked_sdk_docs(tmp_path) -> None:
@@ -295,14 +295,14 @@ def test_write_rejects_symlinked_sdk_docs(tmp_path) -> None:
 def test_create_run_links_sdk_docs(tmp_path) -> None:
     ctx = context(tmp_path)
 
-    link = ctx.workspace / "docs" / "sdk"
+    link = ctx.workspace_dir / "docs" / "sdk"
     assert link.is_symlink()
     assert link.joinpath("common", "00_quickstart.md").is_file()
 
 
 def test_workspace_digest_ignores_docs_caches_and_temp_files(tmp_path) -> None:
     ctx = context(tmp_path)
-    baseline = workspace_digest(ctx.workspace)
+    baseline = workspace_digest(ctx.workspace_dir)
 
     for directory in (
         "__pycache__",
@@ -311,7 +311,7 @@ def test_workspace_digest_ignores_docs_caches_and_temp_files(tmp_path) -> None:
         ".mypy_cache",
         ".git",
     ):
-        path = ctx.workspace / directory
+        path = ctx.workspace_dir / directory
         path.mkdir()
         path.joinpath("generated.txt").write_text("ignored", encoding="utf-8")
     for name in (
@@ -323,8 +323,8 @@ def test_workspace_digest_ignores_docs_caches_and_temp_files(tmp_path) -> None:
         ".~lock.main.py#",
         ".DS_Store",
     ):
-        ctx.workspace.joinpath(name).write_text("ignored", encoding="utf-8")
-    docs = ctx.workspace / "docs"
+        ctx.workspace_dir.joinpath(name).write_text("ignored", encoding="utf-8")
+    docs = ctx.workspace_dir / "docs"
     docs.joinpath("sdk").unlink()
     docs.rmdir()
     external_docs = tmp_path / "external-docs"
@@ -332,32 +332,32 @@ def test_workspace_digest_ignores_docs_caches_and_temp_files(tmp_path) -> None:
     external_docs.joinpath("changed.txt").write_text("external", encoding="utf-8")
     docs.symlink_to(external_docs, target_is_directory=True)
 
-    assert workspace_digest(ctx.workspace) == baseline
+    assert workspace_digest(ctx.workspace_dir) == baseline
 
-    ctx.workspace.joinpath("build").mkdir()
-    ctx.workspace.joinpath("build", "generated.py").write_text("authored", encoding="utf-8")
-    assert workspace_digest(ctx.workspace) != baseline
+    ctx.workspace_dir.joinpath("build").mkdir()
+    ctx.workspace_dir.joinpath("build", "generated.py").write_text("authored", encoding="utf-8")
+    assert workspace_digest(ctx.workspace_dir) != baseline
 
 
 def test_workspace_digest_hashes_non_doc_symlink_targets(tmp_path) -> None:
     ctx = context(tmp_path)
     target = tmp_path / "shared.py"
     target.write_text("VALUE = 1\n", encoding="utf-8")
-    ctx.workspace.joinpath("shared.py").symlink_to(target)
-    baseline = workspace_digest(ctx.workspace)
+    ctx.workspace_dir.joinpath("shared.py").symlink_to(target)
+    baseline = workspace_digest(ctx.workspace_dir)
 
     target.write_text("VALUE = 2\n", encoding="utf-8")
 
-    assert workspace_digest(ctx.workspace) != baseline
+    assert workspace_digest(ctx.workspace_dir) != baseline
 
 
 def test_workspace_digest_is_independent_of_workspace_location(tmp_path) -> None:
     left = context(tmp_path / "left")
     right = context(tmp_path / "right")
-    left.workspace.joinpath("helper.py").write_text("VALUE = 1\n", encoding="utf-8")
-    right.workspace.joinpath("helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+    left.workspace_dir.joinpath("helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+    right.workspace_dir.joinpath("helper.py").write_text("VALUE = 1\n", encoding="utf-8")
 
-    assert workspace_digest(left.workspace) == workspace_digest(right.workspace)
+    assert workspace_digest(left.workspace_dir) == workspace_digest(right.workspace_dir)
 
 
 def test_exec_command_reports_output_and_return_code(tmp_path) -> None:
@@ -397,7 +397,7 @@ def test_exec_command_does_not_receive_api_credentials(monkeypatch, tmp_path) ->
 
 def test_exec_command_renders_public_sdk_previews_before_compile(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.workspace.joinpath("main.py").write_text(
+    ctx.workspace_dir.joinpath("main.py").write_text(
         """from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
@@ -426,7 +426,7 @@ def run_tests() -> TestReport:
 """,
         encoding="utf-8",
     )
-    ctx.workspace.joinpath("previews.py").write_text(
+    ctx.workspace_dir.joinpath("previews.py").write_text(
         """from main import object_model
 from mini_articraft.sdk import (
     MeridionalSectionView,
@@ -478,7 +478,7 @@ render_view(
     assert result["returncode"] == 0, result
     assert ctx.compile_result is None
     for name in ("selected.png", "section.png", "meridional.png", "motion.png"):
-        image_path = ctx.workspace / "qa" / "previews" / name
+        image_path = ctx.workspace_dir / "qa" / "previews" / name
         assert image_path.is_file()
         with Image.open(image_path) as image:
             assert image.width > 0
@@ -488,7 +488,7 @@ render_view(
 def test_preview_output_invalidates_compile_freshness(tmp_path) -> None:
     ctx = context(tmp_path)
     ctx.successful_compile_result = {"status": "success"}
-    ctx.successful_compile_digest = workspace_digest(ctx.workspace)
+    ctx.successful_compile_digest = workspace_digest(ctx.workspace_dir)
     assert ctx.refresh_compile_freshness()
 
     result = run(
@@ -651,7 +651,7 @@ def test_exec_command_zero_output_budget_returns_only_a_truncation_marker(tmp_pa
 
 def test_compile_tool_compiles_workspace(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.workspace.joinpath("main.py").write_text(
+    ctx.workspace_dir.joinpath("main.py").write_text(
         """
 from build123d import *
 
@@ -720,7 +720,7 @@ def test_cached_compile_success_resets_failure_streak(tmp_path) -> None:
             {"status": "success", "test_report": None}
         ),
     }
-    ctx.successful_compile_digest = workspace_digest(ctx.workspace)
+    ctx.successful_compile_digest = workspace_digest(ctx.workspace_dir)
     ctx.last_compile_failure_signature = "previous-failure"
     ctx.consecutive_compile_failures = 2
 

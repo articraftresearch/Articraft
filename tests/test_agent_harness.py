@@ -30,7 +30,7 @@ from mini_articraft.agent.harness import (
 )
 from mini_articraft.agent.tools import Tool, ToolContext, ToolResult
 from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.compiler.runner import DEFAULT_MAIN_PY, LocalEnvironment
+from mini_articraft.agent.workspace.local import DEFAULT_MAIN_PY, LocalWorkspace
 from mini_articraft.record import Record, read_conversation
 
 
@@ -100,7 +100,7 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
             },
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=3)
 
     result = run(agent.run("a box", run_id="box"))
@@ -177,7 +177,7 @@ def test_agent_removes_image_tools_and_prompting_for_text_only_model(tmp_path) -
     model.supports_images = False
 
     result = run(
-        Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run(
+        Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run(
             "a box",
             run_id="box",
         )
@@ -194,7 +194,7 @@ def test_agent_rejects_reference_image_for_text_only_model(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="does not support reference images"):
         run(
-            Agent(model, LocalEnvironment(output_dir=tmp_path)).run(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
                 "a box",
                 image_path=image_path,
             )
@@ -239,7 +239,7 @@ def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> 
     )
     agent = Agent(
         model,
-        LocalEnvironment(output_dir=tmp_path),
+        LocalWorkspace(output_dir=tmp_path),
         max_turns=3,
         on_event=seen_events.append,
     )
@@ -277,7 +277,7 @@ def test_agent_sends_typed_image_content_but_records_only_metadata(
         )
 
     async def run_write(context, args):
-        context.workspace.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
+        context.workspace_dir.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
         return {"path": args["path"], "bytes": len(args["content"])}
 
     def inspect_image(query: ModelQuery) -> Response:
@@ -322,7 +322,7 @@ def test_agent_sends_typed_image_content_but_records_only_metadata(
             text("done"),
         ]
     )
-    agent = Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=4)
+    agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=4)
 
     result = run(agent.run("a box", run_id="box"))
 
@@ -365,7 +365,7 @@ def test_agent_sends_and_saves_initial_reference_image(tmp_path) -> None:
     )
     run_dir = tmp_path / "box"
     result = run(
-        Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run(
+        Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run(
             "a box",
             run_id="box",
             image_path=image_path,
@@ -403,7 +403,7 @@ def test_agent_requires_compile_before_final_response(tmp_path) -> None:
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=4)
 
     result = run(agent.run("a box", run_id="box"))
@@ -426,7 +426,7 @@ def test_agent_keeps_compile_fresh_after_read(
     tmp_path,
 ) -> None:
     async def run_write(context, args):
-        context.workspace.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
+        context.workspace_dir.joinpath(args["path"]).write_text(args["content"], encoding="utf-8")
         return {"path": args["path"], "bytes": len(args["content"])}
 
     async def run_read(context, args):
@@ -449,7 +449,7 @@ def test_agent_keeps_compile_fresh_after_read(
             text("done after read"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=4)
 
     result = run(agent.run("a box", run_id="box"))
@@ -492,7 +492,7 @@ def test_agent_keeps_compile_fresh_after_inspection_and_noop_edits(
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=6).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=6).run("box"))
 
     assert result["status"] == "success"
     assert result["message"] == "done"
@@ -516,7 +516,7 @@ def test_agent_requires_new_compile_after_real_file_change(monkeypatch, tmp_path
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=6).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=6).run("box"))
 
     assert result["status"] == "success"
     assert result["message"] == "done"
@@ -570,7 +570,7 @@ def test_running_exec_session_blocks_compile_and_finalization(monkeypatch, tmp_p
     result = run(
         Agent(
             model,
-            LocalEnvironment(output_dir=tmp_path),
+            LocalWorkspace(output_dir=tmp_path),
             max_turns=6,
         ).run("box", run_id="box")
     )
@@ -600,7 +600,7 @@ def test_agent_requires_visible_final_after_fresh_compile(monkeypatch, tmp_path)
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=4).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=4).run("box"))
 
     assert result["message"] == "done"
     assert model.queries[3].contains("<final_response_required>")
@@ -611,7 +611,7 @@ def test_agent_does_not_finalize_success_without_a_usdz_result(monkeypatch, tmp_
         result = {"status": "success"}
         context.compile_result = result
         context.successful_compile_result = result
-        context.successful_compile_digest = workspace_digest(context.workspace)
+        context.successful_compile_digest = workspace_digest(context.workspace_dir)
         return result
 
     monkeypatch.setattr(
@@ -626,7 +626,7 @@ def test_agent_does_not_finalize_success_without_a_usdz_result(monkeypatch, tmp_
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=2).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=2).run("box"))
 
     assert result["status"] == "error"
     assert result["result"] == ""
@@ -648,7 +648,7 @@ def test_cached_success_survives_a_later_failed_compile(monkeypatch, tmp_path) -
             result = {"status": "success", "usdz": str(usdz)}
             context.compile_result = result
             context.successful_compile_result = result
-            context.successful_compile_digest = workspace_digest(context.workspace)
+            context.successful_compile_digest = workspace_digest(context.workspace_dir)
             return result
         result = {"status": "error", "error": "bad geometry"}
         context.compile_result = result
@@ -680,7 +680,7 @@ def test_cached_success_survives_a_later_failed_compile(monkeypatch, tmp_path) -
     )
 
     result = run(
-        Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=6).run("box", run_id="cached")
+        Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=6).run("box", run_id="cached")
     )
 
     assert attempts == 2
@@ -722,7 +722,7 @@ def test_agent_cancellation_terminates_a_live_exec_session(monkeypatch, tmp_path
     )
 
     async def exercise() -> None:
-        env = LocalEnvironment(output_dir=tmp_path)
+        env = LocalWorkspace(output_dir=tmp_path)
         task = asyncio.create_task(Agent(model, env, max_turns=3).run("box", run_id="cancel"))
         await asyncio.wait_for(waiting.wait(), timeout=5)
         assert contexts[0].exec_sessions.live_ids()
@@ -737,7 +737,7 @@ def test_agent_cancellation_terminates_a_live_exec_session(monkeypatch, tmp_path
 def test_agent_fails_third_consecutive_empty_response(tmp_path) -> None:
     model = ScriptedModel([text("") for _ in range(3)])
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert result["status"] == "error"
     assert "three consecutive responses" in result["error"]
@@ -750,7 +750,7 @@ def test_agent_records_model_query_failure(tmp_path) -> None:
 
     model = ScriptedModel([fail])
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert result["status"] == "error"
     assert result["result"] == ""
@@ -766,7 +766,7 @@ def test_agent_closes_the_model_after_a_successful_run(tmp_path) -> None:
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert result["status"] == "success"
     assert model.close_calls == 1
@@ -778,7 +778,7 @@ def test_agent_closes_the_model_after_a_model_failure(tmp_path) -> None:
 
     model = ScriptedModel([fail])
 
-    run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert model.close_calls == 1
 
@@ -795,7 +795,7 @@ def test_agent_closes_the_model_on_cancellation(tmp_path) -> None:
     model = ScriptedModel([block_forever])
 
     async def exercise() -> None:
-        env = LocalEnvironment(output_dir=tmp_path)
+        env = LocalWorkspace(output_dir=tmp_path)
         task = asyncio.create_task(Agent(model, env, max_turns=3).run("box", run_id="cancel"))
         await asyncio.wait_for(waiting.wait(), timeout=5)
         task.cancel()
@@ -816,7 +816,7 @@ def test_agent_emits_run_events(tmp_path) -> None:
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     captured: list[events.Event] = []
     agent = Agent(model, env, max_turns=3, on_event=captured.append)
 
@@ -885,7 +885,7 @@ def test_agent_runs_parallel_safe_tools_concurrently(monkeypatch, tmp_path) -> N
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=3)
 
     result = run(agent.run("a box", run_id="box"))
@@ -930,7 +930,7 @@ def test_agent_serializes_non_parallel_tools(monkeypatch, tmp_path) -> None:
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=3)
 
     result = run(agent.run("a box", run_id="box"))

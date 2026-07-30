@@ -6,7 +6,7 @@ from mini_articraft.agent.tools._core import Tool, ToolContext, display_path, sc
 
 
 async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    path = workspace_path(context.workspace, str(args["path"]))
+    path = workspace_path(context.workspace_dir, str(args["path"]))
     old_text = str(args["old_text"])
     new_text = str(args["new_text"])
     text = path.read_text(encoding="utf-8")
@@ -14,7 +14,7 @@ async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     if count != 1:
         raise ValueError(f"old_text matched {count} times")
     path.write_text(text.replace(old_text, new_text, 1), encoding="utf-8")
-    return {"path": display_path(context.workspace, path), "replaced": 1}
+    return {"path": display_path(context.workspace_dir, path), "replaced": 1}
 
 
 TOOL = Tool(

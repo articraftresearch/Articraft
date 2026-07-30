@@ -27,7 +27,8 @@ Use these areas as the main boundaries:
 
 - `agent/` owns the generate and compile loop.
 - `models/` owns model adapters.
-- `environments/` owns local run creation and compile execution.
+- `agent/workspace/` owns run creation and compile execution: where the agent works.
+- `compiler/` owns the compile itself, plus its result and the signals the agent reads.
 - `sdk/` owns the small build123d object API, joints, and export helpers.
 - `prompts/` owns the agent prompts.
 - `settings.py` owns default runtime settings.
@@ -62,7 +63,7 @@ The compile worker entry point is:
 uv run mini-articraft-compile-run
 ```
 
-Prefer calling the compile worker through `LocalEnvironment` unless you are
+Prefer calling the compile worker through `LocalWorkspace` unless you are
 debugging the worker itself.
 
 ## Coding style

@@ -28,9 +28,11 @@ IGNORED_WORKSPACE_SUFFIXES = {".pyc", ".pyo", ".swp", ".swo"}
 
 @dataclass
 class ToolContext:
-    env: Any
+    workspace: Any
+    """The Workspace the agent is working in: makes runs, compiles them."""
     run_dir: Path
-    workspace: Path
+    workspace_dir: Path
+    """The directory the agent edits: ``run_dir / "workspace"``."""
     compile_result: dict[str, Any] | None = None
     successful_compile_result: dict[str, Any] | None = None
     successful_compile_digest: str | None = None
@@ -42,7 +44,7 @@ class ToolContext:
         return (
             self.successful_compile_result is not None
             and self.successful_compile_digest is not None
-            and workspace_digest(self.workspace) == self.successful_compile_digest
+            and workspace_digest(self.workspace_dir) == self.successful_compile_digest
         )
 
 

@@ -20,8 +20,8 @@ from mini_articraft.agent.provider.anthropic import (
 from mini_articraft.agent.provider.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
+from mini_articraft.agent.workspace import LocalWorkspace
 from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
-from mini_articraft.compiler import LocalEnvironment
 from mini_articraft.compiler.worker import texture_run
 from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
 from mini_articraft.viewer import load_viewer_run, serve_viewer
@@ -226,7 +226,7 @@ async def _generate(
 ) -> dict[str, Any]:
     model_client = create_model(settings)
     try:
-        env = LocalEnvironment(
+        env = LocalWorkspace(
             output_dir=settings.output_dir,
             timeout_seconds=settings.compile_timeout_seconds,
             physics_enabled=settings.physics_enabled,

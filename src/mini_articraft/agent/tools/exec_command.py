@@ -10,7 +10,7 @@ from mini_articraft.agent.tools._exec import (
 
 
 async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    session = await context.exec_sessions.start(context.run_dir, context.workspace, args)
+    session = await context.exec_sessions.start(context.run_dir, context.workspace_dir, args)
     return await context.exec_sessions.poll(session, args)
 
 

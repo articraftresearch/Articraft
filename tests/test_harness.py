@@ -33,7 +33,7 @@ from harness import (
 
 from mini_articraft.agent.events import TurnStarted
 from mini_articraft.agent.tools import ToolContext
-from mini_articraft.compiler.runner import LocalEnvironment
+from mini_articraft.agent.workspace.local import LocalWorkspace
 from mini_articraft.record import Record
 
 
@@ -220,7 +220,7 @@ def test_warm_environment_requires_main_py(tmp_path: Path) -> None:
 def test_warm_environment_matches_the_cold_subprocess_contract(tmp_path: Path) -> None:
     outcomes = {}
     environments = {
-        "cold": LocalEnvironment(output_dir=tmp_path / "cold"),
+        "cold": LocalWorkspace(output_dir=tmp_path / "cold"),
         "warm": WarmEnvironment(output_dir=tmp_path / "warm"),
     }
     for lane, env in environments.items():
@@ -239,7 +239,7 @@ def test_cold_and_warm_lanes_fail_identically(tmp_path: Path) -> None:
     """Failure payloads also match across lanes: status, signals, and codes."""
     outcomes = {}
     environments = {
-        "cold": LocalEnvironment(output_dir=tmp_path / "cold"),
+        "cold": LocalWorkspace(output_dir=tmp_path / "cold"),
         "warm": WarmEnvironment(output_dir=tmp_path / "warm"),
     }
     for lane, env in environments.items():
@@ -720,7 +720,7 @@ def test_replay_leftovers_fail_the_scenario(tmp_path: Path, replay_harness: Repl
 
 
 def test_compile_success_tool_mints_a_usdz_and_marks_freshness(tmp_path: Path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("box")
     context = ToolContext(env, run_dir, run_dir / "workspace")
 
