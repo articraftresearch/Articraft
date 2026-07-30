@@ -103,6 +103,7 @@ def add_tool_results(
             "role": "assistant",
             "content": response["text"],
             "tool_calls": response["tool_calls"],
+            "provider_content": response["provider_content"],
         }
     )
     messages.extend(
@@ -185,6 +186,16 @@ def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost() -> Non
     ]
 
 
+def test_anthropic_model_records_real_sdk_blocks_without_null_fields() -> None:
+    model, _client = anthropic_model(
+        [SimpleNamespace(content=[anthropic.types.TextBlock(text="done", type="text")])]
+    )
+
+    result = run(model.query([{"role": "user", "content": "build"}]))
+
+    assert result["provider_content"] == [{"type": "text", "text": "done"}]
+
+
 def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
     first_content = [
         {
@@ -263,6 +274,29 @@ def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
             ],
         },
     ]
+
+
+def test_anthropic_summary_request() -> None:
+    model, client = anthropic_model(
+        [text_response("checkpoint", input_tokens=100, output_tokens=20)]
+    )
+
+    result = run(
+        model.summarize_context(
+            [
+                {"role": "system", "content": "summarize"},
+                {"role": "user", "content": "old work"},
+            ],
+            max_output_tokens=8_192,
+        )
+    )
+
+    assert result["text"] == "checkpoint"
+    request = client.messages.requests[0]
+    assert request["max_tokens"] == 8_192
+    assert request["system"] == "summarize"
+    assert "tools" not in request
+    assert "cache_control" not in request
 
 
 def test_anthropic_model_groups_consecutive_tool_results() -> None:
@@ -478,8 +512,13 @@ def test_anthropic_model_rejects_unsupported_models() -> None:
             )
         )
 
-    assert context_window_tokens_for("claude-sonnet-5") == 1_000_000
-    assert context_window_tokens_for("claude-opus-5") == 1_000_000
+
+def test_anthropic_model_exposes_conservative_context_window() -> None:
+    model, _client = anthropic_model([text_response("done")])
+
+    assert model.context_window_tokens == 272_000
+    assert context_window_tokens_for("claude-sonnet-5") == 272_000
+    assert context_window_tokens_for("claude-opus-5") == 272_000
     assert context_window_tokens_for("claude-haiku-4-5") is None
 
 

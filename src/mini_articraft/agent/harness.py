@@ -13,8 +13,9 @@ from typing import Any
 from pydantic import BaseModel
 
 import mini_articraft.agent.tools as tools
-from mini_articraft import Environment, Model, package_dir
+from mini_articraft import ContextSummarizer, Environment, Model, package_dir
 from mini_articraft.agent import events
+from mini_articraft.agent.compaction import SUMMARY_MAX_OUTPUT_TOKENS, prepare_compaction
 from mini_articraft.agent.images import PreparedImage, prepare_image
 from mini_articraft.agent.tools import ToolContext
 from mini_articraft.record import Record, append_conversation
@@ -140,6 +141,37 @@ class Agent:
         try:
             for turn in range(1, self.config.max_turns + 1):
                 self._emit(events.TurnStarted(turn))
+                summarizer = self.model if isinstance(self.model, ContextSummarizer) else None
+                plan = (
+                    prepare_compaction(self.messages, context_window_tokens)
+                    if summarizer is not None
+                    else None
+                )
+                if plan is not None and summarizer is not None:
+                    try:
+                        summary_response = await summarizer.summarize_context(
+                            plan.summary_messages,
+                            max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
+                        )
+                        summary = str(summary_response.get("text") or "").strip()
+                        if not summary:
+                            raise ValueError("summary response did not contain text")
+                    except Exception as exc:
+                        termination_error = (
+                            f"context compaction failed: {type(exc).__name__}: {exc}"
+                        )
+                        break
+
+                    cost += _cost(summary_response)
+                    summary_usage = _token_usage(summary_response)
+                    token_usage = _add_token_usage(token_usage, summary_usage)
+                    _save_cost(run_dir, cost, token_usage)
+                    self.messages = plan.apply(self.messages, summary)
+                    append_conversation(
+                        conversation_path,
+                        plan.record(summary, summary_usage),
+                    )
+                    self._emit(events.ContextCompacted(plan.tokens_before))
                 try:
                     response = await self.model.query(self.messages, tools=tool_schemas)
                 except Exception as exc:

@@ -34,6 +34,21 @@ from mini_articraft.environments.local import DEFAULT_MAIN_PY, LocalEnvironment
 from mini_articraft.record import Record, read_conversation
 
 
+class CompactingScriptedModel(ScriptedModel):
+    def __init__(self, responses, summary_response):
+        super().__init__(
+            responses,
+            model_name="claude-test",
+            context_window_tokens=272_000,
+        )
+        self.summary_response = summary_response
+        self.summary_max_output_tokens = 0
+
+    async def summarize_context(self, messages, *, max_output_tokens):
+        self.summary_max_output_tokens = max_output_tokens
+        return self.summary_response
+
+
 def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
     model = ScriptedModel(
         [
@@ -184,6 +199,65 @@ def test_agent_rejects_reference_image_for_text_only_model(tmp_path) -> None:
                 image_path=image_path,
             )
         )
+
+
+def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> None:
+    seen_events = []
+    old_text = "old work " * 10_000
+    recent_text = "recent work " * 8_000
+
+    def inspect_compacted_query(query: ModelQuery) -> Response:
+        assert query.messages[3]["compaction"]["summary"] == "CAD checkpoint"
+        assert query.messages[4]["content"] == recent_text
+        return text("done", cost=0.5, token_usage={"total_tokens": 500})
+
+    model = CompactingScriptedModel(
+        [
+            calls(
+                tool_call(
+                    "write",
+                    {"path": "main.py", "content": GOOD_MAIN_PY},
+                    call_id="call_write",
+                ),
+                text=old_text,
+                cost=0.1,
+                token_usage={"total_tokens": 100_000},
+            ),
+            calls(
+                tool_call("compile", {}, call_id="call_compile"),
+                text=recent_text,
+                cost=0.2,
+                token_usage={"total_tokens": 260_000},
+            ),
+            inspect_compacted_query,
+        ],
+        {
+            "text": "CAD checkpoint",
+            "cost": 0.25,
+            "token_usage": {"total_tokens": 100},
+        },
+    )
+    agent = Agent(
+        model,
+        LocalEnvironment(output_dir=tmp_path),
+        max_turns=3,
+        on_event=seen_events.append,
+    )
+
+    result = run(agent.run("a box", run_id="box"))
+
+    assert result["status"] == "success"
+    assert result["cost"] == 1.05
+    assert result["token_usage"]["total_tokens"] == 360_600
+    assert model.summary_max_output_tokens == 8_192
+
+    conversation = read_conversation(tmp_path / "box" / "conversation.jsonl")
+    compaction = next(row for row in conversation if row.get("type") == "compaction")
+    assert compaction["summary"] == "CAD checkpoint"
+    assert any(
+        row.get("role") == "assistant" and row.get("content") == old_text for row in conversation
+    )
+    assert any(isinstance(event, events.ContextCompacted) for event in seen_events)
 
 
 def test_agent_sends_typed_image_content_but_records_only_metadata(

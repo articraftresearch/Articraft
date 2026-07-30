@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from google.genai import interactions
+from pydantic import TypeAdapter
 
 from mini_articraft.errors import ModelError
 from mini_articraft.models.gemini import GeminiModel, context_window_tokens_for
@@ -51,10 +53,10 @@ def text_response(
         status="completed",
         output_text=text,
         steps=[
-            SimpleNamespace(
-                type="model_output",
-                content=[SimpleNamespace(type="text", text=text)],
-            )
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": text}],
+            }
         ],
         usage=SimpleNamespace(
             total_input_tokens=input_tokens,
@@ -76,20 +78,20 @@ def function_call_response(
     steps = []
     if text:
         steps.append(
-            SimpleNamespace(
-                type="model_output",
-                content=[SimpleNamespace(type="text", text=text)],
-            )
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": text}],
+            }
         )
     steps.extend(
         [
-            SimpleNamespace(type="thought", signature="opaque"),
-            SimpleNamespace(
-                type="function_call",
-                id=call_id,
-                name=name,
-                arguments=arguments,
-            ),
+            {"type": "thought", "signature": "opaque"},
+            {
+                "type": "function_call",
+                "id": call_id,
+                "name": name,
+                "arguments": arguments,
+            },
         ]
     )
     return SimpleNamespace(
@@ -109,19 +111,6 @@ def gemini_model(
     kwargs.setdefault("gemini_model", DEFAULT_GEMINI_MODEL)
     client = FakeClient(responses)
     return GeminiModel(Settings(**kwargs), client=client), client
-
-
-def dump(value: Any) -> Any:
-    if isinstance(value, list):
-        return [dump(item) for item in value]
-    if isinstance(value, dict):
-        return {key: dump(item) for key, item in value.items()}
-    if isinstance(value, SimpleNamespace):
-        return {key: dump(item) for key, item in vars(value).items() if item is not None}
-    model_dump = getattr(value, "model_dump", None)
-    if model_dump is not None:
-        return model_dump(mode="json", exclude_none=True)
-    return value
 
 
 def test_gemini_model_sends_messages_tools_and_returns_usage() -> None:
@@ -250,7 +239,12 @@ def test_gemini_model_preserves_response_steps_for_tool_results() -> None:
 
     messages.extend(
         [
-            {"role": "assistant", "content": "", "tool_calls": first["tool_calls"]},
+            {
+                "role": "assistant",
+                "content": first["text"],
+                "tool_calls": first["tool_calls"],
+                "provider_content": first["provider_content"],
+            },
             {
                 "type": "function_call_output",
                 "call_id": "call_compile",
@@ -261,7 +255,7 @@ def test_gemini_model_preserves_response_steps_for_tool_results() -> None:
     second = run(model.query(messages, tools=[]))
 
     assert second["text"] == "done"
-    assert dump(client.interactions.requests[1]["input"]) == [
+    assert client.interactions.requests[1]["input"] == [
         {
             "type": "user_input",
             "content": [{"type": "text", "text": "build"}],
@@ -289,6 +283,72 @@ def test_gemini_model_preserves_response_steps_for_tool_results() -> None:
             ],
         },
     ]
+    TypeAdapter(interactions.InteractionsInput).validate_python(
+        client.interactions.requests[1]["input"]
+    )
+
+
+def test_gemini_model_marks_tool_errors() -> None:
+    model, client = gemini_model(
+        [
+            function_call_response("write", {"path": "main.py"}, call_id="call_write"),
+            text_response("done"),
+        ]
+    )
+    messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
+    first = run(model.query(messages))
+    messages.extend(
+        [
+            {
+                "role": "assistant",
+                "content": first["text"],
+                "tool_calls": first["tool_calls"],
+                "provider_content": first["provider_content"],
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_write",
+                "output": '{"error": "write failed"}',
+            },
+        ]
+    )
+
+    run(model.query(messages))
+
+    result = client.interactions.requests[1]["input"][-1]
+    assert result["is_error"] is True
+    TypeAdapter(interactions.InteractionsInput).validate_python([result])
+
+
+def test_gemini_model_preserves_unknown_response_steps() -> None:
+    raw = {"type": "future_step", "payload": {"opaque": "value"}}
+    response = text_response("done")
+    response.steps.insert(0, interactions.UnknownStep(raw=raw))
+    model, _client = gemini_model([response])
+
+    result = run(model.query([{"role": "user", "content": "build"}]))
+
+    assert result["provider_content"][0] == raw
+
+
+def test_gemini_summary_request() -> None:
+    model, client = gemini_model([text_response("checkpoint", input_tokens=100, output_tokens=20)])
+
+    result = run(
+        model.summarize_context(
+            [
+                {"role": "system", "content": "summarize"},
+                {"role": "user", "content": "old work"},
+            ],
+            max_output_tokens=8_192,
+        )
+    )
+
+    assert result["text"] == "checkpoint"
+    request = client.interactions.requests[0]
+    assert request["generation_config"] == {"max_output_tokens": 8_192}
+    assert request["system_instruction"] == "summarize"
+    assert request["tools"] is None
 
 
 def test_gemini_model_converts_image_tool_results() -> None:
@@ -302,7 +362,12 @@ def test_gemini_model_converts_image_tool_results() -> None:
     first = run(model.query(messages))
     messages.extend(
         [
-            {"role": "assistant", "content": "", "tool_calls": first["tool_calls"]},
+            {
+                "role": "assistant",
+                "content": first["text"],
+                "tool_calls": first["tool_calls"],
+                "provider_content": first["provider_content"],
+            },
             {
                 "type": "function_call_output",
                 "call_id": "call_image",
@@ -365,8 +430,13 @@ def test_gemini_model_rejects_unsupported_models() -> None:
             )
         )
 
-    assert context_window_tokens_for("gemini-3.6-flash") == 1_048_576
-    assert context_window_tokens_for("gemini-3.1-pro-preview") == 1_048_576
+
+def test_gemini_model_exposes_conservative_context_window() -> None:
+    model, _client = gemini_model([text_response("done")])
+
+    assert model.context_window_tokens == 272_000
+    assert context_window_tokens_for("gemini-3.6-flash") == 272_000
+    assert context_window_tokens_for("gemini-3.1-pro-preview") == 272_000
     assert context_window_tokens_for("gemini-3.5-flash") is None
 
 

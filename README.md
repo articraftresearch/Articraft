@@ -84,6 +84,59 @@ uv run mini-articraft view runs/<run-id>
 
 Use the viewer to examine each generated version and move its joints.
 
+### Simulate a run
+
+Export validation says the USD is well formed. Simulation says whether the object
+stands up. Drop a run on a floor and see what happens:
+
+```shell
+uv sync --group sim
+uv run mini-articraft simulate runs/<run-id>
+```
+
+```
+2 bodies, 29.306 kg total
+  lowest body: +0.0370 -> +0.0169 m
+  contacts at rest: 8
+  deepest penetration: -4.15 mm
+  largest part separation change: +0.00 mm
+  residual velocity: 0.0000
+  verdict: stands up
+```
+
+Tilt the floor until it slides, which measures the friction its materials
+declared instead of taking it on faith:
+
+```shell
+uv run mini-articraft simulate runs/<run-id> --scenario tilt --seconds 8
+```
+
+```
+  slipped at: 42.3 deg of tilt
+  friction: measured 0.91, authored 0.85
+```
+
+Let the joints fall from mid-travel, which is the motion an articulated object is
+actually for:
+
+```shell
+uv run mini-articraft simulate runs/<run-id> --scenario release
+```
+
+```
+  joints released from mid-travel
+  peak joint speed: 6.20 per second
+```
+
+Every run records its motion, so `mini-articraft view` gains a **Play
+simulation** switch that replays it in the same viewer used to pose joints.
+MuJoCo is optional, so the `sim` group is not installed by default.
+
+A passing run covers geometry, mass, joints, and sliding friction. It does not
+cover restitution: MuJoCo has no such parameter, and static friction has nowhere
+to go in its single sliding coefficient. Those values still export for engines
+that read them.
+
 ### Run the checks
 
 ```shell

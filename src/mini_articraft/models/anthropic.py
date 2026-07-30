@@ -8,7 +8,8 @@ from typing import Any
 from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_ANTHROPIC_MODEL, Settings, get_settings
 
-_CONTEXT_WINDOW_TOKENS = 1_000_000
+# Use the same conservative working budget as Codex instead of the full API window.
+_AGENT_CONTEXT_WINDOW_TOKENS = 272_000
 _MAX_OUTPUT_TOKENS = 128_000
 _MAX_IMAGE_DATA_LENGTH = 10 * 1024 * 1024
 _CACHE_WRITE_5M_MULTIPLIER = 1.25
@@ -39,8 +40,6 @@ class AnthropicModel:
         self.config = settings or get_settings()
         _raise_for_unsupported_model(self.config.anthropic_model)
         self._client = client
-        self._history: list[dict[str, Any]] = []
-        self._last_message_count = 0
 
     @property
     def context_window_tokens(self) -> int:
@@ -53,9 +52,8 @@ class AnthropicModel:
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Query Anthropic and return the response shape used by the agent."""
-        request_messages = self._request_messages(messages)
         try:
-            response = await self._send(messages, request_messages, tools)
+            response = await self._send(messages, tools)
         except ModelError:
             raise
         except Exception as exc:
@@ -68,11 +66,6 @@ class AnthropicModel:
             raise ModelError("Anthropic response did not contain text, thinking, or tool calls")
 
         token_usage = _response_token_usage(response)
-        self._history = [
-            *request_messages,
-            {"role": "assistant", "content": response_content},
-        ]
-        self._last_message_count = len(messages)
         return {
             "text": text,
             "tool_calls": tool_calls,
@@ -80,6 +73,37 @@ class AnthropicModel:
             "cost": _response_cost(self.config.anthropic_model, token_usage),
             "provider_content": [_record_block(block) for block in response_content],
             "response": response,
+        }
+
+    async def summarize_context(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_output_tokens: int,
+    ) -> dict[str, Any]:
+        """Create one context summary."""
+        request: dict[str, Any] = {
+            "model": self.config.anthropic_model,
+            "max_tokens": max_output_tokens,
+            "messages": _messages(messages),
+        }
+        system = _system(messages)
+        if system:
+            request["system"] = system
+        try:
+            response = await self._client_or_create().messages.create(**request)
+        except Exception as exc:
+            raise ModelError(f"Anthropic summary request failed: {_format_exception(exc)}") from exc
+
+        response_content = list(_value(response, "content", []) or [])
+        text = _response_text(response_content)
+        if not text:
+            raise ModelError("Anthropic summary response did not contain text")
+        token_usage = _response_token_usage(response)
+        return {
+            "text": text,
+            "token_usage": token_usage,
+            "cost": _response_cost(self.config.anthropic_model, token_usage),
         }
 
     async def close(self) -> None:
@@ -90,17 +114,16 @@ class AnthropicModel:
 
     async def _send(
         self,
-        source_messages: list[dict[str, Any]],
-        request_messages: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> Any:
         request: dict[str, Any] = {
             "model": self.config.anthropic_model,
             "max_tokens": _MAX_OUTPUT_TOKENS,
-            "messages": request_messages,
+            "messages": _messages(messages),
             "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
-        system = _system(source_messages)
+        system = _system(messages)
         if system:
             request["system"] = system
         converted_tools = _tools(tools or [])
@@ -108,12 +131,6 @@ class AnthropicModel:
             request["tools"] = converted_tools
 
         return await self._client_or_create().messages.create(**request)
-
-    def _request_messages(
-        self,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        return [*self._history, *_messages(messages[self._last_message_count :])]
 
     def _client_or_create(self) -> Any:
         if self._client is None:
@@ -143,16 +160,33 @@ def _system(messages: list[dict[str, Any]]) -> str:
 
 
 def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    user_messages: list[dict[str, Any]] = []
+    converted: list[dict[str, Any]] = []
     tool_results: list[dict[str, Any]] = []
+
+    def flush_tool_results() -> None:
+        if tool_results:
+            converted.append({"role": "user", "content": list(tool_results)})
+            tool_results.clear()
+
     for message in messages:
         if message.get("type") == "function_call_output":
             tool_results.append(_tool_result_block(message))
-        elif message.get("role") == "user":
-            user_messages.append({"role": "user", "content": _user_content(message)})
-    if tool_results:
-        user_messages.append({"role": "user", "content": tool_results})
-    return user_messages
+            continue
+
+        flush_tool_results()
+        if message.get("role") == "user":
+            converted.append({"role": "user", "content": _user_content(message)})
+        elif message.get("role") == "assistant":
+            converted.append({"role": "assistant", "content": _assistant_content(message)})
+    flush_tool_results()
+    return converted
+
+
+def _assistant_content(message: dict[str, Any]) -> list[dict[str, Any]]:
+    provider_content = message.get("provider_content")
+    if not isinstance(provider_content, list):
+        raise TypeError("Anthropic assistant messages require provider_content")
+    return [dict(block) for block in provider_content if isinstance(block, dict)]
 
 
 def _tool_result_block(message: dict[str, Any]) -> dict[str, Any]:
@@ -287,7 +321,9 @@ def _response_tool_calls(content: list[Any]) -> list[dict[str, Any]]:
 
 
 def _record_block(block: Any) -> dict[str, Any]:
-    return block if isinstance(block, dict) else block.model_dump(mode="json")
+    return (
+        dict(block) if isinstance(block, dict) else block.model_dump(mode="json", exclude_none=True)
+    )
 
 
 def _has_thinking(content: list[Any]) -> bool:
@@ -374,7 +410,7 @@ def _prices_for(model: str, *, today: date | None = None) -> _Prices | None:
 
 
 def context_window_tokens_for(model: str) -> int | None:
-    return _CONTEXT_WINDOW_TOKENS if model in SUPPORTED_MODELS else None
+    return _AGENT_CONTEXT_WINDOW_TOKENS if model in SUPPORTED_MODELS else None
 
 
 def _raise_for_unsupported_model(model: str) -> None:
