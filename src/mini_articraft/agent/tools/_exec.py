@@ -145,13 +145,6 @@ class ExecSession:
             if remaining <= 0:
                 break
             self.output_event.clear()
-            # Re-check after clearing: the readers set this event when they hit
-            # EOF, and a set landing between the drain above and this clear would
-            # otherwise be discarded, leaving nothing to wake us before the
-            # deadline. The condition only ever goes from false to true, so
-            # testing it here closes that window rather than narrowing it.
-            if not self.alive and self._streams_closed:
-                break
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.output_event.wait(), timeout=remaining)
 
