@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mini_articraft.record import Record, append_conversation, read_conversation
+from mini_articraft.agent.record import Record, append_conversation, read_conversation
 
 
 def test_record_saves_slim_run_summary(tmp_path) -> None:

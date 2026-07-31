@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mini_articraft._child_process import child_environment
+from mini_articraft.agent._child_process import child_environment
 from mini_articraft.agent.tools._paths import scoped_path
 
 DEFAULT_YIELD_TIME_MS = 10_000

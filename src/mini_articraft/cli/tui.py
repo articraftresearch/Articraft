@@ -25,7 +25,7 @@ from rich.text import Text
 
 from mini_articraft.agent import events
 from mini_articraft.agent.provider import context_window_tokens_for
-from mini_articraft.record import Record, read_conversation
+from mini_articraft.agent.record import Record, read_conversation
 
 EventHandler = Callable[[events.Event], None]
 LiveRun = Callable[[EventHandler], Coroutine[Any, Any, dict[str, Any]]]

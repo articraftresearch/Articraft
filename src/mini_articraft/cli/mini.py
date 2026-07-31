@@ -20,6 +20,7 @@ from mini_articraft.agent.provider.anthropic import (
 from mini_articraft.agent.provider.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
+from mini_articraft.agent.record import Record
 from mini_articraft.agent.workspace import LocalWorkspace
 from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
 from mini_articraft.compiler.worker import texture_run
@@ -204,6 +205,8 @@ def texture(
         raise typer.Exit(1)
     outcome = texture_run(run_dir)
     if outcome.applied:
+        if outcome.usdz is not None:
+            _point_record_at(run_dir, outcome.usdz)
         typer.echo(
             f"applied texture maps to {outcome.textured_shapes}/"
             f"{outcome.requested_shapes} surfaces in {run_dir}"
@@ -284,7 +287,9 @@ def _apply_textures(result: dict[str, Any]) -> None:
     outcome = texture_run(Path(str(run)))
     if outcome.applied:
         if outcome.usdz is not None:
-            result["result"] = outcome.usdz.relative_to(Path(str(run)).resolve()).as_posix()
+            run_dir = Path(str(run)).resolve()
+            result["result"] = outcome.usdz.relative_to(run_dir).as_posix()
+            _point_record_at(run_dir, outcome.usdz)
         typer.echo(
             f"applied texture maps to {outcome.textured_shapes}/{outcome.requested_shapes} surfaces"
         )
@@ -293,6 +298,29 @@ def _apply_textures(result: dict[str, Any]) -> None:
     else:
         detail = outcome.error or "; ".join(outcome.errors) or "no textures were requested"
         typer.echo(f"note: kept parametric result ({detail})", err=True)
+
+
+def _point_record_at(run_dir: Path, usdz: Path) -> None:
+    """Aim the run's record at a newly exported usdz.
+
+    The compiler produces the file and says where it went; the record is the
+    agent's trace, so updating it belongs to whoever drove the run.
+
+    A trace that cannot be updated is worth saying out loud but not worth
+    failing over: the export already succeeded and the usdz is on disk. The
+    compiler used to do this inside its own try/except, which reported the
+    whole texture run as failed when only the bookkeeping broke.
+    """
+
+    record_path = run_dir / "record.json"
+    if not record_path.is_file():
+        return
+    try:
+        record = Record.load(record_path)
+        record.result = usdz.relative_to(run_dir).as_posix()
+        record.save(record_path)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"note: could not update {record_path.name} ({exc})", err=True)
 
 
 def _resolve_run_dir(run: str, output_dir: Path | None) -> Path:

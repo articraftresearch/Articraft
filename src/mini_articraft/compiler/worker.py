@@ -15,7 +15,6 @@ from typing import Any, TypeVar
 
 from mini_articraft.compiler.feedback import with_compile_report
 from mini_articraft.compiler.result import CompilePayload, CompileResult
-from mini_articraft.record import Record
 from mini_articraft.sdk import (
     ArticulatedObject,
     FailureKind,
@@ -156,11 +155,6 @@ def texture_run(run_dir: Path) -> TextureRunResult:
                 for stale in (result_dir / "usdz").glob("*.usdz"):
                     if stale != export_result.usdz:
                         stale.unlink()
-                record_path = run_dir / "record.json"
-                if record_path.is_file():
-                    record = Record.load(record_path)
-                    record.result = export_result.usdz.relative_to(run_dir).as_posix()
-                    record.save(record_path)
         return TextureRunResult(
             succeeded=True,
             requested_shapes=report.requested_shapes,
