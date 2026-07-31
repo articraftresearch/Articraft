@@ -56,17 +56,16 @@ def _nearest_gap(anchor: MeshGeometry, piece: MeshGeometry) -> tuple[float, np.n
     j = int(np.argmin(dist_a))
     if dist_a[j] < dist:
         point_a, point_b, dist = a_mesh.vertices[j], points_on_b[j], float(dist_a[j])
-    direction = np.asarray(point_a, dtype=np.float64) - np.asarray(point_b, dtype=np.float64)
+    direction = np.asarray(point_a, dtype=np.float64) - np.asarray(
+        point_b, dtype=np.float64
+    )
     norm = float(np.linalg.norm(direction))
     unit = direction / norm if norm > 1e-12 else np.zeros(3)
     return dist, unit
 
 
 def _smooth_max(
-    first: np.ndarray,
-    second: np.ndarray,
-    radius: float,
-    profile: str,
+    first: np.ndarray, second: np.ndarray, radius: float, profile: str
 ) -> np.ndarray:
     amount = np.clip(0.5 + 0.5 * (first - second) / radius, 0.0, 1.0)
     blend = amount * (1.0 - amount)
@@ -78,11 +77,7 @@ def _smooth_max(
     )
 
 
-def _mesh_field(
-    mesh: Trimesh,
-    points: np.ndarray,
-    band: float,
-) -> np.ndarray:
+def _mesh_field(mesh: Trimesh, points: np.ndarray, band: float) -> np.ndarray:
     values = np.full(len(points), -_FAR, dtype=np.float64)
     minimum, maximum = mesh.bounds
     near = np.all((points >= minimum - band) & (points <= maximum + band), axis=1)
@@ -114,10 +109,7 @@ def _grid_points(
 
 
 def _extract_level_set(
-    field: np.ndarray,
-    dimensions: np.ndarray,
-    lower: np.ndarray,
-    spacing: np.ndarray,
+    field: np.ndarray, dimensions: np.ndarray, lower: np.ndarray, spacing: np.ndarray
 ) -> MeshGeometry:
     nx, ny, nz = (int(value) for value in dimensions)
     point_count = len(field)
@@ -142,7 +134,9 @@ def _extract_level_set(
         )
     )
     if solid.status() != manifold3d.Error.NoError or solid.is_empty():
-        raise ValueError(f"weld level set produced an invalid solid (status={solid.status()})")
+        raise ValueError(
+            f"weld level set produced an invalid solid (status={solid.status()})"
+        )
     solid = solid.simplify(float(np.min(spacing)) * 0.05)
     return _from_manifold(solid)
 
@@ -153,11 +147,15 @@ def _validate_weld_inputs(geometries: tuple[MeshGeometry, ...]) -> list[Trimesh]
         geometry = _require_mesh(raw_geometry, f"geometries[{index}]")
         geometry.validate()
         if not geometry.vertices or not geometry.faces or not geometry.is_watertight:
-            raise ValueError(f"geometries[{index}] must be a non-empty closed manifold solid")
+            raise ValueError(
+                f"geometries[{index}] must be a non-empty closed manifold solid"
+            )
         health = analyze_mesh_health(geometry)
         if not health.healthy:
             issues = ", ".join(finding.issue.value for finding in health.findings)
-            raise ValueError(f"geometries[{index}] has unhealthy mesh geometry: {issues}")
+            raise ValueError(
+                f"geometries[{index}] has unhealthy mesh geometry: {issues}"
+            )
         mesh = geometry.to_trimesh()
         if _positive_body_count(mesh) != 1:
             raise ValueError(f"geometries[{index}] must contain one connected solid")
@@ -169,7 +167,9 @@ def _positive_body_count(mesh: Trimesh) -> int:
     return sum(bool(part.volume > 0.0) for part in mesh.split(only_watertight=True))
 
 
-def _connection_gaps(geometries: tuple[MeshGeometry, ...]) -> list[tuple[int, int, float]]:
+def _connection_gaps(
+    geometries: tuple[MeshGeometry, ...],
+) -> list[tuple[int, int, float]]:
     gaps: list[tuple[int, int, float]] = []
     for first_index, first in enumerate(geometries):
         for second_index in range(first_index + 1, len(geometries)):
@@ -188,9 +188,7 @@ def _connection_gaps(geometries: tuple[MeshGeometry, ...]) -> list[tuple[int, in
 
 
 def _require_connected_inputs(
-    geometries: tuple[MeshGeometry, ...],
-    *,
-    max_gap: float,
+    geometries: tuple[MeshGeometry, ...], *, max_gap: float
 ) -> None:
     connected = {0}
     gaps = _connection_gaps(geometries)
@@ -205,7 +203,9 @@ def _require_connected_inputs(
         connected.update(additions)
     if len(connected) != len(geometries):
         nearest = min(
-            gap for first, second, gap in gaps if (first in connected) != (second in connected)
+            gap
+            for first, second, gap in gaps
+            if (first in connected) != (second in connected)
         )
         raise ValueError(
             f"weld inputs are separated by {nearest * 1000.0:.2f} mm; overlap them or "
@@ -214,9 +214,7 @@ def _require_connected_inputs(
 
 
 def _surface_controls(
-    radius: float,
-    tolerance: float | None,
-    profile: str,
+    radius: float, tolerance: float | None, profile: str
 ) -> tuple[float, float, str]:
     radius = float(radius)
     if not math.isfinite(radius) or radius <= 0.0:
@@ -252,7 +250,9 @@ def _smooth_operation(
     dimensions = np.ceil((upper - lower) / tolerance).astype(np.int64) + 1
     point_count = int(np.prod(dimensions))
     if point_count > _MAX_GRID_POINTS:
-        minimum_tolerance = float(np.max(upper - lower) / (math.cbrt(_MAX_GRID_POINTS) - 1.0))
+        minimum_tolerance = float(
+            np.max(upper - lower) / (math.cbrt(_MAX_GRID_POINTS) - 1.0)
+        )
         raise ValueError(
             f"weld tolerance creates {point_count:,} field samples; use tolerance of at "
             f"least {minimum_tolerance:.6g} for this size"
@@ -268,9 +268,13 @@ def _smooth_operation(
             if mesh_index == 0:
                 field[start:stop] = values
             elif operation == "difference":
-                field[start:stop] = -_smooth_max(-field[start:stop], values, radius, profile)
+                field[start:stop] = -_smooth_max(
+                    -field[start:stop], values, radius, profile
+                )
             else:
-                field[start:stop] = _smooth_max(field[start:stop], values, radius, profile)
+                field[start:stop] = _smooth_max(
+                    field[start:stop], values, radius, profile
+                )
     if trim is not None:
         for start in range(0, point_count, _FIELD_CHUNK):
             stop = min(start + _FIELD_CHUNK, point_count)
