@@ -9,7 +9,7 @@ from typing import Protocol
 import pytest
 from harness import TAPE_ROOT, ReplayHarness
 
-from mini_articraft import Model
+from mini_articraft.agent import Model
 
 
 @pytest.fixture(scope="session")

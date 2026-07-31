@@ -13,10 +13,11 @@ from typing import Any
 from pydantic import BaseModel
 
 import mini_articraft.agent.tools as tools
-from mini_articraft import ContextSummarizer, Model, Workspace, package_dir
+from mini_articraft import package_dir
 from mini_articraft.agent import events
 from mini_articraft.agent.compaction import SUMMARY_MAX_OUTPUT_TOKENS, prepare_compaction
 from mini_articraft.agent.images import PreparedImage, prepare_image
+from mini_articraft.agent.protocols import ContextSummarizer, Model, Workspace
 from mini_articraft.agent.record import Record, append_conversation
 from mini_articraft.agent.tools import ToolContext
 from mini_articraft.settings import DEFAULT_MAX_TURNS
