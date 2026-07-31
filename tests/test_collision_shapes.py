@@ -4,7 +4,6 @@ from pathlib import Path
 
 from pxr import Usd, UsdGeom, UsdPhysics
 
-from mini_articraft.compiler.export import export_object
 from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
@@ -15,6 +14,7 @@ from mini_articraft.sdk import (
     Origin,
     SphereGeometry,
 )
+from mini_articraft.sdk.export import export_object
 from mini_articraft.sdk.mesh import boolean_difference
 
 # The usd-core stubs omit these schemas; bind them once instead of repeating the

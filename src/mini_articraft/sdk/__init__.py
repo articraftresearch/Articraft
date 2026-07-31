@@ -7,11 +7,8 @@ One canonical import path per category:
 - Advanced mesh authoring and repair recipes (booleans, welds, snapping,
   profile/wire sampling, sweep helpers, section lofts, shell partitioning,
   refinement) live under ``mini_articraft.sdk.mesh``.
-
-This package is what an object is declared and checked with. Turning that
-declaration into a USDZ is the compiler's job and lives in
-``mini_articraft.compiler.export`` -- which also keeps OpenUSD out of a plain
-``mini_articraft.sdk`` import.
+- USDZ publication lives under ``mini_articraft.sdk.export`` so importing the
+  root SDK does not eagerly load OpenUSD.
 """
 
 from __future__ import annotations
