@@ -6,9 +6,9 @@ from typing import Any, ClassVar
 
 from typer.testing import CliRunner
 
+from mini_articraft.agent.record import Record, append_conversation
 from mini_articraft.cli import mini
 from mini_articraft.compiler.worker import TextureRunResult
-from mini_articraft.record import Record, append_conversation
 from mini_articraft.settings import Settings, get_settings
 
 
@@ -598,3 +598,25 @@ def test_main_args_keep_commands_and_help() -> None:
     assert mini._app_args(["view", "run-x"]) == ["view", "run-x"]
     assert mini._app_args(["texture", "run-x"]) == ["texture", "run-x"]
     assert mini._app_args(["--help"]) == ["--help"]
+
+
+def test_point_record_at_rewrites_the_result_path(tmp_path: Path) -> None:
+    """The CLI owns this: the compiler reports the usdz, the caller records it."""
+    run_dir = tmp_path / "run"
+    (run_dir / "result" / "usdz").mkdir(parents=True)
+    Record(run_id="run", status="success", result="result/usdz/0000.usdz").save(
+        run_dir / "record.json"
+    )
+
+    mini._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
+
+    assert Record.load(run_dir / "record.json").result == "result/usdz/0001.usdz"
+
+
+def test_point_record_at_is_a_noop_without_a_record(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    mini._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
+
+    assert not (run_dir / "record.json").exists()

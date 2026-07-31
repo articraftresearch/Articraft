@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 
 import mini_articraft.compiler.worker as worker
-from mini_articraft.record import Record
 from mini_articraft.sdk import ArticulatedObject, BoxGeometry
 from mini_articraft.sdk.export import TextureExportReport, export_object
 
@@ -63,12 +62,9 @@ def test_texture_run_keeps_parametric_result_when_no_textures_apply(monkeypatch,
     assert [path.name for path in prior.usdz.parent.glob("*.usdz")] == ["0000.usdz"]
 
 
-def test_texture_run_updates_record_to_the_final_usdz(monkeypatch, tmp_path) -> None:
+def test_texture_run_reports_the_final_usdz(monkeypatch, tmp_path) -> None:
     run_dir = _run_dir(tmp_path)
     prior = export_object(_model(), run_dir / "result")
-    Record(run_id="run", status="success", result="result/usdz/0000.usdz").save(
-        run_dir / "record.json"
-    )
     monkeypatch.setattr(
         worker.runpy, "run_path", lambda *_args, **_kwargs: {"object_model": _model()}
     )
@@ -87,5 +83,4 @@ def test_texture_run_updates_record_to_the_final_usdz(monkeypatch, tmp_path) -> 
 
     assert outcome.applied
     assert outcome.usdz == final_usdz
-    assert Record.load(run_dir / "record.json").result == "result/usdz/0001.usdz"
     assert not prior.usdz.exists()

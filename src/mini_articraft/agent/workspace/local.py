@@ -13,10 +13,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_articraft import package_dir
-from mini_articraft._child_process import child_environment
+from mini_articraft.agent._child_process import child_environment
+from mini_articraft.agent.record import Record
 from mini_articraft.compiler.feedback import with_compile_report
 from mini_articraft.compiler.result import CompilePayload, CompileResult
-from mini_articraft.record import Record
 from mini_articraft.settings import DEFAULT_COMPILE_TIMEOUT_SECONDS, DEFAULT_OUTPUT_DIR
 
 _COMPILE_PROGRESS_FILE = ".compile-progress.json"

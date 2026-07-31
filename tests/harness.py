@@ -48,12 +48,12 @@ from typing import Any, ClassVar, Generic, Literal, TypeVar, cast
 
 from mini_articraft import Model
 from mini_articraft.agent import Agent, events
+from mini_articraft.agent.record import Record, read_conversation
 from mini_articraft.agent.tools import Tool, ToolContext
 from mini_articraft.agent.tools._core import schema as _tool_schema
 from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.workspace.local import LocalWorkspace, _error_result, _finalize_payload
 from mini_articraft.compiler.result import CompilePayload, CompileResult
-from mini_articraft.record import Record, read_conversation
 
 
 def fake_compile_payload(**overrides: Any) -> CompilePayload:

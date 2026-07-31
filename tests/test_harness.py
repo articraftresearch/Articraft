@@ -32,10 +32,10 @@ from harness import (
 )
 
 from mini_articraft.agent.events import TurnStarted
+from mini_articraft.agent.record import Record
 from mini_articraft.agent.tools import ToolContext
 from mini_articraft.agent.workspace.local import LocalWorkspace
 from mini_articraft.compiler.result import CompilePayload
-from mini_articraft.record import Record
 
 
 def write_good_main() -> Response:
