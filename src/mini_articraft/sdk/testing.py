@@ -23,8 +23,8 @@ from mini_articraft.sdk._collision import (
     _pair_key,
 )
 from mini_articraft.sdk._mass_solver import resolve_mass
-from mini_articraft.sdk._mesh_core import geometry_to_trimesh
-from mini_articraft.sdk._mesh_health import MeshHealthIssue, analyze_mesh_health
+from mini_articraft.sdk._mesh.core import geometry_to_trimesh
+from mini_articraft.sdk._mesh.health import MeshHealthIssue, analyze_mesh_health
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType
 from mini_articraft.sdk.materials import LIBRARY

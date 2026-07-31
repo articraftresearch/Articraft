@@ -7,12 +7,12 @@ import manifold3d
 import numpy as np
 from trimesh import Trimesh
 
-from mini_articraft.sdk._mesh_boolean import (
+from mini_articraft.sdk._mesh.boolean import (
     _as_manifold,
     _from_manifold,
 )
-from mini_articraft.sdk._mesh_core import MeshGeometry
-from mini_articraft.sdk._mesh_health import (
+from mini_articraft.sdk._mesh.core import MeshGeometry
+from mini_articraft.sdk._mesh.health import (
     MeshHealthIssue,
     _require_healthy_mesh,
     analyze_mesh_health,

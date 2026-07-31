@@ -7,7 +7,7 @@ from typing import cast
 import numpy as np
 import trimesh
 
-from mini_articraft.sdk._mesh_core import MeshGeometry
+from mini_articraft.sdk._mesh.core import MeshGeometry
 
 
 def _require_mesh(mesh: object) -> MeshGeometry:

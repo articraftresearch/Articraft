@@ -6,7 +6,7 @@ from typing import TypeAlias
 
 from build123d.topology import Shape
 
-from mini_articraft.sdk._mesh_core import MeshGeometry
+from mini_articraft.sdk._mesh.core import MeshGeometry
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import (
     Articulation,

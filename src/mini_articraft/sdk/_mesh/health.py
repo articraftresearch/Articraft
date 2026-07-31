@@ -9,7 +9,7 @@ import igl
 import numpy as np
 import trimesh
 
-from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
+from mini_articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.errors import ValidationError
 
 Vec3: TypeAlias = tuple[float, float, float]

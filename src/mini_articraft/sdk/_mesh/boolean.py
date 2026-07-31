@@ -5,7 +5,7 @@ from collections.abc import Iterable
 import manifold3d
 import numpy as np
 
-from mini_articraft.sdk._mesh_core import (
+from mini_articraft.sdk._mesh.core import (
     LoftGeometry,
     MeshGeometry,
     Vec2,
@@ -13,7 +13,7 @@ from mini_articraft.sdk._mesh_core import (
     _ensure_ccw,
     _profile_2d,
 )
-from mini_articraft.sdk._mesh_health import MeshHealthIssue, _require_healthy_mesh
+from mini_articraft.sdk._mesh.health import MeshHealthIssue, _require_healthy_mesh
 
 _BOOLEAN_ALLOWED_ISSUES = (MeshHealthIssue.MULTIPLE_COMPONENTS,)
 
