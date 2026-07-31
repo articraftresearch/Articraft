@@ -15,7 +15,7 @@ shapes in the same part if they always move together.
 from build123d import Box
 
 from mini_articraft.sdk import ArticulatedObject, TestContext
-from mini_articraft.sdk.export import export_object
+from mini_articraft.compiler.export import export_object
 
 
 model = ArticulatedObject("box")
@@ -99,7 +99,7 @@ The compiler also does these tests:
 - It finds unwanted overlap.
 - It finds joints that separate during motion.
 
-USDZ export is in `mini_articraft.sdk.export`. Thus, a normal SDK import does not load OpenUSD.
+USDZ export is in `mini_articraft.compiler.export`. Thus, a normal SDK import does not load OpenUSD.
 Each part becomes one rigid body. Each named shape keeps its mesh and color.
 
 ## Reference

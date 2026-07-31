@@ -7,6 +7,7 @@ import pytest
 import trimesh
 from pxr import Usd, UsdPhysics
 
+from mini_articraft.compiler.export import _resolve_part_mass, export_object
 from mini_articraft.sdk import (
     ArticulatedObject,
     BoxGeometry,
@@ -17,7 +18,6 @@ from mini_articraft.sdk import (
 )
 from mini_articraft.sdk._mass_solver import resolve_mass
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import _resolve_part_mass, export_object
 
 
 def _box(size=(0.2, 0.1, 0.05)) -> trimesh.Trimesh:

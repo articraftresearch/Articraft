@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from mini_articraft.compiler.export import export_object
 from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
@@ -16,7 +17,6 @@ from mini_articraft.sdk import (
     MotionLimits,
     Origin,
 )
-from mini_articraft.sdk.export import export_object
 from mini_articraft.simulate import simulate_usdz, write_mjcf
 
 mujoco = pytest.importorskip("mujoco", reason="simulation needs the sim dependency group")

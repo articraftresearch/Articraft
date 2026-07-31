@@ -6,6 +6,7 @@ from typing import Any, cast
 import pytest
 from pxr import Usd, UsdGeom, UsdShade  # pyright: ignore[reportAttributeAccessIssue]
 
+from mini_articraft.compiler.export import export_object
 from mini_articraft.sdk import (
     ArticulatedObject,
     BoxGeometry,
@@ -14,7 +15,6 @@ from mini_articraft.sdk import (
     ambientcg,
 )
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import export_object
 from mini_articraft.sdk.materials import is_library_material
 from mini_articraft.viewer import _read_version
 
