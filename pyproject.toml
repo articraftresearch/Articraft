@@ -57,8 +57,7 @@ dev = [
 ]
 
 [project.scripts]
-mini-articraft = "mini_articraft.cli.mini:main"
-mini-articraft-compile-run = "mini_articraft.compiler.worker:main"
+mini-articraft = "mini_articraft.app:main"
 
 [tool.uv]
 required-version = ">=0.9.0"
@@ -131,7 +130,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 # typer builds CLI options by calling typer.Option in parameter defaults.
-"src/mini_articraft/cli/mini.py" = ["B008"]
+"src/mini_articraft/app.py" = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"

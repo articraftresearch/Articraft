@@ -22,16 +22,16 @@ from mini_articraft.agent.provider.gemini import (
 )
 from mini_articraft.agent.record import Record
 from mini_articraft.agent.workspace import LocalWorkspace
-from mini_articraft.cli.tui import print_settings_error, replay_run, run_live
 from mini_articraft.compiler.worker import texture_run
 from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
+from mini_articraft.tui import print_settings_error, replay_run, run_live
 from mini_articraft.viewer import load_viewer_run, serve_viewer
 
-app = typer.Typer(help="Generate articulated objects with mini-articraft.", add_completion=False)
+cli = typer.Typer(help="Generate articulated objects with mini-articraft.", add_completion=False)
 COMMANDS = {"generate", "replay", "view", "simulate", "texture"}
 
 
-@app.command()
+@cli.command()
 def generate(
     prompt: str,
     image: Path | None = typer.Option(
@@ -101,7 +101,7 @@ def generate(
         raise typer.Exit(1) from None
 
 
-@app.command()
+@cli.command()
 def replay(
     run: str = typer.Argument(
         ..., help="Run id under the output directory, or a path to a run directory."
@@ -119,7 +119,7 @@ def replay(
     replay_run(run_dir, delay=delay)
 
 
-@app.command()
+@cli.command()
 def view(
     run: str = typer.Argument(
         ..., help="Run id under the output directory, or a path to a run directory."
@@ -134,7 +134,7 @@ def view(
         raise typer.Exit(1) from None
 
 
-@app.command()
+@cli.command()
 def simulate(
     run: str = typer.Argument(
         ..., help="Run id under the output directory, or a path to a run directory."
@@ -187,7 +187,7 @@ def simulate(
         raise typer.Exit(1)
 
 
-@app.command()
+@cli.command()
 def texture(
     run: str = typer.Argument(
         ..., help="Run id under the output directory, or a path to a run directory."
@@ -445,7 +445,7 @@ def _print_result(result: dict[str, object]) -> None:
 
 
 def main() -> None:
-    app(args=_app_args(sys.argv[1:]), prog_name="mini-articraft")
+    cli(args=_app_args(sys.argv[1:]), prog_name="mini-articraft")
 
 
 def _app_args(argv: list[str]) -> list[str]:

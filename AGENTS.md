@@ -60,7 +60,7 @@ uv run mini-articraft
 The compile worker entry point is:
 
 ```bash
-uv run mini-articraft-compile-run
+uv run python -m mini_articraft.compiler.worker <run_dir>
 ```
 
 Prefer calling the compile worker through `LocalWorkspace` unless you are
