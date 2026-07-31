@@ -9,6 +9,7 @@ import pytest
 from PIL import Image
 from pxr import Usd, UsdGeom  # pyright: ignore[reportAttributeAccessIssue]
 
+from mini_articraft.compiler.export import export_object
 from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
@@ -26,7 +27,6 @@ from mini_articraft.sdk import (
     ValidationError,
     render_view,
 )
-from mini_articraft.sdk.export import export_object
 
 
 def test_partial_lathe_is_capped_watertight_and_axis_aware() -> None:

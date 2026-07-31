@@ -8,14 +8,15 @@ would bypass the compiler owned checks and publication rules.
 Code using mini-articraft as a regular Python SDK can export directly:
 
 ```python
-from mini_articraft.sdk.export import export_object
+from mini_articraft.compiler.export import export_object
 
 result = export_object(object_model, "output")
 print(result.usdz)
 ```
 
-The explicit `mini_articraft.sdk.export` import keeps the OpenUSD dependency out of a plain
-`mini_articraft.sdk` import until export is requested.
+Export lives with the compiler rather than the SDK: the SDK is what you declare and check a model
+with, and turning that model into a USDZ is the compiler's job. It also keeps the OpenUSD
+dependency out of a plain `mini_articraft.sdk` import until export is requested.
 
 The exporter validates the object and tessellates build123d shapes with a default tolerance of
 `0.001` meter.

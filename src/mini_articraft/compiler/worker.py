@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
+from mini_articraft.compiler.export import export_object
 from mini_articraft.compiler.feedback import with_compile_report
 from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.sdk import (
@@ -22,7 +23,6 @@ from mini_articraft.sdk import (
     TestMetric,
     TestReport,
 )
-from mini_articraft.sdk.export import export_object
 
 T = TypeVar("T", bound=Hashable)
 _COMPILE_PROGRESS_FILE = ".compile-progress.json"
