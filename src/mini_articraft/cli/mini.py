@@ -305,14 +305,22 @@ def _point_record_at(run_dir: Path, usdz: Path) -> None:
 
     The compiler produces the file and says where it went; the record is the
     agent's trace, so updating it belongs to whoever drove the run.
+
+    A trace that cannot be updated is worth saying out loud but not worth
+    failing over: the export already succeeded and the usdz is on disk. The
+    compiler used to do this inside its own try/except, which reported the
+    whole texture run as failed when only the bookkeeping broke.
     """
 
     record_path = run_dir / "record.json"
     if not record_path.is_file():
         return
-    record = Record.load(record_path)
-    record.result = usdz.relative_to(run_dir).as_posix()
-    record.save(record_path)
+    try:
+        record = Record.load(record_path)
+        record.result = usdz.relative_to(run_dir).as_posix()
+        record.save(record_path)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"note: could not update {record_path.name} ({exc})", err=True)
 
 
 def _resolve_run_dir(run: str, output_dir: Path | None) -> Path:

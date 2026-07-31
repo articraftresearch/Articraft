@@ -620,3 +620,14 @@ def test_point_record_at_is_a_noop_without_a_record(tmp_path: Path) -> None:
     mini._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
 
     assert not (run_dir / "record.json").exists()
+
+
+def test_point_record_at_survives_an_unreadable_record(tmp_path: Path, capsys) -> None:
+    """The usdz is already exported; a broken trace must not take the run down."""
+    run_dir = tmp_path / "run"
+    (run_dir / "result" / "usdz").mkdir(parents=True)
+    (run_dir / "record.json").write_text("{not json", encoding="utf-8")
+
+    mini._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
+
+    assert "could not update record.json" in capsys.readouterr().err
