@@ -438,7 +438,9 @@ def main(argv: list[str] | None = None) -> int:
     physics = "--physics" in args
     args = [arg for arg in args if arg not in {"--raw", "--physics"}]
     if len(args) != 1:
-        payload = CompileResult(error="Usage: mini-articraft-compile-run <run_dir>").to_payload()
+        payload = CompileResult(
+            error="Usage: python -m mini_articraft.compiler.worker <run_dir>"
+        ).to_payload()
         if not raw:
             payload = with_compile_report(payload)
         print(json.dumps(payload))

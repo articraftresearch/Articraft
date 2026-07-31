@@ -6,8 +6,8 @@ from typing import Any, ClassVar
 
 from typer.testing import CliRunner
 
+from mini_articraft import app
 from mini_articraft.agent.record import Record, append_conversation
-from mini_articraft.cli import mini
 from mini_articraft.compiler.worker import TextureRunResult
 from mini_articraft.settings import Settings, get_settings
 
@@ -74,16 +74,16 @@ def reset_fakes() -> None:
 
 def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
     monkeypatch.setattr(
-        mini, "get_settings", lambda: Settings(openai_api_key="sk-test", max_turns=123)
+        app, "get_settings", lambda: Settings(openai_api_key="sk-test", max_turns=123)
     )
 
     output_dir = tmp_path / "runs"
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         [
             "generate",
             "make a hinge",
@@ -116,13 +116,13 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
 
 def test_cli_physics_flag_enables_the_physics_lane(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
-    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a hinge", "--output-dir", str(tmp_path / "runs"), "--physics"],
     )
 
@@ -133,15 +133,15 @@ def test_cli_physics_flag_enables_the_physics_lane(monkeypatch, tmp_path: Path) 
 
 def test_cli_applies_textures_only_after_generation(monkeypatch) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
-    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     applied: list[dict[str, Any]] = []
-    monkeypatch.setattr(mini, "_apply_textures", applied.append)
+    monkeypatch.setattr(app, "_apply_textures", applied.append)
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a steel ball", "--textures", "--no-tui"],
     )
 
@@ -152,7 +152,7 @@ def test_cli_applies_textures_only_after_generation(monkeypatch) -> None:
 
 
 def test_texture_flag_is_postprocessing_after_tui_generation(monkeypatch) -> None:
-    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     calls: list[tuple[str, object]] = []
     generated = {"status": "success", "run": "/tmp/run"}
 
@@ -163,11 +163,11 @@ def test_texture_flag_is_postprocessing_after_tui_generation(monkeypatch) -> Non
     def apply_textures(result):
         calls.append(("textures", result))
 
-    monkeypatch.setattr(mini, "_run_generation", run_generation)
-    monkeypatch.setattr(mini, "_apply_textures", apply_textures)
+    monkeypatch.setattr(app, "_run_generation", run_generation)
+    monkeypatch.setattr(app, "_apply_textures", apply_textures)
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a steel ball", "--textures", "--tui"],
     )
 
@@ -179,7 +179,7 @@ def test_apply_textures_updates_the_reported_result_path(monkeypatch, tmp_path: 
     run_dir = tmp_path / "run"
     final_usdz = run_dir / "result" / "usdz" / "0003.usdz"
     monkeypatch.setattr(
-        mini,
+        app,
         "texture_run",
         lambda _run: TextureRunResult(
             succeeded=True,
@@ -194,7 +194,7 @@ def test_apply_textures_updates_the_reported_result_path(monkeypatch, tmp_path: 
         "result": "result/usdz/0002.usdz",
     }
 
-    mini._apply_textures(result)
+    app._apply_textures(result)
 
     assert result["result"] == "result/usdz/0003.usdz"
 
@@ -203,22 +203,22 @@ def test_apply_textures_ignores_failed_generation(monkeypatch) -> None:
     def unexpected_texture_run(_run):
         raise AssertionError("failed generation must not start texture postprocessing")
 
-    monkeypatch.setattr(mini, "texture_run", unexpected_texture_run)
+    monkeypatch.setattr(app, "texture_run", unexpected_texture_run)
 
-    mini._apply_textures({"status": "error", "run": "/tmp/run"})
+    app._apply_textures({"status": "error", "run": "/tmp/run"})
 
 
 def test_cli_passes_reference_image_to_agent(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
-    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     image_path = tmp_path / "reference.png"
     image_path.write_bytes(b"image")
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a hinge", "--image", str(image_path)],
     )
 
@@ -229,7 +229,7 @@ def test_cli_passes_reference_image_to_agent(monkeypatch, tmp_path: Path) -> Non
 def test_cli_rejects_openrouter_reference_image(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
     monkeypatch.setattr(
-        mini,
+        app,
         "get_settings",
         lambda: Settings(openrouter_api_key="or-test"),
     )
@@ -237,7 +237,7 @@ def test_cli_rejects_openrouter_reference_image(monkeypatch, tmp_path: Path) -> 
     image_path.write_bytes(b"image")
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         [
             "generate",
             "make a hinge",
@@ -254,10 +254,10 @@ def test_cli_rejects_openrouter_reference_image(monkeypatch, tmp_path: Path) -> 
 
 
 def test_cli_rejects_missing_reference_image(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a hinge", "--image", str(tmp_path / "missing.png")],
     )
 
@@ -270,9 +270,9 @@ def test_cli_reports_invalid_reference_image_without_traceback(
     tmp_path: Path,
 ) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
     monkeypatch.setattr(
-        mini,
+        app,
         "get_settings",
         lambda: Settings(openai_api_key="sk-test", output_dir=tmp_path / "runs"),
     )
@@ -280,7 +280,7 @@ def test_cli_reports_invalid_reference_image_without_traceback(
     image_path.write_bytes(b"not an image")
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a hinge", "--image", str(image_path)],
     )
 
@@ -291,18 +291,18 @@ def test_cli_reports_invalid_reference_image_without_traceback(
 
 def test_cli_selects_gemini_provider(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
     monkeypatch.setattr(
-        mini,
+        app,
         "get_settings",
         lambda: Settings(gemini_api_key="gemini-test", max_turns=123),
     )
 
     output_dir = tmp_path / "runs"
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         [
             "generate",
             "make a hinge",
@@ -325,18 +325,18 @@ def test_cli_selects_gemini_provider(monkeypatch, tmp_path: Path) -> None:
 
 def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
     monkeypatch.setattr(
-        mini,
+        app,
         "get_settings",
         lambda: Settings(anthropic_api_key="anthropic-test", max_turns=123),
     )
 
     output_dir = tmp_path / "runs"
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         [
             "generate",
             "make a hinge",
@@ -359,18 +359,18 @@ def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
 
 def test_cli_selects_openrouter_provider_with_arbitrary_model(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
     monkeypatch.setattr(
-        mini,
+        app,
         "get_settings",
         lambda: Settings(openrouter_api_key="or-test", max_turns=123),
     )
 
     output_dir = tmp_path / "runs"
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         [
             "generate",
             "make a hinge",
@@ -396,7 +396,7 @@ def test_cli_warns_on_missing_required_settings(monkeypatch, tmp_path: Path) -> 
     get_settings.cache_clear()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    result = CliRunner().invoke(mini.app, ["generate", "make a hinge", "--no-tui"])
+    result = CliRunner().invoke(app.cli, ["generate", "make a hinge", "--no-tui"])
 
     assert result.exit_code == 1
     assert "Missing required environment variable" in result.output
@@ -414,7 +414,7 @@ def test_cli_warns_on_missing_gemini_key(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a hinge", "--provider", "gemini", "--no-tui"],
     )
 
@@ -431,7 +431,7 @@ def test_cli_warns_on_missing_anthropic_key(monkeypatch, tmp_path: Path) -> None
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a hinge", "--provider", "anthropic", "--no-tui"],
     )
 
@@ -452,7 +452,7 @@ def test_cli_uses_default_openrouter_model_and_warns_on_missing_key(
     monkeypatch.delenv("MINI_ARTICRAFT_OPENROUTER_MODEL", raising=False)
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["generate", "make a hinge", "--provider", "openrouter", "--no-tui"],
     )
 
@@ -470,10 +470,10 @@ def test_cli_rejects_unsupported_anthropic_model_without_model_call(
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test")
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         [
             "generate",
             "make a hinge",
@@ -493,12 +493,12 @@ def test_cli_rejects_unsupported_anthropic_model_without_model_call(
 def test_cli_exits_nonzero_when_agent_fails(monkeypatch) -> None:
     reset_fakes()
     FakeAgent.result = {"status": "error", "run": "/tmp/run", "error": "compile failed"}
-    monkeypatch.setattr(mini, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(mini, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(mini, "Agent", FakeAgent)
-    monkeypatch.setattr(mini, "get_settings", lambda: Settings(openai_api_key="sk-test"))
+    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
-    result = CliRunner().invoke(mini.app, ["generate", "make a hinge"])
+    result = CliRunner().invoke(app.cli, ["generate", "make a hinge"])
 
     assert result.exit_code == 1
     assert "error: compile failed" in result.output
@@ -532,7 +532,7 @@ def test_cli_replays_recorded_run(tmp_path: Path) -> None:
         run_dir / "record.json"
     )
 
-    result = CliRunner().invoke(mini.app, ["replay", str(run_dir)])
+    result = CliRunner().invoke(app.cli, ["replay", str(run_dir)])
 
     assert result.exit_code == 0
     assert "make a box" in result.output
@@ -542,7 +542,7 @@ def test_cli_replays_recorded_run(tmp_path: Path) -> None:
 
 
 def test_cli_replay_missing_run_exits_nonzero(tmp_path: Path) -> None:
-    result = CliRunner().invoke(mini.app, ["replay", str(tmp_path / "nope")])
+    result = CliRunner().invoke(app.cli, ["replay", str(tmp_path / "nope")])
 
     assert result.exit_code == 1
     assert "no conversation log" in result.output
@@ -554,10 +554,10 @@ def test_cli_view_opens_resolved_run(monkeypatch, tmp_path: Path) -> None:
     def view_run(run_dir: Path) -> None:
         viewed.append(run_dir)
 
-    monkeypatch.setattr(mini, "serve_viewer", view_run)
+    monkeypatch.setattr(app, "serve_viewer", view_run)
 
     result = CliRunner().invoke(
-        mini.app,
+        app.cli,
         ["view", "run-demo", "--output-dir", str(tmp_path)],
     )
 
@@ -569,22 +569,22 @@ def test_cli_view_reports_invalid_run(monkeypatch, tmp_path: Path) -> None:
     def fail(_run_dir: Path) -> None:
         raise ValueError("no USDZ outputs")
 
-    monkeypatch.setattr(mini, "serve_viewer", fail)
-    result = CliRunner().invoke(mini.app, ["view", str(tmp_path / "missing")])
+    monkeypatch.setattr(app, "serve_viewer", fail)
+    result = CliRunner().invoke(app.cli, ["view", str(tmp_path / "missing")])
 
     assert result.exit_code == 1
     assert "no USDZ outputs" in result.output
 
 
 def test_main_args_accept_bare_prompt() -> None:
-    assert mini._app_args(["articulated lamp"]) == ["generate", "articulated lamp"]
-    assert mini._app_args(["articulated lamp", "--model", "gpt-test"]) == [
+    assert app._app_args(["articulated lamp"]) == ["generate", "articulated lamp"]
+    assert app._app_args(["articulated lamp", "--model", "gpt-test"]) == [
         "generate",
         "articulated lamp",
         "--model",
         "gpt-test",
     ]
-    assert mini._app_args(["--model", "gpt-test", "articulated lamp"]) == [
+    assert app._app_args(["--model", "gpt-test", "articulated lamp"]) == [
         "generate",
         "--model",
         "gpt-test",
@@ -593,11 +593,11 @@ def test_main_args_accept_bare_prompt() -> None:
 
 
 def test_main_args_keep_commands_and_help() -> None:
-    assert mini._app_args(["generate", "articulated lamp"]) == ["generate", "articulated lamp"]
-    assert mini._app_args(["replay", "run-x"]) == ["replay", "run-x"]
-    assert mini._app_args(["view", "run-x"]) == ["view", "run-x"]
-    assert mini._app_args(["texture", "run-x"]) == ["texture", "run-x"]
-    assert mini._app_args(["--help"]) == ["--help"]
+    assert app._app_args(["generate", "articulated lamp"]) == ["generate", "articulated lamp"]
+    assert app._app_args(["replay", "run-x"]) == ["replay", "run-x"]
+    assert app._app_args(["view", "run-x"]) == ["view", "run-x"]
+    assert app._app_args(["texture", "run-x"]) == ["texture", "run-x"]
+    assert app._app_args(["--help"]) == ["--help"]
 
 
 def test_point_record_at_rewrites_the_result_path(tmp_path: Path) -> None:
@@ -608,7 +608,7 @@ def test_point_record_at_rewrites_the_result_path(tmp_path: Path) -> None:
         run_dir / "record.json"
     )
 
-    mini._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
+    app._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
 
     assert Record.load(run_dir / "record.json").result == "result/usdz/0001.usdz"
 
@@ -617,7 +617,7 @@ def test_point_record_at_is_a_noop_without_a_record(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
 
-    mini._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
+    app._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
 
     assert not (run_dir / "record.json").exists()
 
@@ -628,6 +628,6 @@ def test_point_record_at_survives_an_unreadable_record(tmp_path: Path, capsys) -
     (run_dir / "result" / "usdz").mkdir(parents=True)
     (run_dir / "record.json").write_text("{not json", encoding="utf-8")
 
-    mini._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
+    app._point_record_at(run_dir, run_dir / "result" / "usdz" / "0001.usdz")
 
     assert "could not update record.json" in capsys.readouterr().err
