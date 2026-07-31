@@ -7,8 +7,7 @@ import pytest
 from build123d import Box, Pos
 from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdValidation
 
-import mini_articraft.compiler.export as export_module
-from mini_articraft.compiler.export import export_object
+import mini_articraft.sdk.export as export_module
 from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
@@ -16,6 +15,7 @@ from mini_articraft.sdk import (
     MotionLimits,
     Origin,
 )
+from mini_articraft.sdk.export import export_object
 
 
 def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> None:
