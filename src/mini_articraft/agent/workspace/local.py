@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from mini_articraft import package_dir
 from mini_articraft._child_process import child_environment
 from mini_articraft.compiler.feedback import with_compile_report
-from mini_articraft.compiler.result import CompileResult
+from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.record import Record
 from mini_articraft.settings import DEFAULT_COMPILE_TIMEOUT_SECONDS, DEFAULT_OUTPUT_DIR
 
@@ -67,7 +67,7 @@ class LocalWorkspace:
         Record(run_id=run_id).save(run_dir / "record.json")
         return run_dir
 
-    def compile_path(self, run_dir: Path | str) -> dict[str, Any]:
+    def compile_path(self, run_dir: Path | str) -> CompilePayload:
         run_dir = Path(run_dir)
         workspace = run_dir / "workspace"
 
@@ -80,7 +80,7 @@ class LocalWorkspace:
         self._record_compile(run_dir)
         return result
 
-    def _run_worker(self, run_dir: Path) -> dict[str, Any]:
+    def _run_worker(self, run_dir: Path) -> CompilePayload:
         args = [
             sys.executable,
             "-m",
@@ -210,7 +210,7 @@ def _signal_worker_group(proc: subprocess.Popen[str], sig: signal.Signals) -> No
         return
 
 
-def _with_paths(run_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
+def _with_paths(run_dir: Path, result: CompilePayload) -> CompilePayload:
     workspace = run_dir / "workspace"
     result_dir = run_dir / "result"
     result["run_id"] = run_dir.name
@@ -227,7 +227,7 @@ def _finalize_payload(
     *,
     stderr: str,
     returncode: int | None,
-) -> dict[str, Any]:
+) -> CompilePayload:
     """Assemble the environment-level compile result from a worker payload.
 
     Single owner of result assembly for any worker transport: captured worker
@@ -243,7 +243,7 @@ def _finalize_result(
     run_dir: Path,
     result: CompileResult,
     returncode: int | None,
-) -> dict[str, Any]:
+) -> CompilePayload:
     payload = with_compile_report(result.to_payload(include_returncode=True, returncode=returncode))
     return _with_paths(run_dir, payload)
 
@@ -283,7 +283,7 @@ def _error_result(
     stderr: str = "",
     returncode: int | None = None,
     compile_stats: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> CompilePayload:
     return _finalize_result(
         run_dir,
         CompileResult(

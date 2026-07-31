@@ -34,6 +34,7 @@ from harness import (
 from mini_articraft.agent.events import TurnStarted
 from mini_articraft.agent.tools import ToolContext
 from mini_articraft.agent.workspace.local import LocalWorkspace
+from mini_articraft.compiler.result import CompilePayload
 from mini_articraft.record import Record
 
 
@@ -284,7 +285,7 @@ def run_tests() -> TestReport:
 """
 
 
-def _compile_helper_run(env: WarmEnvironment, run_id: str, value: str) -> dict:
+def _compile_helper_run(env: WarmEnvironment, run_id: str, value: str) -> CompilePayload:
     run_dir = env.create_run(run_id)
     workspace = run_dir / "workspace"
     workspace.joinpath("helper.py").write_text(f'VALUE = "{value}"\n', encoding="utf-8")

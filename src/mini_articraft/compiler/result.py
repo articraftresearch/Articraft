@@ -1,10 +1,55 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
-from typing import Any, Literal
+from dataclasses import dataclass
+from typing import Any, Literal, TypedDict
 
 CompileStatus = Literal["success", "error"]
+
+
+class _CompilePayloadBase(TypedDict):
+    """Written by every compile, whatever the outcome.
+
+    ``CompileResult.to_payload`` always sets these, so reading them needs no
+    guard. Everything below is conditional and does.
+    """
+
+    status: CompileStatus
+    manifest: str
+    usdz: str
+    test_report: Any
+    stdout: str
+    stderr: str
+    error: str
+    traceback: str
+
+
+class CompilePayload(_CompilePayloadBase, total=False):
+    """What one compile attempt looks like on the wire.
+
+    Assembled in three layers, which is why nothing owned its shape before: the
+    compiler produces the required fields above, the workspace attaches the
+    process-level ones as it collects the subprocess, and the agent's tools
+    attach the last group before the model sees the result.
+    """
+
+    compile_stats: dict[str, Any]
+
+    # Attached by the workspace once the subprocess is collected.
+    returncode: int | None
+    run: str
+    run_id: str
+    workspace: str
+    entrypoint: str
+    result: str
+    # A dict on the wire and in the record; the agent's compile tool replaces it
+    # with the rendered text before the model sees it. Any, because this type
+    # exists to check key names -- the nested reports are their own shapes.
+    compile_report: Any
+
+    # Attached by the agent's tools before the model sees it.
+    is_error: bool
+    raster_path: str
 
 
 @dataclass
@@ -41,10 +86,19 @@ class CompileResult:
         *,
         include_returncode: bool = False,
         returncode: int | None = None,
-    ) -> dict[str, Any]:
-        payload = {field.name: getattr(self, field.name) for field in fields(self)}
+    ) -> CompilePayload:
+        payload: CompilePayload = {
+            "status": self.status,
+            "manifest": self.manifest,
+            "usdz": self.usdz,
+            "test_report": self.test_report,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "error": self.error,
+            "traceback": self.traceback,
+        }
+        if self.compile_stats is not None:
+            payload["compile_stats"] = self.compile_stats
         if include_returncode:
             payload["returncode"] = returncode
-        if self.compile_stats is None:
-            payload.pop("compile_stats")
         return payload

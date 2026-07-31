@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from mini_articraft.compiler.result import CompileResult
+from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.sdk import FailureKind, TestReport
 
 Severity = Literal["failure", "warning", "note"]
@@ -54,11 +55,11 @@ class CompileSignalBundle:
     signals: tuple[CompileSignal, ...] = ()
 
 
-def empty_compile_payload(*, error: str = "", stdout: str = "", stderr: str = "") -> dict[str, Any]:
+def empty_compile_payload(*, error: str = "", stdout: str = "", stderr: str = "") -> CompilePayload:
     return CompileResult(error=error, stdout=stdout, stderr=stderr).to_payload()
 
 
-def with_compile_report(payload: dict[str, Any]) -> dict[str, Any]:
+def with_compile_report(payload: CompilePayload) -> CompilePayload:
     """Attach the agent-facing report to a compile payload.
 
     Callers add this rather than ``CompileResult`` building its own report: the
@@ -69,7 +70,7 @@ def with_compile_report(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def build_compile_report_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def build_compile_report_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     status: Status = "success" if payload["status"] == "success" else "failure"
     return build_compile_report(
         status=status,
