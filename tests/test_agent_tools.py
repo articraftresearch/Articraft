@@ -10,9 +10,9 @@ import shlex
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
+from harness import fake_compile_payload
 from PIL import Image
 
 from mini_articraft.agent.images import LIMITS, prepare_image
@@ -21,6 +21,7 @@ from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.tools._exec import ExecSessions
 from mini_articraft.agent.workspace.local import LocalWorkspace
 from mini_articraft.compiler.feedback import build_compile_report_from_payload
+from mini_articraft.compiler.result import CompilePayload
 
 
 def run(awaitable):
@@ -489,7 +490,7 @@ render_view(
 
 def test_preview_output_invalidates_compile_freshness(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.successful_compile_result = {"status": "success"}
+    ctx.successful_compile_result = fake_compile_payload()
     ctx.successful_compile_digest = workspace_digest(ctx.workspace)
     assert ctx.refresh_compile_freshness()
 
@@ -716,12 +717,11 @@ def test_compile_tool_resets_failure_streak_on_success(tmp_path) -> None:
 
 def test_cached_compile_success_resets_failure_streak(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.successful_compile_result = {
-        "status": "success",
-        "compile_report": build_compile_report_from_payload(
+    ctx.successful_compile_result = fake_compile_payload(
+        compile_report=build_compile_report_from_payload(
             {"status": "success", "test_report": None}
         ),
-    }
+    )
     ctx.successful_compile_digest = workspace_digest(ctx.workspace)
     ctx.last_compile_failure_signature = "previous-failure"
     ctx.consecutive_compile_failures = 2
@@ -737,16 +737,12 @@ class FakeCompileEnv:
     def __init__(self, *statuses: str) -> None:
         self.statuses = list(statuses)
 
-    def compile_path(self, run_dir: Path | str) -> dict[str, Any]:
+    def compile_path(self, run_dir: Path | str) -> CompilePayload:
         status = self.statuses.pop(0)
-        payload = {
-            "status": status,
-            "error": "ValueError: bad loft" if status == "error" else "",
-            "stdout": "",
-            "stderr": "",
-            "traceback": "",
-            "returncode": 1 if status == "error" else 0,
-            "test_report": None,
-        }
+        payload = fake_compile_payload(
+            status=status,
+            error="ValueError: bad loft" if status == "error" else "",
+            returncode=1 if status == "error" else 0,
+        )
         payload["compile_report"] = build_compile_report_from_payload(payload)
         return payload

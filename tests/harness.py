@@ -44,7 +44,7 @@ from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Generic, Literal, TypeVar
+from typing import Any, ClassVar, Generic, Literal, TypeVar, cast
 
 from mini_articraft import Model
 from mini_articraft.agent import Agent, events
@@ -52,7 +52,21 @@ from mini_articraft.agent.tools import Tool, ToolContext
 from mini_articraft.agent.tools._core import schema as _tool_schema
 from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.workspace.local import LocalWorkspace, _error_result, _finalize_payload
+from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.record import Record, read_conversation
+
+
+def fake_compile_payload(**overrides: Any) -> CompilePayload:
+    """A structurally complete payload for fakes that only care about a few keys.
+
+    Built through the real producer so a field added to ``CompileResult`` shows
+    up here too, instead of every fake drifting from the shape it stands in for.
+    """
+
+    payload = CompileResult(status="success").to_payload()
+    payload.update(cast(CompilePayload, overrides))
+    return payload
+
 
 T = TypeVar("T")
 Item = TypeVar("Item")
@@ -783,7 +797,7 @@ class WarmEnvironment(LocalWorkspace):
                 cls._server = _CompileServer()
             return cls._server
 
-    def _run_worker(self, run_dir: Path) -> dict[str, Any]:
+    def _run_worker(self, run_dir: Path) -> CompilePayload:
         self.compile_count += 1
         status, payload = self._shared_server().compile(
             run_dir,
@@ -937,11 +951,11 @@ def compile_success_tool() -> Tool:
         usdz = context.run_dir / "result" / "usdz" / "0000.usdz"
         usdz.parent.mkdir(parents=True, exist_ok=True)
         usdz.write_bytes(b"test-usdz")
-        result = {"status": "success", "usdz": str(usdz)}
+        result = fake_compile_payload(usdz=str(usdz))
         context.compile_result = result
         context.successful_compile_result = result
         context.successful_compile_digest = workspace_digest(context.workspace)
-        return result
+        return dict(result)
 
     return Tool("compile", stub_schema("compile"), run_compile)
 
@@ -954,6 +968,7 @@ GOOD_MAIN_PY = """
 from build123d import Box
 
 from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+
 
 
 def build_object_model() -> ArticulatedObject:

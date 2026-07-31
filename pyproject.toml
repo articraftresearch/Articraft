@@ -95,6 +95,10 @@ include = ["src", "tests", "scripts", "benchmarks"]
 # The vendored build123d doc snippets are agent-facing content, not package code.
 exclude = ["src/mini_articraft/sdk/docs"]
 typeCheckingMode = "standard"
+# CompilePayload exists to catch mistyped keys, not to prove every optional key
+# is present at each read. The latter would need a guard at ~20 call sites that
+# already know the key is there. Unknown keys are still an error.
+reportTypedDictNotRequiredAccess = false
 
 # Test modules import the test environment as `import harness` (pytest prepend
 # mode puts tests/ on sys.path); teach the type checker the same root.

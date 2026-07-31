@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +46,7 @@ def _parse_request(line: str) -> Path | None:
         return None
 
 
-def _emit(payload: dict[str, Any]) -> None:
+def _emit(payload: Mapping[str, Any]) -> None:
     sys.stdout.write(json.dumps(payload, default=str) + "\n")
     sys.stdout.flush()
 

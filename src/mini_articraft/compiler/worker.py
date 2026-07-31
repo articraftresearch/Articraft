@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from mini_articraft.compiler.feedback import with_compile_report
-from mini_articraft.compiler.result import CompileResult
+from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.record import Record
 from mini_articraft.sdk import (
     ArticulatedObject,
@@ -84,7 +84,7 @@ class _CompileTracker:
 
 def compile_run(
     run_dir: Path, *, include_report: bool = True, physics_enabled: bool = False
-) -> dict[str, Any]:
+) -> CompilePayload:
     workspace = run_dir / "workspace"
     result_dir = run_dir / "result"
     tracker = _CompileTracker(result_dir / _COMPILE_PROGRESS_FILE)

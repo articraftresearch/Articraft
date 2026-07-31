@@ -5,7 +5,7 @@ import contextlib
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -286,11 +286,9 @@ class Agent:
         compile_result = (
             context.successful_compile_result if workspace_is_compiled else context.compile_result
         )
-        if compile_result and isinstance(
-            compile_result.get("compile_report"),
-            dict,
-        ):
-            data["compile_report"] = compile_result["compile_report"]
+        compile_report = compile_result.get("compile_report") if compile_result else None
+        if isinstance(compile_report, dict):
+            data["compile_report"] = compile_report
         if self.config.output_path:
             record.save(self.config.output_path)
         self._emit(
@@ -503,7 +501,7 @@ def _append_reminder(messages: list[dict[str, Any]], path: Path, content: str) -
     append_conversation(path, reminder)
 
 
-def _result_path(run_dir: Path, compile_result: dict[str, Any] | None) -> str:
+def _result_path(run_dir: Path, compile_result: Mapping[str, Any] | None) -> str:
     raw = compile_result.get("usdz") if compile_result else None
     if not raw:
         return ""

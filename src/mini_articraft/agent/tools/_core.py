@@ -11,6 +11,7 @@ from typing import Any, Generic, Protocol, TypeVar
 from mini_articraft import package_dir
 from mini_articraft.agent.tools._exec import ExecSessions
 from mini_articraft.agent.tools._paths import scoped_path
+from mini_articraft.compiler.result import CompilePayload
 
 SDK_DOCS_ROOT = package_dir / "sdk" / "docs"
 WORKSPACE_SDK_DOCS_ROOT = Path("docs") / "sdk"
@@ -33,7 +34,7 @@ class Compiler(Protocol):
     than the whole protocol. A ``Workspace`` satisfies this structurally.
     """
 
-    def compile_path(self, run_dir: Path | str) -> dict[str, Any]: ...
+    def compile_path(self, run_dir: Path | str) -> CompilePayload: ...
 
 
 @dataclass
@@ -42,8 +43,8 @@ class ToolContext:
     run_dir: Path
     workspace: Path
     """The directory the agent edits: ``run_dir / "workspace"``."""
-    compile_result: dict[str, Any] | None = None
-    successful_compile_result: dict[str, Any] | None = None
+    compile_result: CompilePayload | None = None
+    successful_compile_result: CompilePayload | None = None
     successful_compile_digest: str | None = None
     last_compile_failure_signature: str | None = None
     consecutive_compile_failures: int = 0
