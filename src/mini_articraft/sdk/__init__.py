@@ -13,7 +13,7 @@ One canonical import path per category:
 
 from __future__ import annotations
 
-from mini_articraft.sdk._mesh_core import (
+from mini_articraft.sdk._mesh.core import (
     BoxGeometry,
     CapsuleGeometry,
     ConeGeometry,
@@ -29,13 +29,13 @@ from mini_articraft.sdk._mesh_core import (
     SuperellipsoidGeometry,
     TorusGeometry,
 )
-from mini_articraft.sdk._mesh_health import (
+from mini_articraft.sdk._mesh.health import (
     MeshHealthFinding,
     MeshHealthIssue,
     MeshHealthReport,
     analyze_mesh_health,
 )
-from mini_articraft.sdk._mesh_sweeps import (
+from mini_articraft.sdk._mesh.sweeps import (
     ArcPipeGeometry,
     PipeGeometry,
     SweepGeometry,

@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TypedDict, Unpack
 
-from mini_articraft.sdk._mesh_core import (
+from mini_articraft.sdk._mesh.core import (
     _EPS,
     LoftGeometry,
     MeshGeometry,

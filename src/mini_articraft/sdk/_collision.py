@@ -9,7 +9,7 @@ import manifold3d
 import numpy as np
 import trimesh
 
-from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
+from mini_articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType, Origin
 from mini_articraft.sdk.object import ArticulatedObject, Geometry

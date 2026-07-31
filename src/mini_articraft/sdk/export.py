@@ -29,7 +29,7 @@ from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
 from mini_articraft.sdk import ambientcg
 from mini_articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
 from mini_articraft.sdk._mass_solver import ResolvedMass, resolve_mass
-from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
+from mini_articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
 from mini_articraft.sdk.materials import Material, is_library_material
 from mini_articraft.sdk.object import ArticulatedObject, Geometry

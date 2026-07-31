@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import cast
 
-from mini_articraft.sdk._mesh_core import (
+from mini_articraft.sdk._mesh.core import (
     _EPS,
     MeshGeometry,
     SphereGeometry,
@@ -25,7 +25,7 @@ from mini_articraft.sdk._mesh_core import (
     _v_sub,
     _vec2,
 )
-from mini_articraft.sdk._mesh_profiles import (
+from mini_articraft.sdk._mesh.profiles import (
     sample_arc_3d,
     sample_catmull_rom_spline_3d,
     sample_cubic_bezier_spline_3d,
@@ -1237,7 +1237,7 @@ def tube_network_from_paths(
             result.merge(solid)
         return result
 
-    from mini_articraft.sdk._mesh_boolean import _boolean_union_many
+    from mini_articraft.sdk._mesh.boolean import _boolean_union_many
 
     try:
         return _boolean_union_many(solids)

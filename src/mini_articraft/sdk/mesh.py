@@ -8,14 +8,14 @@ sampling, sweep helpers, section lofts, shell partitioning, and refinement.
 
 from __future__ import annotations
 
-from mini_articraft.sdk._mesh_boolean import (
+from mini_articraft.sdk._mesh.boolean import (
     boolean_difference,
     boolean_intersection,
     boolean_union,
     cut_opening_on_face,
 )
-from mini_articraft.sdk._mesh_core import build123d_to_mesh
-from mini_articraft.sdk._mesh_profiles import (
+from mini_articraft.sdk._mesh.core import build123d_to_mesh
+from mini_articraft.sdk._mesh.profiles import (
     WirePath,
     resample_side_sections,
     rounded_rect_profile,
@@ -28,15 +28,15 @@ from mini_articraft.sdk._mesh_profiles import (
     superellipse_profile,
     superellipse_side_loft,
 )
-from mini_articraft.sdk._mesh_refine import refine_mesh, smooth_mesh, subdivide_mesh
-from mini_articraft.sdk._mesh_sweeps import (
+from mini_articraft.sdk._mesh.refine import refine_mesh, smooth_mesh, subdivide_mesh
+from mini_articraft.sdk._mesh.sweeps import (
     SweepSection,
     sweep_profile_along_spline,
     tube_from_spline_points,
     tube_network_from_paths,
     wire_from_points,
 )
-from mini_articraft.sdk._mesh_weld import SnapRefused, smooth_difference, snap_to, weld
+from mini_articraft.sdk._mesh.weld import SnapRefused, smooth_difference, snap_to, weld
 from mini_articraft.sdk._section_loft import (
     LoftSection,
     SectionLoftSpec,
