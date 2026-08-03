@@ -4,7 +4,7 @@ Everything here is imported from the package root, and mesh recipes also from
 ``mini_articraft.sdk.mesh``. The modules below are how the source is organised,
 not extra import paths.
 
-Five threads run through this package:
+Six threads run through this package:
 
 - **structure** -- what the object is and how it moves. ``object`` holds
   ``Part`` and ``ArticulatedObject``; ``joints`` holds ``Articulation`` and
@@ -21,7 +21,6 @@ Five threads run through this package:
   which the authored ``run_tests()`` uses.
 - **inspect** -- seeing the result. ``visual`` renders views for the author to
   look at.
-
 - **publish** -- writing the result out. ``export`` turns a model into a
   validated USDZ package plus its manifest. It is imported explicitly rather
   than re-exported here, which keeps OpenUSD out of a plain
