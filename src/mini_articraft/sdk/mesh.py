@@ -29,6 +29,17 @@ from mini_articraft.sdk._mesh.profiles import (
     superellipse_side_loft,
 )
 from mini_articraft.sdk._mesh.refine import refine_mesh, smooth_mesh, subdivide_mesh
+from mini_articraft.sdk._mesh.section_loft import (
+    LoftSection,
+    SectionLoftSpec,
+    repair_loft,
+    section_loft,
+)
+from mini_articraft.sdk._mesh.shell_partition import (
+    ShellPartitionRegion,
+    ShellPartitionSpec,
+    partition_shell,
+)
 from mini_articraft.sdk._mesh.sweeps import (
     SweepSection,
     sweep_profile_along_spline,
@@ -37,17 +48,6 @@ from mini_articraft.sdk._mesh.sweeps import (
     wire_from_points,
 )
 from mini_articraft.sdk._mesh.weld import SnapRefused, smooth_difference, snap_to, weld
-from mini_articraft.sdk._section_loft import (
-    LoftSection,
-    SectionLoftSpec,
-    repair_loft,
-    section_loft,
-)
-from mini_articraft.sdk._shell_partition import (
-    ShellPartitionRegion,
-    ShellPartitionSpec,
-    partition_shell,
-)
 
 __all__ = [
     "LoftSection",

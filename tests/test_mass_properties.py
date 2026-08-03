@@ -15,9 +15,9 @@ from mini_articraft.sdk import (
     Material,
     TestContext,
 )
-from mini_articraft.sdk._mass_solver import resolve_mass
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.export import _resolve_part_mass, export_object
+from mini_articraft.sdk.mass import resolve_mass
 
 
 def _box(size=(0.2, 0.1, 0.05)) -> trimesh.Trimesh:

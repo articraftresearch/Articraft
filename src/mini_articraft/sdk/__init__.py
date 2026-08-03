@@ -1,14 +1,31 @@
 """Public SDK for authoring and testing articulated objects.
 
-One canonical import path per category:
+Everything here is imported from the package root, and mesh recipes also from
+``mini_articraft.sdk.mesh``. The modules below are how the source is organised,
+not extra import paths.
 
-- Object and articulation modeling, geometry classes, physical testing, and
-  errors live here at the package root.
-- Advanced mesh authoring and repair recipes (booleans, welds, snapping,
-  profile/wire sampling, sweep helpers, section lofts, shell partitioning,
-  refinement) live under ``mini_articraft.sdk.mesh``.
-- USDZ publication lives under ``mini_articraft.sdk.export`` so importing the
-  root SDK does not eagerly load OpenUSD.
+Five threads run through this package:
+
+- **structure** -- what the object is and how it moves. ``object`` holds
+  ``Part`` and ``ArticulatedObject``; ``joints`` holds ``Articulation`` and
+  its motion limits.
+- **geometry** -- how shapes are made. ``mesh`` is the public face; ``_mesh``
+  is the engine behind it. Geometry is undifferentiated: a boolean or a weld
+  does not know whether the result is heavy or shiny.
+- **physics and appearance** -- what a shape is made of. Both live on one
+  ``Material`` in ``materials``, deliberately: density, friction and
+  restitution alongside colour, metallic and roughness. ``mass`` measures a
+  part from those densities and lets you override the result; ``ambientcg``
+  fetches texture sets.
+- **verify** -- checking the result. ``testing`` provides ``TestContext``,
+  which the authored ``run_tests()`` uses.
+- **inspect** -- seeing the result. ``visual`` renders views for the author to
+  look at.
+
+- **publish** -- writing the result out. ``export`` turns a model into a
+  validated USDZ package plus its manifest. It is imported explicitly rather
+  than re-exported here, which keeps OpenUSD out of a plain
+  ``mini_articraft.sdk`` import.
 """
 
 from __future__ import annotations
