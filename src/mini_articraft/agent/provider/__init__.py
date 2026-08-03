@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mini_articraft import Model
+from mini_articraft.agent.protocols import Model
 from mini_articraft.agent.provider.anthropic import AnthropicModel
 from mini_articraft.agent.provider.anthropic import (
     context_window_tokens_for as anthropic_context_window_tokens_for,

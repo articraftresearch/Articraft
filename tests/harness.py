@@ -46,8 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Generic, Literal, TypeVar, cast
 
-from mini_articraft import Model
-from mini_articraft.agent import Agent, events
+from mini_articraft.agent import Agent, Model, events
 from mini_articraft.agent.record import Record, read_conversation
 from mini_articraft.agent.tools import Tool, ToolContext
 from mini_articraft.agent.tools._core import schema as _tool_schema
