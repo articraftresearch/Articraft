@@ -203,3 +203,25 @@ def test_releasing_a_joint_produces_motion_worth_watching(tmp_path: Path) -> Non
     angles = [frame["joints"][0] for frame in result.trajectory.frames]
     assert max(angles) - min(angles) > 0.5  # radians
     assert result.peak_joint_speed is not None and result.peak_joint_speed > 1.0
+
+
+def _negative_axis_hinge() -> ArticulatedObject:
+    """The crate, hinged on -X instead of +X."""
+    model = _hinged_box()
+    model.articulations[-1].axis = (-1.0, 0.0, 0.0)
+    return model
+
+
+def test_a_negative_hinge_axis_survives_the_round_trip(tmp_path: Path) -> None:
+    """UsdPhysics names a cardinal axis and rotates the joint frame to aim it.
+
+    A -X hinge is written as "X" plus a half turn about Z, so reading the axis
+    token alone flips it. A flipped hinge does not fail loudly -- gravity simply
+    drives the joint the wrong way, and a lid that should hang shut swings open.
+    """
+    write_mjcf(_export(_negative_axis_hinge(), tmp_path), tmp_path / "sim")
+    joint = ET.parse(tmp_path / "sim" / "model.xml").getroot().find(".//joint")
+
+    assert joint is not None
+    axis = tuple(round(float(value), 6) for value in str(joint.get("axis")).split())
+    assert axis == (-1.0, 0.0, 0.0)
