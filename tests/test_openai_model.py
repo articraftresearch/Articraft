@@ -402,6 +402,7 @@ def test_openai_model_round_trips_response_items(
 
 def test_openai_model_loads_dotenv(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     get_settings.cache_clear()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("MINI_ARTICRAFT_OUTPUT_DIR", raising=False)

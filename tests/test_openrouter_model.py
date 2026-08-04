@@ -330,6 +330,7 @@ def test_model_factory_selects_openrouter() -> None:
 
 def test_openrouter_settings_load_from_dotenv(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     get_settings.cache_clear()
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("MINI_ARTICRAFT_OPENROUTER_MODEL", raising=False)
