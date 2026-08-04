@@ -72,7 +72,7 @@ class LocalWorkspace:
         workspace = run_dir / "workspace"
 
         if not (workspace / "main.py").is_file():
-            result = _error_result(run_dir, error="workspace/main.py is required")
+            result = _error_result(error="workspace/main.py is required")
             self._record_compile(run_dir)
             return result
 
@@ -106,7 +106,6 @@ class LocalWorkspace:
                     "model": {},
                 }
             return _error_result(
-                run_dir,
                 error=_timeout_error(self.config.timeout_seconds, compile_stats),
                 stdout=completed.stdout,
                 stderr=completed.stderr,
@@ -118,7 +117,6 @@ class LocalWorkspace:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError:
             return _error_result(
-                run_dir,
                 error="compile worker did not return JSON",
                 stdout=completed.stdout,
                 stderr=completed.stderr,
@@ -127,7 +125,6 @@ class LocalWorkspace:
 
         if not isinstance(payload, dict):
             return _error_result(
-                run_dir,
                 error="compile worker returned invalid JSON",
                 stdout=completed.stdout,
                 stderr=completed.stderr,
@@ -135,7 +132,6 @@ class LocalWorkspace:
             )
 
         return _finalize_payload(
-            run_dir,
             payload,
             stderr=completed.stderr,
             returncode=completed.returncode,
@@ -210,19 +206,7 @@ def _signal_worker_group(proc: subprocess.Popen[str], sig: signal.Signals) -> No
         return
 
 
-def _with_paths(run_dir: Path, result: CompilePayload) -> CompilePayload:
-    workspace = run_dir / "workspace"
-    result_dir = run_dir / "result"
-    result["run_id"] = run_dir.name
-    result["run"] = str(run_dir)
-    result["workspace"] = str(workspace)
-    result["entrypoint"] = str(workspace / "main.py")
-    result["result"] = str(result_dir)
-    return result
-
-
 def _finalize_payload(
-    run_dir: Path,
     payload: dict[str, Any],
     *,
     stderr: str,
@@ -232,20 +216,18 @@ def _finalize_payload(
 
     Single owner of result assembly for any worker transport: captured worker
     stderr is followed by process-level stderr, missing keys are defaulted,
-    and the compile report and run paths are attached here.
+    and the compile report is attached here.
     """
     result = CompileResult.from_payload(payload)
     result.stderr += stderr
-    return _finalize_result(run_dir, result, returncode)
+    return _finalize_result(result, returncode)
 
 
 def _finalize_result(
-    run_dir: Path,
     result: CompileResult,
     returncode: int | None,
 ) -> CompilePayload:
-    payload = with_compile_report(result.to_payload(include_returncode=True, returncode=returncode))
-    return _with_paths(run_dir, payload)
+    return with_compile_report(result.to_payload(include_returncode=True, returncode=returncode))
 
 
 def _read_compile_progress(run_dir: Path) -> dict[str, Any]:
@@ -276,7 +258,6 @@ def _timeout_error(timeout_seconds: float, compile_stats: dict[str, Any]) -> str
 
 
 def _error_result(
-    run_dir: Path,
     *,
     error: str,
     stdout: str = "",
@@ -285,7 +266,6 @@ def _error_result(
     compile_stats: dict[str, Any] | None = None,
 ) -> CompilePayload:
     return _finalize_result(
-        run_dir,
         CompileResult(
             error=error,
             stdout=stdout,
