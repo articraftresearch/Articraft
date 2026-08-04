@@ -64,12 +64,18 @@ class Agent:
         image_path: Path | None = None,
     ) -> dict[str, Any]:
         """Run one generation and release the model exactly once."""
+        data: dict[str, Any] | None = None
         try:
-            return await self._run(prompt, run_id=run_id, image_path=image_path)
+            data = await self._run(prompt, run_id=run_id, image_path=image_path)
+            return data
         finally:
             # The agent owns the model for the whole run, including setup
             # failures. Teardown noise must not replace the generation outcome.
             if await _finish_cleanup(self.model.close(), label="model"):
+                if data is not None:
+                    run_dir = data.get("run")
+                    if isinstance(run_dir, str):
+                        _save_run_error(Path(run_dir) / "record.json", "generation cancelled")
                 raise asyncio.CancelledError
 
     async def _run(

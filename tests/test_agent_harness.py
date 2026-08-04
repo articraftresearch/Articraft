@@ -929,6 +929,57 @@ def test_repeated_cancellation_waits_for_model_close(tmp_path) -> None:
     assert record.error == "generation cancelled"
 
 
+def test_cancellation_during_model_close_terminalizes_completed_run(tmp_path) -> None:
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+
+    class BlockingCloseModel(ScriptedModel):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+                    calls(tool_call("compile")),
+                    text("done"),
+                ]
+            )
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            close_started.set()
+            await release_close.wait()
+
+    model = BlockingCloseModel()
+
+    async def exercise() -> None:
+        task = asyncio.create_task(
+            Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run(
+                "box",
+                run_id="cancel-during-close",
+            )
+        )
+        await asyncio.wait_for(close_started.wait(), timeout=10)
+        record_path = tmp_path / "cancel-during-close" / "record.json"
+        assert Record.load(record_path).status == "success"
+
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release_close.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        run(exercise())
+    finally:
+        release_close.set()
+
+    assert model.close_calls == 1
+    record = Record.load(tmp_path / "cancel-during-close" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation cancelled"
+    assert record.result == ""
+
+
 def test_event_handler_cannot_mutate_pending_tool_calls(tmp_path) -> None:
     model = ScriptedModel(
         [
