@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from mini_articraft.compiler.result import CompilePayload, CompileResult
+from mini_articraft.compiler.result import CompilePayload
 from mini_articraft.sdk import FailureKind, TestReport
 
 Severity = Literal["failure", "warning", "note"]
@@ -53,10 +53,6 @@ class CompileSignalBundle:
     status: Status
     summary: str
     signals: tuple[CompileSignal, ...] = ()
-
-
-def empty_compile_payload(*, error: str = "", stdout: str = "", stderr: str = "") -> CompilePayload:
-    return CompileResult(error=error, stdout=stdout, stderr=stderr).to_payload()
 
 
 def with_compile_report(payload: CompilePayload) -> CompilePayload:

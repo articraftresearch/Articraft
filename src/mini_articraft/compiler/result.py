@@ -27,29 +27,18 @@ class _CompilePayloadBase(TypedDict):
 class CompilePayload(_CompilePayloadBase, total=False):
     """What one compile attempt looks like on the wire.
 
-    Assembled in three layers, which is why nothing owned its shape before: the
-    compiler produces the required fields above, the workspace attaches the
-    process-level ones as it collects the subprocess, and the agent's tools
-    attach the last group before the model sees the result.
+    The compiler produces the required fields above. The workspace attaches
+    process details and the report after it collects the subprocess.
     """
 
     compile_stats: dict[str, Any]
 
     # Attached by the workspace once the subprocess is collected.
     returncode: int | None
-    run: str
-    run_id: str
-    workspace: str
-    entrypoint: str
-    result: str
     # A dict on the wire and in the record; the agent's compile tool replaces it
     # with the rendered text before the model sees it. Any, because this type
     # exists to check key names -- the nested reports are their own shapes.
     compile_report: Any
-
-    # Attached by the agent's tools before the model sees it.
-    is_error: bool
-    raster_path: str
 
 
 @dataclass
