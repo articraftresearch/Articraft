@@ -203,3 +203,39 @@ def test_releasing_a_joint_produces_motion_worth_watching(tmp_path: Path) -> Non
     angles = [frame["joints"][0] for frame in result.trajectory.frames]
     assert max(angles) - min(angles) > 0.5  # radians
     assert result.peak_joint_speed is not None and result.peak_joint_speed > 1.0
+
+
+def test_prismatic_travel_is_not_reported_as_part_separation(tmp_path: Path) -> None:
+    model = ArticulatedObject("lift")
+    base = model.part("base")
+    base.add(
+        BoxGeometry((0.10, 0.10, 0.02)),
+        name="base_slab",
+        material=Material.STEEL,
+    )
+    body = model.part("body")
+    body.add(
+        BoxGeometry((0.08, 0.08, 0.10)).translate(0.0, 0.0, 0.06),
+        name="body_box",
+        material=Material.STEEL,
+    )
+    model.articulation(
+        "slide",
+        ArticulationType.PRISMATIC,
+        base,
+        body,
+        axis=(0.0, 0.0, 1.0),
+        motion_limits=MotionLimits(lower=0.0, upper=0.10),
+    )
+
+    result = simulate_usdz(
+        _export(model, tmp_path),
+        tmp_path / "sim",
+        seconds=1.0,
+        scenario="release",
+    )
+
+    assert result.trajectory is not None
+    positions = [frame["joints"][0] for frame in result.trajectory.frames]
+    assert abs(positions[0]) > 0.005
+    assert result.parts_stayed_together, result.summary()
