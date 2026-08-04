@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,11 +14,13 @@ from typing import Any
 from pydantic import BaseModel
 
 import mini_articraft.agent.tools as tools
-from mini_articraft import Environment, Model, package_dir
+from mini_articraft import package_dir
 from mini_articraft.agent import events
+from mini_articraft.agent.compaction import SUMMARY_MAX_OUTPUT_TOKENS, prepare_compaction
 from mini_articraft.agent.images import PreparedImage, prepare_image
+from mini_articraft.agent.protocols import ContextSummarizer, Model, Workspace
+from mini_articraft.agent.record import Record, append_conversation
 from mini_articraft.agent.tools import ToolContext
-from mini_articraft.record import Record, append_conversation
 from mini_articraft.settings import DEFAULT_MAX_TURNS
 
 PROMPT_SLUG_MAX_LENGTH = 48
@@ -35,16 +37,17 @@ class Agent:
     def __init__(
         self,
         model: Model,
-        env: Environment,
+        workspace: Workspace,
         *,
         on_event: Callable[[events.Event], None] | None = None,
         **kwargs: Any,
     ):
         self.config = AgentConfig(**kwargs)
         self.model = model
-        self.env = env
+        self.workspace = workspace
         self.messages: list[dict[str, Any]] = []
         self._on_event = on_event
+        self._enabled_tool_names = set(tools.TOOLS)
 
     def _emit(self, event: events.Event) -> None:
         if self._on_event is not None:
@@ -76,12 +79,25 @@ class Agent:
         run_id: str | None = None,
         image_path: Path | None = None,
     ) -> dict[str, Any]:
+        supports_images = bool(getattr(self.model, "supports_images", True))
+        if image_path is not None and not supports_images:
+            raise ValueError("The selected model does not support reference images.")
         image = prepare_image(image_path) if image_path is not None else None
-        run_id, run_dir = _create_run(self.env, prompt, run_id)
-        context = ToolContext(self.env, run_dir, run_dir / "workspace")
+        tool_schemas = tools.schemas(include_images=supports_images)
+        self._enabled_tool_names = {str(schema["name"]) for schema in tool_schemas}
+        run_id, run_dir = _create_run(self.workspace, prompt, run_id)
+        context = ToolContext(self.workspace, run_dir, run_dir / "workspace")
         record_path = run_dir / "record.json"
         try:
-            return await self._run_created(prompt, image, run_id, run_dir, context)
+            return await self._run_created(
+                prompt,
+                image,
+                run_id,
+                run_dir,
+                context,
+                supports_images=supports_images,
+                tool_schemas=tool_schemas,
+            )
         except asyncio.CancelledError:
             _save_run_error(record_path, "generation cancelled")
             raise
@@ -100,6 +116,9 @@ class Agent:
         run_id: str,
         run_dir: Path,
         context: ToolContext,
+        *,
+        supports_images: bool,
+        tool_schemas: list[dict[str, Any]],
     ) -> dict[str, Any]:
         conversation_path = run_dir / "conversation.jsonl"
         record_path = run_dir / "record.json"
@@ -109,7 +128,9 @@ class Agent:
         record.result = ""
         record.save(record_path)
 
-        task = _read_prompt("task.md").replace("{{ prompt }}", prompt)
+        task = _read_prompt("task.md", include_images=supports_images).replace(
+            "{{ prompt }}", prompt
+        )
         task_message: dict[str, Any] = {"role": "user", "content": task}
         recorded_task = task_message
         if image is not None:
@@ -130,11 +151,11 @@ class Agent:
         self.messages = [
             {
                 "role": "system",
-                "content": _read_prompt("system.md"),
+                "content": _read_prompt("system.md", include_images=supports_images),
             },
             {
                 "role": "user",
-                "content": _read_sdk_quickstart(),
+                "content": _read_sdk_quickstart(include_images=supports_images),
             },
             task_message,
         ]
@@ -173,8 +194,37 @@ class Agent:
         consecutive_empty_responses = 0
         for turn in range(1, self.config.max_turns + 1):
             self._emit(events.TurnStarted(turn))
+            summarizer = self.model if isinstance(self.model, ContextSummarizer) else None
+            plan = (
+                prepare_compaction(self.messages, context_window_tokens)
+                if summarizer is not None
+                else None
+            )
+            if plan is not None and summarizer is not None:
+                try:
+                    summary_response = await summarizer.summarize_context(
+                        plan.summary_messages,
+                        max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
+                    )
+                    summary = str(summary_response.get("text") or "").strip()
+                    if not summary:
+                        raise ValueError("summary response did not contain text")
+                except Exception as exc:
+                    termination_error = f"context compaction failed: {type(exc).__name__}: {exc}"
+                    break
+
+                cost += _cost(summary_response)
+                summary_usage = _token_usage(summary_response)
+                token_usage = _add_token_usage(token_usage, summary_usage)
+                _save_cost(run_dir, cost, token_usage)
+                self.messages = plan.apply(self.messages, summary)
+                append_conversation(
+                    conversation_path,
+                    plan.record(summary, summary_usage),
+                )
+                self._emit(events.ContextCompacted(plan.tokens_before))
             try:
-                response = await self.model.query(self.messages, tools=tools.schemas())
+                response = await self.model.query(self.messages, tools=tool_schemas)
             except Exception as exc:
                 termination_error = f"model query failed: {type(exc).__name__}: {exc}"
                 break
@@ -280,11 +330,9 @@ class Agent:
         compile_result = (
             context.successful_compile_result if workspace_is_compiled else context.compile_result
         )
-        if compile_result and isinstance(
-            compile_result.get("compile_report"),
-            dict,
-        ):
-            data["compile_report"] = compile_result["compile_report"]
+        compile_report = compile_result.get("compile_report") if compile_result else None
+        if isinstance(compile_report, dict):
+            data["compile_report"] = compile_report
         if self.config.output_path:
             record.save(self.config.output_path)
         self._emit(
@@ -366,6 +414,8 @@ class Agent:
         name = str(call["name"])
         call_id = str(call["id"])
         try:
+            if name not in self._enabled_tool_names:
+                raise ValueError(f"tool is not available for this model: {name}")
             live_sessions = context.exec_sessions.live_ids()
             if live_sessions and name != "write_stdin":
                 raise ValueError(
@@ -441,20 +491,20 @@ def _save_run_error(path: Path, error: str) -> None:
 
 
 def _create_run(
-    env: Environment,
+    workspace: Workspace,
     prompt: str,
     run_id: str | None,
 ) -> tuple[str, Path]:
     """Create an explicit run exactly, or atomically suffix an automatic id."""
     if run_id is not None:
-        return run_id, env.create_run(run_id)
+        return run_id, workspace.create_run(run_id)
 
     base = _run_id_for_prompt(prompt)
     attempt = 1
     while True:
         candidate = base if attempt == 1 else f"{base}-{attempt}"
         try:
-            return candidate, env.create_run(candidate)
+            return candidate, workspace.create_run(candidate)
         except FileExistsError:
             attempt += 1
 
@@ -547,7 +597,7 @@ def _append_reminder(messages: list[dict[str, Any]], path: Path, content: str) -
     append_conversation(path, reminder)
 
 
-def _result_path(run_dir: Path, compile_result: dict[str, Any] | None) -> str:
+def _result_path(run_dir: Path, compile_result: Mapping[str, Any] | None) -> str:
     raw = compile_result.get("usdz") if compile_result else None
     if not raw:
         return ""
@@ -585,8 +635,11 @@ def _add_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, i
     return {key: left.get(key, 0) + right.get(key, 0) for key in keys}
 
 
-def _read_prompt(name: str) -> str:
-    return (package_dir / "prompts" / name).read_text(encoding="utf-8")
+def _read_prompt(name: str, *, include_images: bool = True) -> str:
+    prompt = (package_dir / "prompts" / name).read_text(encoding="utf-8")
+    if include_images:
+        return prompt.replace("<image_prompt>\n", "").replace("</image_prompt>\n", "")
+    return re.sub(r"<image_prompt>\n.*?</image_prompt>\n?", "", prompt, flags=re.DOTALL)
 
 
 def _save_input_image(run_dir: Path, image: PreparedImage) -> str:
@@ -597,10 +650,15 @@ def _save_input_image(run_dir: Path, image: PreparedImage) -> str:
     return relative.as_posix()
 
 
-def _read_sdk_quickstart() -> str:
+def _read_sdk_quickstart(*, include_images: bool = True) -> str:
     quickstart = (package_dir / "sdk" / "docs" / "common" / "00_quickstart.md").read_text(
         encoding="utf-8"
     )
+    if not include_images:
+        quickstart = quickstart.replace(
+            "- Visual views and report artifacts: `docs/sdk/common/45_visual_evidence.md`.\n",
+            "",
+        )
     return (
         "<sdk_quickstart>\n"
         "This SDK quickstart is preloaded for the run. Use it as the first "

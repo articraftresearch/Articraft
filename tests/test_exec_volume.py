@@ -19,7 +19,7 @@ import asyncio
 import pytest
 
 from mini_articraft.agent.tools import ToolContext, get
-from mini_articraft.environments.local import LocalEnvironment
+from mini_articraft.agent.workspace.local import LocalWorkspace
 
 SEQUENTIAL_CALLS = 250
 CONCURRENT_BATCH = 60
@@ -30,7 +30,7 @@ def _run(awaitable):
 
 
 def _context(tmp_path) -> ToolContext:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("volume")
     return ToolContext(env, run_dir, run_dir / "workspace")
 

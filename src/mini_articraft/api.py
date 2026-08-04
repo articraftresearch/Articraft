@@ -19,20 +19,20 @@ from pathlib import Path
 from typing import Any, Literal, cast, get_args
 
 from mini_articraft.agent import Agent, events
-from mini_articraft.environments import LocalEnvironment
-from mini_articraft.models import create_model
-from mini_articraft.models.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
-from mini_articraft.models.anthropic import anthropic_api_key_value
-from mini_articraft.models.anthropic import (
+from mini_articraft.agent.provider import create_model
+from mini_articraft.agent.provider.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
+from mini_articraft.agent.provider.anthropic import anthropic_api_key_value
+from mini_articraft.agent.provider.anthropic import (
     context_window_tokens_for as anthropic_context_window_tokens_for,
 )
-from mini_articraft.models.gemini import SUPPORTED_MODELS as GEMINI_MODELS
-from mini_articraft.models.gemini import (
+from mini_articraft.agent.provider.gemini import SUPPORTED_MODELS as GEMINI_MODELS
+from mini_articraft.agent.provider.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
 )
+from mini_articraft.agent.workspace import LocalWorkspace
 from mini_articraft.settings import Settings, get_settings
 
-Provider = Literal["openai", "gemini", "anthropic"]
+Provider = Literal["openai", "gemini", "anthropic", "openrouter"]
 GenerationStatus = Literal["success", "error"]
 Event = events.Event
 EventHandler = Callable[[Event], None]
@@ -196,6 +196,7 @@ def _resolved_settings(
             "anthropic": "anthropic_model",
             "gemini": "gemini_model",
             "openai": "openai_model",
+            "openrouter": "openrouter_model",
         }[selected_provider]
         updates[model_key] = model
 
@@ -225,6 +226,13 @@ def _resolved_settings(
 
 
 def _missing_provider_settings(settings: Settings) -> list[str]:
+    if settings.provider == "openrouter":
+        missing = []
+        if not (settings.openrouter_api_key or "").strip():
+            missing.append("OPENROUTER_API_KEY")
+        if not settings.openrouter_model.strip():
+            missing.append("MINI_ARTICRAFT_OPENROUTER_MODEL or --model")
+        return missing
     if settings.provider == "anthropic":
         return [] if anthropic_api_key_value(settings) else ["ANTHROPIC_API_KEY"]
     if settings.provider == "gemini":
@@ -240,7 +248,7 @@ async def _run_generation(
     on_event: EventHandler | None = None,
 ) -> dict[str, Any]:
     """Run one agent generation against fully resolved settings."""
-    env = LocalEnvironment(
+    workspace = LocalWorkspace(
         output_dir=settings.output_dir,
         timeout_seconds=settings.compile_timeout_seconds,
         physics_enabled=settings.physics_enabled,
@@ -249,7 +257,7 @@ async def _run_generation(
     agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
     if on_event is not None:
         agent_kwargs["on_event"] = on_event
-    return await Agent(model_client, env, **agent_kwargs).run(prompt, image_path=image_path)
+    return await Agent(model_client, workspace, **agent_kwargs).run(prompt, image_path=image_path)
 
 
 def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:

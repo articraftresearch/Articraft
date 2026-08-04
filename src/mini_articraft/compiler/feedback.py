@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from mini_articraft.compile_result import CompileResult
+from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.sdk import FailureKind, TestReport
 
 Severity = Literal["failure", "warning", "note"]
@@ -54,11 +55,22 @@ class CompileSignalBundle:
     signals: tuple[CompileSignal, ...] = ()
 
 
-def empty_compile_payload(*, error: str = "", stdout: str = "", stderr: str = "") -> dict[str, Any]:
+def empty_compile_payload(*, error: str = "", stdout: str = "", stderr: str = "") -> CompilePayload:
     return CompileResult(error=error, stdout=stdout, stderr=stderr).to_payload()
 
 
-def build_compile_report_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def with_compile_report(payload: CompilePayload) -> CompilePayload:
+    """Attach the agent-facing report to a compile payload.
+
+    Callers add this rather than ``CompileResult`` building its own report: the
+    result is data, this is presentation, and the dependency only runs one way.
+    """
+
+    payload["compile_report"] = build_compile_report_from_payload(payload)
+    return payload
+
+
+def build_compile_report_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     status: Status = "success" if payload["status"] == "success" else "failure"
     return build_compile_report(
         status=status,
@@ -482,7 +494,11 @@ def _runtime_signal(error: str, *, traceback_text: str = "") -> CompileSignal:
         )
     if any(
         marker in lower
-        for marker in ("unknown shape", "missing named geometry", "missing exact geometry")
+        for marker in (
+            "unknown shape",
+            "missing named geometry",
+            "missing exact geometry",
+        )
     ):
         return CompileSignal(
             "failure",
@@ -589,10 +605,9 @@ _RUNTIME_RULES = (
 _STRUCTURE_RULES = ("- Fix the model structure first. Local geometry tuning comes after that.",)
 _RULES_BY_KIND = {
     "missing_mass": (
-        "- Give every part a mass: pass `mass_properties=MassProperties(material=MaterialDensity.STEEL)` "
-        "to `model.part()`, choosing the material the part is actually made of.",
-        "- Use `density=` for a material that is not in the library, or `mass=` in kilograms "
-        "when you know the weight. Center of mass and inertia are measured from the geometry.",
+        "- Say what each shape is made of: `material=Material.STEEL` on `part.add()`.",
+        "- If the library has nothing close, build one: "
+        '`Material(name="ceramic", density=2400.0)`.',
     ),
     "compile_timeout": (
         "- Inspect the phase named in the timeout before editing.",
@@ -698,7 +713,13 @@ def _inspection_advice(kind: str) -> str:
 
 def _add_section(parts: list[str], tag: str, title: str, signals: list[CompileSignal]) -> None:
     if signals:
-        parts += ["", f"<{tag}>", title, *[_signal_line(s) for s in signals], f"</{tag}>"]
+        parts += [
+            "",
+            f"<{tag}>",
+            title,
+            *[_signal_line(s) for s in signals],
+            f"</{tag}>",
+        ]
 
 
 def _signal_line(signal: CompileSignal) -> str:
@@ -710,7 +731,9 @@ def _signal_line(signal: CompileSignal) -> str:
     return line
 
 
-def _failures(signals: list[CompileSignal] | tuple[CompileSignal, ...]) -> list[CompileSignal]:
+def _failures(
+    signals: list[CompileSignal] | tuple[CompileSignal, ...],
+) -> list[CompileSignal]:
     return _ordered_signals(signals, "failure")
 
 

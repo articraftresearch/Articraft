@@ -1,7 +1,14 @@
+"""Generate articulated objects with an agent that writes build123d.
+
+Package metadata and lazy Python API exports live here, so importing
+``mini_articraft`` costs almost nothing. The agent's plugin interfaces are in
+``mini_articraft.agent``.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from mini_articraft.api import (
@@ -29,21 +36,6 @@ _LAZY_EXPORTS = (
 )
 
 
-class Model(Protocol):
-    async def query(
-        self,
-        messages: list[dict[str, Any]],
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]: ...
-    async def close(self) -> None: ...
-
-
-class Environment(Protocol):
-    def create_run(self, run_id: str) -> Path: ...
-    def compile_path(self, run_dir: Path | str) -> dict[str, Any]: ...
-
-
 def __getattr__(name: str) -> Any:
     # Resolved lazily so `import mini_articraft.sdk` in a compile worker does
     # not load the model adapters and their client libraries.
@@ -61,12 +53,10 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
-    "Environment",
     "Event",
     "EventHandler",
     "GenerationResult",
     "GenerationStatus",
-    "Model",
     "Provider",
     "__version__",
     "generate",

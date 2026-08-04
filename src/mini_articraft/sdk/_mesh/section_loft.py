@@ -8,8 +8,8 @@ from typing import Literal, cast
 import numpy as np
 import trimesh
 
-from mini_articraft.sdk._mesh_core import LoftGeometry, MeshGeometry
-from mini_articraft.sdk._mesh_sweeps import (
+from mini_articraft.sdk._mesh.core import LoftGeometry, MeshGeometry
+from mini_articraft.sdk._mesh.sweeps import (
     _initial_frame,
     _path_frames,
     _validated_up_hint,

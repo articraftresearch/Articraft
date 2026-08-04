@@ -3,16 +3,15 @@
 mini-articraft has a small generation system. This is its core loop:
 
 ```text
-prompt -> model -> environment -> record
+prompt -> model -> workspace -> record
 ```
 
-The model changes one Python workspace. The environment compiles the workspace in a separate
-process. The agent adds each model response and tool result to the conversation record.
+The model changes one Python workspace. The workspace compiles it in a separate process. The agent adds each model response and tool result to the conversation record.
 
 ## Run sequence
 
 The command line interface and the `mini_articraft.generate` functions create a model adapter and
-a local environment. They give both items to `Agent`. This separation keeps the loop independent
+a local workspace. They give both items to `Agent`. This separation keeps the loop independent
 of one model or compiler.
 
 The agent does these steps for each run:
@@ -94,14 +93,18 @@ contains the numbered export files.
 - [`api.py`](../src/mini_articraft/api.py) contains the public synchronous and asynchronous
   generation functions and the provider routing they share with the command line interface.
 - [`agent/`](../src/mini_articraft/agent) contains the turn loop and tools.
-- [`models/`](../src/mini_articraft/models) contains model adapters.
-- [`environments/`](../src/mini_articraft/environments) creates runs and compiles workspaces.
+- [`agent/provider/`](../src/mini_articraft/agent/provider) contains the model adapters.
+- [`agent/workspace/`](../src/mini_articraft/agent/workspace) creates runs and compiles them.
+- [`compiler/`](../src/mini_articraft/compiler) is the compile itself, its result, and the signals
+  the agent reads. It runs with or without an agent.
 - [`sdk/`](../src/mini_articraft/sdk) contains object authoring, tests, and export code.
-- [`record.py`](../src/mini_articraft/record.py) saves the run record and conversation log.
+- [`agent/record.py`](../src/mini_articraft/agent/record.py) saves the run record and conversation
+  log.
 - [`prompts/`](../src/mini_articraft/prompts) contains the model instructions.
 
-The `Model` and `Environment` protocols are the two main extension points. A model adapter answers
-queries and closes its resources. An environment creates a run and compiles its workspace.
+The `Model` and `Workspace` protocols are the two main extension points. A model adapter answers
+queries and closes its resources. A workspace creates a run and compiles it -- both halves vary
+together, because whatever machine holds the run directory is the machine that compiles it.
 
 ## Test the loop
 

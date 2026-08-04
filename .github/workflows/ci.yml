@@ -131,8 +131,8 @@ jobs:
           /tmp/smoke/bin/python -c "
           import shutil
           from pathlib import Path
-          from mini_articraft.environments import LocalEnvironment
-          env = LocalEnvironment(output_dir=Path('/tmp'))
+          from mini_articraft.agent.workspace import LocalWorkspace
+          env = LocalWorkspace(output_dir=Path('/tmp'))
           run_dir = env.create_run('smoke-run')
           shutil.copyfile('examples/mesh_knob/main.py', run_dir / 'workspace' / 'main.py')
           payload = env.compile_path(run_dir)

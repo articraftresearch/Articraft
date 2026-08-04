@@ -13,15 +13,16 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mini_articraft import package_dir
-from mini_articraft._child_process import child_environment
-from mini_articraft.compile_result import CompileResult
-from mini_articraft.record import Record
+from mini_articraft.agent._child_process import child_environment
+from mini_articraft.agent.record import Record
+from mini_articraft.compiler.feedback import with_compile_report
+from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.settings import DEFAULT_COMPILE_TIMEOUT_SECONDS, DEFAULT_OUTPUT_DIR
 
 _COMPILE_PROGRESS_FILE = ".compile-progress.json"
 
 
-class LocalEnvironmentConfig(BaseModel):
+class LocalWorkspaceConfig(BaseModel):
     output_dir: Path = DEFAULT_OUTPUT_DIR
     timeout_seconds: float = Field(default=DEFAULT_COMPILE_TIMEOUT_SECONDS, gt=0.0)
     physics_enabled: bool = False
@@ -35,7 +36,7 @@ from mini_articraft.sdk import ArticulatedObject, Material, TestContext, TestRep
 def build_object_model() -> ArticulatedObject:
     model = ArticulatedObject("object")
     base = model.part("base")
-    base.add(Box(0.2, 0.2, 0.1), name="body", material=Material.plastic((0.7, 0.7, 0.72)))
+    base.add(Box(0.2, 0.2, 0.1), name="body", material=Material.ABS_PLASTIC)
     return model
 
 
@@ -48,9 +49,9 @@ def run_tests() -> TestReport:
 """
 
 
-class LocalEnvironment:
+class LocalWorkspace:
     def __init__(self, **kwargs: Any):
-        self.config = LocalEnvironmentConfig(**kwargs)
+        self.config = LocalWorkspaceConfig(**kwargs)
 
     def create_run(self, run_id: str) -> Path:
         run_id = _validate_run_id(run_id)
@@ -66,7 +67,7 @@ class LocalEnvironment:
         Record(run_id=run_id).save(run_dir / "record.json")
         return run_dir
 
-    def compile_path(self, run_dir: Path | str) -> dict[str, Any]:
+    def compile_path(self, run_dir: Path | str) -> CompilePayload:
         run_dir = Path(run_dir)
         workspace = run_dir / "workspace"
 
@@ -79,11 +80,11 @@ class LocalEnvironment:
         self._record_compile(run_dir)
         return result
 
-    def _run_worker(self, run_dir: Path) -> dict[str, Any]:
+    def _run_worker(self, run_dir: Path) -> CompilePayload:
         args = [
             sys.executable,
             "-m",
-            "mini_articraft.environments.worker",
+            "mini_articraft.compiler.worker",
             "--raw",
             str(run_dir.resolve()),
         ]
@@ -209,7 +210,7 @@ def _signal_worker_group(proc: subprocess.Popen[str], sig: signal.Signals) -> No
         return
 
 
-def _with_paths(run_dir: Path, result: dict[str, Any]) -> dict[str, Any]:
+def _with_paths(run_dir: Path, result: CompilePayload) -> CompilePayload:
     workspace = run_dir / "workspace"
     result_dir = run_dir / "result"
     result["run_id"] = run_dir.name
@@ -226,7 +227,7 @@ def _finalize_payload(
     *,
     stderr: str,
     returncode: int | None,
-) -> dict[str, Any]:
+) -> CompilePayload:
     """Assemble the environment-level compile result from a worker payload.
 
     Single owner of result assembly for any worker transport: captured worker
@@ -242,12 +243,8 @@ def _finalize_result(
     run_dir: Path,
     result: CompileResult,
     returncode: int | None,
-) -> dict[str, Any]:
-    payload = result.to_payload(
-        include_report=True,
-        include_returncode=True,
-        returncode=returncode,
-    )
+) -> CompilePayload:
+    payload = with_compile_report(result.to_payload(include_returncode=True, returncode=returncode))
     return _with_paths(run_dir, payload)
 
 
@@ -286,7 +283,7 @@ def _error_result(
     stderr: str = "",
     returncode: int | None = None,
     compile_stats: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> CompilePayload:
     return _finalize_result(
         run_dir,
         CompileResult(

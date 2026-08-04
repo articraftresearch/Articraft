@@ -21,7 +21,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from mini_articraft.sdk.materials import SurfaceKind
+from mini_articraft.sdk.materials import Material
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,14 +54,6 @@ class MaterialSpec:
 
     asset: str
 
-
-_MATERIALS = {
-    SurfaceKind.ALUMINUM: MaterialSpec("Metal050A"),
-    SurfaceKind.STEEL: MaterialSpec("Metal009"),
-    SurfaceKind.DARK_METAL: MaterialSpec("Metal046A"),
-    SurfaceKind.PLASTIC: MaterialSpec("Plastic010"),
-    SurfaceKind.RUBBER: MaterialSpec("Rubber004"),
-}
 
 _URL = "https://ambientcg.com/get?file={asset}_{res}-JPG.zip"
 _CACHE_ROOT = Path.home() / ".cache" / "mini_articraft" / "ambientcg"
@@ -109,14 +101,20 @@ def fetch_texture_set(
 
 
 def fetch_material(
-    kind: SurfaceKind,
+    kind: Material,
     *,
     resolution: str = "1K",
     cache_root: Path | None = None,
 ) -> tuple[TextureSet, MaterialSpec]:
-    """Fetch the texture set and rendering metadata for ``kind``."""
+    """Fetch the texture set and rendering metadata for ``kind``.
 
-    spec = _MATERIALS[kind]
+    The asset comes from the material itself, so a derived material keeps the
+    texture of whatever it was derived from.
+    """
+
+    if kind.texture is None:
+        raise RuntimeError(f"material {kind.name!r} has no texture")
+    spec = MaterialSpec(kind.texture)
     return (
         fetch_texture_set(spec.asset, resolution=resolution, cache_root=cache_root),
         spec,

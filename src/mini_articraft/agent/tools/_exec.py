@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mini_articraft._child_process import child_environment
+from mini_articraft.agent._child_process import child_environment
 from mini_articraft.agent.tools._paths import scoped_path
 
 DEFAULT_YIELD_TIME_MS = 10_000
@@ -207,6 +207,11 @@ class ExecSession:
     async def _reap_descendants_after_exit(self) -> None:
         await self.proc.wait()
         _signal_process_group(self.proc, signal.SIGKILL)
+        # Wake any poll that is waiting. The stream readers signal once at EOF,
+        # and a poll that woke on that signal before this task finished would
+        # find the exit condition still false with nothing left to wake it, so
+        # it would wait out its whole deadline for a command already done.
+        self.output_event.set()
 
     async def _read_stream(self, stream: asyncio.StreamReader, buffer: OutputBuffer) -> None:
         try:

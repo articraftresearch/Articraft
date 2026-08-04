@@ -6,7 +6,7 @@ import json
 from rich.console import Console
 
 from mini_articraft.agent import events
-from mini_articraft.cli.tui import PRIMARY_STYLE, RunRenderer
+from mini_articraft.tui import PRIMARY_STYLE, RunRenderer
 
 
 def _renderer() -> tuple[RunRenderer, Console]:

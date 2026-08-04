@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TypeAlias
 
+import igl
 import numpy as np
 import trimesh
 
-from mini_articraft.sdk._mesh_core import MeshGeometry, geometry_to_trimesh
+from mini_articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.errors import ValidationError
 
 Vec3: TypeAlias = tuple[float, float, float]
@@ -135,6 +136,14 @@ def analyze_mesh_health(
     )
     volume_epsilon = max(scale**3 * 1e-12, np.finfo(np.float64).tiny)
     positive_components = np.flatnonzero(component_volumes > volume_epsilon)
+    inward_components = _inward_components_outside_positive_solids(
+        canonical_vertices,
+        unique_faces,
+        component_ids,
+        component_volumes,
+        positive_components,
+        volume_epsilon=volume_epsilon,
+    )
 
     boundary_edges = topology.edges[topology.edge_counts == 1]
     nonmanifold_edges = topology.edges[topology.edge_counts > 2]
@@ -228,13 +237,16 @@ def analyze_mesh_health(
         inconsistent_edges,
         details="adjacent faces traverse a shared edge in the same direction",
     )
-    if watertight and winding_consistent and component_count == 1 and signed_volume <= 0.0:
+    if watertight and winding_consistent and len(inward_components):
+        inward_faces = unique_faces[np.isin(component_ids, inward_components)]
         findings.append(
             MeshHealthFinding(
                 issue=MeshHealthIssue.INWARD_ORIENTATION,
-                count=1,
-                bounds=_bounds(canonical_vertices),
-                details="closed mesh has zero or negative signed volume",
+                count=len(inward_components),
+                bounds=_bounds(canonical_vertices[np.unique(inward_faces)]),
+                details=(
+                    "closed components have non-positive volume outside any positive-volume solid"
+                ),
             )
         )
 
@@ -391,6 +403,51 @@ def _faces_outside_largest_positive_component(
     largest = int(positive[np.argmax(component_volumes[positive])])
     extra = np.isin(component_ids, positive) & (component_ids != largest)
     return faces[extra]
+
+
+def _inward_components_outside_positive_solids(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    component_ids: np.ndarray,
+    component_volumes: np.ndarray,
+    positive_components: np.ndarray,
+    *,
+    volume_epsilon: float,
+) -> np.ndarray:
+    inward = np.flatnonzero(component_volumes <= volume_epsilon)
+    if not len(inward) or not len(positive_components):
+        return inward
+
+    invalid: list[int] = []
+    for component in inward:
+        if component_volumes[component] >= -volume_epsilon:
+            invalid.append(int(component))
+            continue
+        component_faces = faces[component_ids == component]
+        component_vertices = vertices[np.unique(component_faces)]
+        if not any(
+            _points_are_inside_component(
+                component_vertices,
+                vertices,
+                faces[component_ids == positive],
+            )
+            for positive in positive_components
+        ):
+            invalid.append(int(component))
+    return np.asarray(invalid, dtype=np.int64)
+
+
+def _points_are_inside_component(
+    points: np.ndarray,
+    vertices: np.ndarray,
+    faces: np.ndarray,
+) -> bool:
+    signed_distances, _face_indices, _closest_points, _normals = igl.signed_distance(
+        np.ascontiguousarray(points, dtype=np.float64),
+        np.ascontiguousarray(vertices, dtype=np.float64),
+        np.ascontiguousarray(faces, dtype=np.int64),
+    )
+    return bool(np.all(np.asarray(signed_distances) < 0.0))
 
 
 def _signed_volume(vertices: np.ndarray, faces: np.ndarray) -> float:

@@ -13,8 +13,8 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
-from mini_articraft.compile_result import CompileResult
-from mini_articraft.record import Record
+from mini_articraft.compiler.feedback import with_compile_report
+from mini_articraft.compiler.result import CompilePayload, CompileResult
 from mini_articraft.sdk import (
     ArticulatedObject,
     FailureKind,
@@ -83,7 +83,7 @@ class _CompileTracker:
 
 def compile_run(
     run_dir: Path, *, include_report: bool = True, physics_enabled: bool = False
-) -> dict[str, Any]:
+) -> CompilePayload:
     workspace = run_dir / "workspace"
     result_dir = run_dir / "result"
     tracker = _CompileTracker(result_dir / _COMPILE_PROGRESS_FILE)
@@ -92,7 +92,8 @@ def compile_run(
     )
     result.compile_stats = tracker.finish()
     tracker.remove()
-    return result.to_payload(include_report=include_report)
+    payload = result.to_payload()
+    return with_compile_report(payload) if include_report else payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,11 +155,6 @@ def texture_run(run_dir: Path) -> TextureRunResult:
                 for stale in (result_dir / "usdz").glob("*.usdz"):
                     if stale != export_result.usdz:
                         stale.unlink()
-                record_path = run_dir / "record.json"
-                if record_path.is_file():
-                    record = Record.load(record_path)
-                    record.result = export_result.usdz.relative_to(run_dir).as_posix()
-                    record.save(record_path)
         return TextureRunResult(
             succeeded=True,
             requested_shapes=report.requested_shapes,
@@ -442,9 +438,11 @@ def main(argv: list[str] | None = None) -> int:
     physics = "--physics" in args
     args = [arg for arg in args if arg not in {"--raw", "--physics"}]
     if len(args) != 1:
-        payload = CompileResult(error="Usage: mini-articraft-compile-run <run_dir>").to_payload(
-            include_report=not raw
-        )
+        payload = CompileResult(
+            error="Usage: python -m mini_articraft.compiler.worker <run_dir>"
+        ).to_payload()
+        if not raw:
+            payload = with_compile_report(payload)
         print(json.dumps(payload))
         return 2
 

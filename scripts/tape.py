@@ -75,8 +75,8 @@ def record(
 ) -> None:
     """Run a live generation and record it as a tape (pays for model calls)."""
     from mini_articraft.agent import Agent
-    from mini_articraft.environments.local import LocalEnvironment
-    from mini_articraft.models.openai import OpenAIModel
+    from mini_articraft.agent.provider.openai import OpenAIModel
+    from mini_articraft.agent.workspace.local import LocalWorkspace
     from mini_articraft.settings import get_settings
 
     settings = get_settings()
@@ -84,7 +84,7 @@ def record(
     meta = {"prompt": prompt, "model": settings.openai_model}
     with library.record(name, OpenAIModel(settings), meta=meta) as model:
         result = harness.run(
-            Agent(model, LocalEnvironment(), max_turns=max_turns, on_event=_print_event).run(prompt)
+            Agent(model, LocalWorkspace(), max_turns=max_turns, on_event=_print_event).run(prompt)
         )
     _print_result(result)
     raise typer.Exit(0 if result["status"] == "success" else 1)

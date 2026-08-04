@@ -33,7 +33,7 @@ from mini_articraft.sdk import (
     TestContext,
 )
 from mini_articraft.sdk._collision import MeshCollisionKernel
-from mini_articraft.sdk._mesh_boolean import _boolean_union_many
+from mini_articraft.sdk._mesh.boolean import _boolean_union_many
 from mini_articraft.sdk.mesh import (
     LoftSection,
     SectionLoftSpec,

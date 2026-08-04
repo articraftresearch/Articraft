@@ -8,9 +8,12 @@ from typing import Any
 from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_ANTHROPIC_MODEL, Settings, get_settings
 
-_CONTEXT_WINDOW_TOKENS = 1_000_000
+# Use the same conservative working budget as Codex instead of the full API window.
+_AGENT_CONTEXT_WINDOW_TOKENS = 272_000
 _MAX_OUTPUT_TOKENS = 128_000
 _MAX_IMAGE_DATA_LENGTH = 10 * 1024 * 1024
+_COMPACTION_BETA = "compact-2026-01-12"
+_COMPACTION_TRIGGER_TOKENS = 50_000
 _CACHE_WRITE_5M_MULTIPLIER = 1.25
 _CACHE_WRITE_1H_MULTIPLIER = 2.0
 _CACHE_READ_MULTIPLIER = 0.1
@@ -39,8 +42,6 @@ class AnthropicModel:
         self.config = settings or get_settings()
         _raise_for_unsupported_model(self.config.anthropic_model)
         self._client = client
-        self._history: list[dict[str, Any]] = []
-        self._last_message_count = 0
 
     @property
     def context_window_tokens(self) -> int:
@@ -53,9 +54,8 @@ class AnthropicModel:
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Query Anthropic and return the response shape used by the agent."""
-        request_messages = self._request_messages(messages)
         try:
-            response = await self._send(messages, request_messages, tools)
+            response = await self._send(messages, tools)
         except ModelError:
             raise
         except Exception as exc:
@@ -68,11 +68,6 @@ class AnthropicModel:
             raise ModelError("Anthropic response did not contain text, thinking, or tool calls")
 
         token_usage = _response_token_usage(response)
-        self._history = [
-            *request_messages,
-            {"role": "assistant", "content": response_content},
-        ]
-        self._last_message_count = len(messages)
         return {
             "text": text,
             "tool_calls": tool_calls,
@@ -80,6 +75,52 @@ class AnthropicModel:
             "cost": _response_cost(self.config.anthropic_model, token_usage),
             "provider_content": [_record_block(block) for block in response_content],
             "response": response,
+        }
+
+    async def summarize_context(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_output_tokens: int,
+    ) -> dict[str, Any]:
+        """Create one plain checkpoint with Anthropic's native compaction."""
+        system = _system(messages)
+        edit: dict[str, Any] = {
+            "type": "compact_20260112",
+            "trigger": {
+                "type": "input_tokens",
+                "value": _COMPACTION_TRIGGER_TOKENS,
+            },
+            "pause_after_compaction": True,
+        }
+        if system:
+            # Native compaction uses its own instructions instead of the normal
+            # system prompt. Keep the system prompt too so short inputs that do
+            # not reach the 50k minimum still produce the same plain summary.
+            edit["instructions"] = system
+        request: dict[str, Any] = {
+            "model": self.config.anthropic_model,
+            "max_tokens": max_output_tokens,
+            "messages": _messages(messages),
+            "betas": [_COMPACTION_BETA],
+            "context_management": {"edits": [edit]},
+        }
+        if system:
+            request["system"] = system
+        try:
+            response = await self._client_or_create().beta.messages.create(**request)
+        except Exception as exc:
+            raise ModelError(f"Anthropic summary request failed: {_format_exception(exc)}") from exc
+
+        response_content = list(_value(response, "content", []) or [])
+        text = _compaction_text(response_content) or _response_text(response_content)
+        if not text:
+            raise ModelError("Anthropic summary response did not contain a checkpoint")
+        token_usage = _response_token_usage(response)
+        return {
+            "text": text,
+            "token_usage": token_usage,
+            "cost": _response_cost(self.config.anthropic_model, token_usage),
         }
 
     async def close(self) -> None:
@@ -90,17 +131,16 @@ class AnthropicModel:
 
     async def _send(
         self,
-        source_messages: list[dict[str, Any]],
-        request_messages: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> Any:
         request: dict[str, Any] = {
             "model": self.config.anthropic_model,
             "max_tokens": _MAX_OUTPUT_TOKENS,
-            "messages": request_messages,
+            "messages": _messages(messages),
             "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
-        system = _system(source_messages)
+        system = _system(messages)
         if system:
             request["system"] = system
         converted_tools = _tools(tools or [])
@@ -108,12 +148,6 @@ class AnthropicModel:
             request["tools"] = converted_tools
 
         return await self._client_or_create().messages.create(**request)
-
-    def _request_messages(
-        self,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        return [*self._history, *_messages(messages[self._last_message_count :])]
 
     def _client_or_create(self) -> Any:
         if self._client is None:
@@ -143,16 +177,33 @@ def _system(messages: list[dict[str, Any]]) -> str:
 
 
 def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    user_messages: list[dict[str, Any]] = []
+    converted: list[dict[str, Any]] = []
     tool_results: list[dict[str, Any]] = []
+
+    def flush_tool_results() -> None:
+        if tool_results:
+            converted.append({"role": "user", "content": list(tool_results)})
+            tool_results.clear()
+
     for message in messages:
         if message.get("type") == "function_call_output":
             tool_results.append(_tool_result_block(message))
-        elif message.get("role") == "user":
-            user_messages.append({"role": "user", "content": _user_content(message)})
-    if tool_results:
-        user_messages.append({"role": "user", "content": tool_results})
-    return user_messages
+            continue
+
+        flush_tool_results()
+        if message.get("role") == "user":
+            converted.append({"role": "user", "content": _user_content(message)})
+        elif message.get("role") == "assistant":
+            converted.append({"role": "assistant", "content": _assistant_content(message)})
+    flush_tool_results()
+    return converted
+
+
+def _assistant_content(message: dict[str, Any]) -> list[dict[str, Any]]:
+    provider_content = message.get("provider_content")
+    if not isinstance(provider_content, list):
+        raise TypeError("Anthropic assistant messages require provider_content")
+    return [dict(block) for block in provider_content if isinstance(block, dict)]
 
 
 def _tool_result_block(message: dict[str, Any]) -> dict[str, Any]:
@@ -266,6 +317,14 @@ def _response_text(content: list[Any]) -> str:
     )
 
 
+def _compaction_text(content: list[Any]) -> str:
+    for block in reversed(content):
+        block_content = _value(block, "content", None)
+        if _block_type(block) == "compaction" and block_content:
+            return str(block_content)
+    return ""
+
+
 def _response_tool_calls(content: list[Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     for block in content:
@@ -287,7 +346,9 @@ def _response_tool_calls(content: list[Any]) -> list[dict[str, Any]]:
 
 
 def _record_block(block: Any) -> dict[str, Any]:
-    return block if isinstance(block, dict) else block.model_dump(mode="json")
+    return (
+        dict(block) if isinstance(block, dict) else block.model_dump(mode="json", exclude_none=True)
+    )
 
 
 def _has_thinking(content: list[Any]) -> bool:
@@ -303,24 +364,38 @@ def _response_token_usage(response: Any) -> dict[str, int]:
     if usage is None:
         return {}
 
-    input_tokens = _usage_int(usage, "input_tokens")
-    output_tokens = _usage_int(usage, "output_tokens")
-    cache_creation_input_tokens = _usage_int(usage, "cache_creation_input_tokens")
-    cache_read_input_tokens = _usage_int(usage, "cache_read_input_tokens")
-    cache_creation = _value(usage, "cache_creation", None)
-    cache_creation_5m_input_tokens = _usage_int(
-        cache_creation,
-        "ephemeral_5m_input_tokens",
-    )
-    cache_creation_1h_input_tokens = _usage_int(
-        cache_creation,
-        "ephemeral_1h_input_tokens",
-    )
-    detailed_cache_creation_tokens = cache_creation_5m_input_tokens + cache_creation_1h_input_tokens
-    if detailed_cache_creation_tokens:
-        cache_creation_input_tokens = detailed_cache_creation_tokens
-    else:
-        cache_creation_5m_input_tokens = cache_creation_input_tokens
+    iterations = _value(usage, "iterations", None)
+    rows = iterations if isinstance(iterations, list) and iterations else [usage]
+    input_tokens = 0
+    output_tokens = 0
+    cache_creation_input_tokens = 0
+    cache_creation_5m_input_tokens = 0
+    cache_creation_1h_input_tokens = 0
+    cache_read_input_tokens = 0
+    for row in rows:
+        input_tokens += _usage_int(row, "input_tokens")
+        output_tokens += _usage_int(row, "output_tokens")
+        row_cache_creation_input_tokens = _usage_int(row, "cache_creation_input_tokens")
+        cache_creation = _value(row, "cache_creation", None)
+        row_cache_creation_5m_input_tokens = _usage_int(
+            cache_creation,
+            "ephemeral_5m_input_tokens",
+        )
+        row_cache_creation_1h_input_tokens = _usage_int(
+            cache_creation,
+            "ephemeral_1h_input_tokens",
+        )
+        detailed_cache_creation_tokens = (
+            row_cache_creation_5m_input_tokens + row_cache_creation_1h_input_tokens
+        )
+        if detailed_cache_creation_tokens:
+            row_cache_creation_input_tokens = detailed_cache_creation_tokens
+        else:
+            row_cache_creation_5m_input_tokens = row_cache_creation_input_tokens
+        cache_creation_input_tokens += row_cache_creation_input_tokens
+        cache_creation_5m_input_tokens += row_cache_creation_5m_input_tokens
+        cache_creation_1h_input_tokens += row_cache_creation_1h_input_tokens
+        cache_read_input_tokens += _usage_int(row, "cache_read_input_tokens")
 
     return {
         "input_tokens": input_tokens,
@@ -374,7 +449,7 @@ def _prices_for(model: str, *, today: date | None = None) -> _Prices | None:
 
 
 def context_window_tokens_for(model: str) -> int | None:
-    return _CONTEXT_WINDOW_TOKENS if model in SUPPORTED_MODELS else None
+    return _AGENT_CONTEXT_WINDOW_TOKENS if model in SUPPORTED_MODELS else None
 
 
 def _raise_for_unsupported_model(model: str) -> None:

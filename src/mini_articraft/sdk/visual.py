@@ -11,7 +11,7 @@ import trimesh
 from PIL import Image, ImageDraw
 
 from mini_articraft.sdk._collision import MeshCollisionKernel, _origin_matrix
-from mini_articraft.sdk._mesh_core import geometry_to_trimesh
+from mini_articraft.sdk._mesh.core import geometry_to_trimesh
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation
 from mini_articraft.sdk.object import ArticulatedObject
@@ -417,10 +417,11 @@ def _world_meshes(
                 continue
             mesh = geometry_to_trimesh(shape.geometry, mesh_tolerance).copy()
             mesh.apply_transform(transforms[part.name])
-            if color_by == "material" and shape.material is not None:
+            appearance = shape.display_material
+            if color_by == "material" and appearance is not None:
                 color = cast(
                     tuple[int, int, int],
-                    tuple(round(value * 255) for value in shape.material.base_color[:3]),
+                    tuple(round(value * 255) for value in appearance.base_color[:3]),
                 )
             elif color_by == "shape":
                 color = _stable_color(f"{part.name}/{shape.name}")

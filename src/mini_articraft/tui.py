@@ -24,8 +24,8 @@ from rich.spinner import Spinner
 from rich.text import Text
 
 from mini_articraft.agent import events
-from mini_articraft.models import context_window_tokens_for
-from mini_articraft.record import Record, read_conversation
+from mini_articraft.agent.provider import context_window_tokens_for
+from mini_articraft.agent.record import Record, read_conversation
 
 EventHandler = Callable[[events.Event], None]
 LiveRun = Callable[[EventHandler], Coroutine[Any, Any, dict[str, Any]]]
@@ -191,6 +191,14 @@ class RunRenderer:
             ):
                 self._names.setdefault(call_id, name)
                 self._print_tool_result(name, payload, duration=duration)
+            case events.ContextCompacted(tokens_before=tokens):
+                self._activity = "thinking"
+                self._print(
+                    Text(
+                        f"  context compacted at {_format_tokens(tokens)}",
+                        style="dim",
+                    )
+                )
             case events.RunFinished():
                 self._finished = event
 

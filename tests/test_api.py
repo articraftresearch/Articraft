@@ -14,7 +14,8 @@ from pydantic import ValidationError
 import mini_articraft
 from mini_articraft import api
 from mini_articraft.agent import events
-from mini_articraft.record import Record
+from mini_articraft.agent.record import Record
+from mini_articraft.compiler.result import CompilePayload
 from mini_articraft.settings import Settings, get_settings
 
 
@@ -144,7 +145,7 @@ def test_generate_routes_inputs_and_returns_typed_paths(monkeypatch, tmp_path: P
             }
 
     monkeypatch.setattr(api, "create_model", FakeModel)
-    monkeypatch.setattr(api, "LocalEnvironment", FakeEnvironment)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
     monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(api, "get_settings", lambda: Settings(anthropic_api_key="sk-test"))
 
@@ -194,7 +195,7 @@ def test_generate_end_to_end_with_scripted_model(monkeypatch, tmp_path: Path) ->
     ]
     model = ScriptedModel(script)
     monkeypatch.setattr(api, "create_model", lambda settings: model)
-    monkeypatch.setattr(api, "LocalEnvironment", WarmEnvironment)
+    monkeypatch.setattr(api, "LocalWorkspace", WarmEnvironment)
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     seen: list[events.Event] = []
 
@@ -307,7 +308,7 @@ def test_generate_async_runs_on_the_ambient_loop(monkeypatch, tmp_path: Path) ->
         text("done"),
     ]
     monkeypatch.setattr(api, "create_model", lambda settings: ScriptedModel(script))
-    monkeypatch.setattr(api, "LocalEnvironment", WarmEnvironment)
+    monkeypatch.setattr(api, "LocalWorkspace", WarmEnvironment)
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     seen: list[events.Event] = []
 
@@ -334,7 +335,7 @@ def _hanging_model_step(query: Any) -> Any:
 def test_generate_async_uses_native_task_cancellation(monkeypatch, tmp_path: Path) -> None:
     model = ScriptedModel([_hanging_model_step])
     monkeypatch.setattr(api, "create_model", lambda settings: model)
-    monkeypatch.setattr(api, "LocalEnvironment", WarmEnvironment)
+    monkeypatch.setattr(api, "LocalWorkspace", WarmEnvironment)
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     async def cancel_running_generation() -> None:
@@ -377,7 +378,7 @@ def test_generate_async_finishes_active_compile_before_cancelling(
     )
 
     class BlockingEnvironment(WarmEnvironment):
-        def compile_path(self, run_dir: Path | str) -> dict[str, Any]:
+        def compile_path(self, run_dir: Path | str) -> CompilePayload:
             compile_started.set()
             if not release_compile.wait(timeout=5):
                 raise TimeoutError("test did not release compile")
@@ -386,7 +387,7 @@ def test_generate_async_finishes_active_compile_before_cancelling(
             return super().compile_path(run_dir)
 
     monkeypatch.setattr(api, "create_model", lambda settings: model)
-    monkeypatch.setattr(api, "LocalEnvironment", BlockingEnvironment)
+    monkeypatch.setattr(api, "LocalWorkspace", BlockingEnvironment)
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     async def cancel_during_compile() -> None:
@@ -418,7 +419,7 @@ def test_generate_async_supports_concurrent_identical_prompts(monkeypatch, tmp_p
         text("done"),
     ]
     monkeypatch.setattr(api, "create_model", lambda settings: ScriptedModel(list(script)))
-    monkeypatch.setattr(api, "LocalEnvironment", WarmEnvironment)
+    monkeypatch.setattr(api, "LocalWorkspace", WarmEnvironment)
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     async def generate_twice() -> list[api.GenerationResult]:
@@ -450,7 +451,7 @@ def test_root_import_is_lazy_and_exports_python_api() -> None:
             "import sys",
             "import mini_articraft",
             "heavy = [name for name in (",
-            "    'mini_articraft.api', 'mini_articraft.models', 'mini_articraft.agent',",
+            "    'mini_articraft.api', 'mini_articraft.agent.provider', 'mini_articraft.agent',",
             "    'PIL', 'anthropic', 'websockets',",
             ") if name in sys.modules]",
             "assert not heavy, heavy",

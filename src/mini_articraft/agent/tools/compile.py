@@ -1,10 +1,28 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 from mini_articraft.agent.tools._core import Tool, ToolContext, schema, workspace_digest
-from mini_articraft.compile_feedback import compile_failure_signature, render_compile_report
+from mini_articraft.compiler.feedback import compile_failure_signature, render_compile_report
+from mini_articraft.compiler.result import CompilePayload
+
+_AGENT_FACING_KEYS = frozenset(
+    {
+        "status",
+        "manifest",
+        "usdz",
+        "error",
+        "stdout",
+        "stderr",
+        "traceback",
+        "returncode",
+        "compile_stats",
+        "test_report",
+        "compile_report",
+    }
+)
 
 
 async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -24,14 +42,14 @@ async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return _compact_result(internal_result)
 
 
-async def _compile_path(context: ToolContext) -> dict[str, Any]:
+async def _compile_path(context: ToolContext) -> CompilePayload:
     """Finish a started compile before propagating task cancellation.
 
     ``asyncio.to_thread`` cannot stop its worker. Shielding and joining it keeps
     a cancelled generation from leaving a compiler mutating the run after the
     task has finished.
     """
-    task = asyncio.create_task(asyncio.to_thread(context.env.compile_path, context.run_dir))
+    task = asyncio.create_task(asyncio.to_thread(context.compiler.compile_path, context.run_dir))
     cancelled = False
     while True:
         try:
@@ -50,7 +68,7 @@ async def _compile_path(context: ToolContext) -> dict[str, Any]:
     return result
 
 
-def _internal_result(context: ToolContext, result: dict[str, Any]) -> dict[str, Any]:
+def _internal_result(context: ToolContext, result: CompilePayload) -> CompilePayload:
     compile_report = result.get("compile_report")
     if isinstance(compile_report, dict):
         signature = compile_failure_signature(compile_report)
@@ -67,26 +85,12 @@ def _internal_result(context: ToolContext, result: dict[str, Any]) -> dict[str, 
                 repeated=repeated,
                 failure_streak=context.consecutive_compile_failures,
             )
-    return {
-        key: result[key]
-        for key in (
-            "status",
-            "manifest",
-            "usdz",
-            "error",
-            "stdout",
-            "stderr",
-            "traceback",
-            "returncode",
-            "compile_stats",
-            "test_report",
-            "compile_report",
-        )
-        if key in result
-    }
+    # Iterate the payload rather than index it: dynamic keys cannot be spelled
+    # as a TypedDict literal, and this way no optional key is accessed.
+    return cast(CompilePayload, {k: v for k, v in result.items() if k in _AGENT_FACING_KEYS})
 
 
-def _compact_result(result: dict[str, Any]) -> dict[str, Any]:
+def _compact_result(result: Mapping[str, Any]) -> dict[str, Any]:
     report = result.get("compile_report")
     signals = report.get("signals_text") if isinstance(report, dict) else None
     if not isinstance(signals, str):

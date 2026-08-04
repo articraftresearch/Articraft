@@ -50,6 +50,11 @@ class ToolFinished:
 
 
 @dataclass(frozen=True)
+class ContextCompacted:
+    tokens_before: int
+
+
+@dataclass(frozen=True)
 class RunFinished:
     status: str
     run: str
@@ -61,4 +66,12 @@ class RunFinished:
     token_usage: dict[str, int] = field(default_factory=dict)
 
 
-Event = RunStarted | TurnStarted | AssistantMessage | ToolStarted | ToolFinished | RunFinished
+Event = (
+    RunStarted
+    | TurnStarted
+    | AssistantMessage
+    | ToolStarted
+    | ToolFinished
+    | ContextCompacted
+    | RunFinished
+)

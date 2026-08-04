@@ -108,6 +108,24 @@ def test_analyze_mesh_health_accepts_a_closed_inner_cavity() -> None:
     assert report.signed_volume > 0.0
 
 
+def test_analyze_mesh_health_rejects_a_detached_inward_solid() -> None:
+    outer = BoxGeometry((1.0, 1.0, 1.0))
+    detached = BoxGeometry((0.2, 0.2, 0.2)).translate(2.0, 0.0, 0.0)
+    detached.faces = [(first, third, second) for first, second, third in detached.faces]
+    outer.merge(detached)
+
+    report = analyze_mesh_health(outer)
+
+    assert not report.healthy
+    finding = next(
+        finding
+        for finding in report.findings
+        if finding.issue is MeshHealthIssue.INWARD_ORIENTATION
+    )
+    assert finding.count == 1
+    assert finding.bounds is not None
+
+
 def test_analyze_mesh_health_finds_inconsistent_winding() -> None:
     box = BoxGeometry((1.0, 1.0, 1.0)).to_trimesh()
     faces = box.faces.copy()

@@ -7,12 +7,12 @@ import manifold3d
 import numpy as np
 from trimesh import Trimesh
 
-from mini_articraft.sdk._mesh_boolean import (
+from mini_articraft.sdk._mesh.boolean import (
     _as_manifold,
     _from_manifold,
 )
-from mini_articraft.sdk._mesh_core import MeshGeometry
-from mini_articraft.sdk._mesh_health import (
+from mini_articraft.sdk._mesh.core import MeshGeometry
+from mini_articraft.sdk._mesh.health import (
     MeshHealthIssue,
     _require_healthy_mesh,
     analyze_mesh_health,
@@ -62,12 +62,7 @@ def _nearest_gap(anchor: MeshGeometry, piece: MeshGeometry) -> tuple[float, np.n
     return dist, unit
 
 
-def _smooth_max(
-    first: np.ndarray,
-    second: np.ndarray,
-    radius: float,
-    profile: str,
-) -> np.ndarray:
+def _smooth_max(first: np.ndarray, second: np.ndarray, radius: float, profile: str) -> np.ndarray:
     amount = np.clip(0.5 + 0.5 * (first - second) / radius, 0.0, 1.0)
     blend = amount * (1.0 - amount)
     return (
@@ -78,11 +73,7 @@ def _smooth_max(
     )
 
 
-def _mesh_field(
-    mesh: Trimesh,
-    points: np.ndarray,
-    band: float,
-) -> np.ndarray:
+def _mesh_field(mesh: Trimesh, points: np.ndarray, band: float) -> np.ndarray:
     values = np.full(len(points), -_FAR, dtype=np.float64)
     minimum, maximum = mesh.bounds
     near = np.all((points >= minimum - band) & (points <= maximum + band), axis=1)
@@ -114,10 +105,7 @@ def _grid_points(
 
 
 def _extract_level_set(
-    field: np.ndarray,
-    dimensions: np.ndarray,
-    lower: np.ndarray,
-    spacing: np.ndarray,
+    field: np.ndarray, dimensions: np.ndarray, lower: np.ndarray, spacing: np.ndarray
 ) -> MeshGeometry:
     nx, ny, nz = (int(value) for value in dimensions)
     point_count = len(field)
@@ -169,7 +157,9 @@ def _positive_body_count(mesh: Trimesh) -> int:
     return sum(bool(part.volume > 0.0) for part in mesh.split(only_watertight=True))
 
 
-def _connection_gaps(geometries: tuple[MeshGeometry, ...]) -> list[tuple[int, int, float]]:
+def _connection_gaps(
+    geometries: tuple[MeshGeometry, ...],
+) -> list[tuple[int, int, float]]:
     gaps: list[tuple[int, int, float]] = []
     for first_index, first in enumerate(geometries):
         for second_index in range(first_index + 1, len(geometries)):
@@ -187,11 +177,7 @@ def _connection_gaps(geometries: tuple[MeshGeometry, ...]) -> list[tuple[int, in
     return gaps
 
 
-def _require_connected_inputs(
-    geometries: tuple[MeshGeometry, ...],
-    *,
-    max_gap: float,
-) -> None:
+def _require_connected_inputs(geometries: tuple[MeshGeometry, ...], *, max_gap: float) -> None:
     connected = {0}
     gaps = _connection_gaps(geometries)
     while True:
@@ -214,9 +200,7 @@ def _require_connected_inputs(
 
 
 def _surface_controls(
-    radius: float,
-    tolerance: float | None,
-    profile: str,
+    radius: float, tolerance: float | None, profile: str
 ) -> tuple[float, float, str]:
     radius = float(radius)
     if not math.isfinite(radius) or radius <= 0.0:

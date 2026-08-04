@@ -6,7 +6,7 @@ from typing import TypeAlias
 
 from build123d.topology import Shape
 
-from mini_articraft.sdk._mesh_core import MeshGeometry
+from mini_articraft.sdk._mesh.core import MeshGeometry
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import (
     Articulation,
@@ -30,11 +30,34 @@ class _ShapeData:
     name: str
     geometry: Geometry
     material: Material | None
+    coating: Material | None
+    tint: Color | None
+
+    @property
+    def surface_material(self) -> Material | None:
+        """What the outside of this shape is: its coating, else its own material.
+
+        Friction and looks are surface properties, so both come from here.
+        Density does not: a chrome-plated knob slides like chrome and weighs like
+        plastic.
+        """
+        return self.coating if self.coating is not None else self.material
+
+    @property
+    def display_material(self) -> Material | None:
+        """The surface as it should be drawn, with any one-off tint applied."""
+        surface = self.surface_material
+        if surface is None:
+            if self.tint is None:
+                return None
+            return Material(name="color", density=1.0, base_color=self.tint)
+        return surface if self.tint is None else surface.but(color=self.tint)
 
     @property
     def color(self) -> Color | None:
-        """Base color of the shape's material, for display-color fallbacks."""
-        return None if self.material is None else self.material.base_color
+        """Base color, for display-color fallbacks."""
+        display = self.display_material
+        return None if display is None else display.base_color
 
 
 @dataclass
@@ -55,14 +78,23 @@ class Part:
         shape: Geometry,
         *,
         name: str,
-        color: Sequence[float] | None = None,
         material: Material | None = None,
+        coating: Material | None = None,
+        color: Sequence[float] | None = None,
     ) -> Geometry:
         """Add named geometry in this part's local frame.
 
-        Pass ``material`` for a physically based surface (metal, plastic, glass),
-        or ``color`` for a plain colored surface. ``color`` is shorthand for a
-        matte dielectric ``Material`` and cannot be combined with ``material``.
+        ``material`` says what the shape is made of. It decides the shape's mass,
+        how it behaves on contact, and how it looks, so it is usually the only
+        thing you need.
+
+        ``coating`` covers the shape in a different material: a rubber grip on a
+        steel bar is heavy like steel and grippy like rubber. Friction and looks
+        follow the coating; mass stays with the material underneath.
+
+        ``color`` tints the surface of this one shape and changes no physics.
+        For anything more, derive a material with ``Material.but(...)`` and give
+        it a name to reuse across shapes and parts.
         """
 
         shape_name = _as_name(name, field_name=f"shape name on part {self.name!r}")
@@ -72,10 +104,22 @@ class Part:
         self._shapes[shape_name] = _ShapeData(
             name=shape_name,
             geometry=shape,
-            material=_resolve_material(
-                color=color,
-                material=material,
-                context=f"part {self.name!r} shape {shape_name!r}",
+            material=(
+                None
+                if material is None
+                else _as_material(material, field_name=f"part {self.name!r} shape {shape_name!r}")
+            ),
+            coating=(
+                None
+                if coating is None
+                else _as_material(
+                    coating, field_name=f"part {self.name!r} shape {shape_name!r} coating"
+                )
+            ),
+            tint=(
+                None
+                if color is None
+                else _as_color(color, field_name=f"part {self.name!r} shape {shape_name!r} color")
             ),
         )
         return shape
@@ -106,6 +150,8 @@ class Part:
                 _as_material(
                     entry.material, field_name=f"part {self.name!r} shape {name!r} material"
                 )
+            if entry.coating is not None:
+                _as_material(entry.coating, field_name=f"part {self.name!r} shape {name!r} coating")
 
 
 PartRef: TypeAlias = str | Part
@@ -260,18 +306,3 @@ def _validate_geometry(shape: object, *, context: str) -> None:
             raise ValidationError(f"{context} must be non-empty")
         return
     raise ValidationError(f"{context} must be a build123d Shape or MeshGeometry")
-
-
-def _resolve_material(
-    *,
-    color: Sequence[float] | None,
-    material: Material | None,
-    context: str,
-) -> Material | None:
-    if material is not None:
-        if color is not None:
-            raise ValidationError(f"{context} cannot set both color and material")
-        return _as_material(material, field_name=f"{context} material")
-    if color is not None:
-        return Material(base_color=_as_color(color, field_name=f"{context} color"))
-    return None
