@@ -258,7 +258,7 @@ def _triple(values) -> tuple[float, float, float]:
 
 
 def _combine(meshes: list[trimesh.Trimesh], *, part_name: str) -> trimesh.Trimesh | None:
-    """One solid for the part: a union when it succeeds, else the closed shapes."""
+    """Combine closed shapes without silently counting overlapping volume twice."""
 
     solids: list[trimesh.Trimesh] = []
     open_shapes = 0
@@ -289,13 +289,17 @@ def _combine(meshes: list[trimesh.Trimesh], *, part_name: str) -> trimesh.Trimes
         # Shapes are deliberately embedded in each other, so a union avoids
         # counting the shared volume twice.
         union = trimesh.boolean.union(solids)
-        if union is not None and union.is_watertight and float(union.volume) > 0.0:
-            return union
-    except Exception:
-        pass
-    # Fall back to treating the shapes as one body: mass and inertia still add up
-    # (parallel-axis, via trimesh's concatenation), overlaps just count twice.
-    return trimesh.util.concatenate(solids)
+    except Exception as exc:
+        raise ValidationError(
+            f"part {part_name!r} shapes could not be combined for mass measurement; "
+            "simplify the geometry or set explicit mass properties"
+        ) from exc
+    if union is None or not union.is_watertight or float(union.volume) <= 0.0:
+        raise ValidationError(
+            f"part {part_name!r} shapes did not produce a closed solid for mass measurement; "
+            "simplify the geometry or set explicit mass properties"
+        )
+    return union
 
 
 def _quaternion(rotation: np.ndarray) -> tuple[float, float, float, float]:
