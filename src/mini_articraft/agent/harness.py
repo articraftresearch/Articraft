@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import copy
 import json
+import logging
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from mini_articraft.settings import DEFAULT_MAX_TURNS
 
 PROMPT_SLUG_MAX_LENGTH = 48
 MAX_CONSECUTIVE_EMPTY_RESPONSES = 3
+LOGGER = logging.getLogger(__name__)
 
 
 class AgentConfig(BaseModel):
@@ -49,9 +51,34 @@ class Agent:
 
     def _emit(self, event: events.Event) -> None:
         if self._on_event is not None:
-            self._on_event(event)
+            try:
+                self._on_event(copy.deepcopy(event))
+            except Exception:
+                LOGGER.exception("generation event handler failed")
 
     async def run(
+        self,
+        prompt: str,
+        *,
+        run_id: str | None = None,
+        image_path: Path | None = None,
+    ) -> dict[str, Any]:
+        """Run one generation and release the model exactly once."""
+        data: dict[str, Any] | None = None
+        try:
+            data = await self._run(prompt, run_id=run_id, image_path=image_path)
+            return data
+        finally:
+            # The agent owns the model for the whole run, including setup
+            # failures. Teardown noise must not replace the generation outcome.
+            if await _finish_cleanup(self.model.close(), label="model"):
+                if data is not None:
+                    run_dir = data.get("run")
+                    if isinstance(run_dir, str):
+                        _save_run_error(Path(run_dir) / "record.json", "generation cancelled")
+                raise asyncio.CancelledError
+
+    async def _run(
         self,
         prompt: str,
         *,
@@ -64,9 +91,41 @@ class Agent:
         image = prepare_image(image_path) if image_path is not None else None
         tool_schemas = tools.schemas(include_images=supports_images)
         self._enabled_tool_names = {str(schema["name"]) for schema in tool_schemas}
-        run_id = run_id or _run_id_for_prompt(prompt)
-        run_dir = self.workspace.create_run(run_id)
+        run_id, run_dir = _create_run(self.workspace, prompt, run_id)
         context = ToolContext(self.workspace, run_dir, run_dir / "workspace")
+        record_path = run_dir / "record.json"
+        try:
+            return await self._run_created(
+                prompt,
+                image,
+                run_id,
+                run_dir,
+                context,
+                supports_images=supports_images,
+                tool_schemas=tool_schemas,
+            )
+        except asyncio.CancelledError:
+            _save_run_error(record_path, "generation cancelled")
+            raise
+        except Exception as exc:
+            _save_run_error(record_path, f"generation failed: {type(exc).__name__}: {exc}")
+            raise
+        finally:
+            if await _finish_cleanup(context.exec_sessions.aclose(), label="exec sessions"):
+                _save_run_error(record_path, "generation cancelled")
+                raise asyncio.CancelledError
+
+    async def _run_created(
+        self,
+        prompt: str,
+        image: PreparedImage | None,
+        run_id: str,
+        run_dir: Path,
+        context: ToolContext,
+        *,
+        supports_images: bool,
+        tool_schemas: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         conversation_path = run_dir / "conversation.jsonl"
         record_path = run_dir / "record.json"
         record = Record.load(record_path)
@@ -139,115 +198,105 @@ class Agent:
         hit_max_turns = False
         termination_error = ""
         consecutive_empty_responses = 0
-        try:
-            for turn in range(1, self.config.max_turns + 1):
-                self._emit(events.TurnStarted(turn))
-                summarizer = self.model if isinstance(self.model, ContextSummarizer) else None
-                plan = (
-                    prepare_compaction(self.messages, context_window_tokens)
-                    if summarizer is not None
-                    else None
-                )
-                if plan is not None and summarizer is not None:
-                    try:
-                        summary_response = await summarizer.summarize_context(
-                            plan.summary_messages,
-                            max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
-                        )
-                        summary = str(summary_response.get("text") or "").strip()
-                        if not summary:
-                            raise ValueError("summary response did not contain text")
-                    except Exception as exc:
-                        termination_error = (
-                            f"context compaction failed: {type(exc).__name__}: {exc}"
-                        )
-                        break
-
-                    cost += _cost(summary_response)
-                    summary_usage = _token_usage(summary_response)
-                    token_usage = _add_token_usage(token_usage, summary_usage)
-                    _save_cost(run_dir, cost, token_usage)
-                    self.messages = plan.apply(self.messages, summary)
-                    append_conversation(
-                        conversation_path,
-                        plan.record(summary, summary_usage),
-                    )
-                    self._emit(events.ContextCompacted(plan.tokens_before))
+        for turn in range(1, self.config.max_turns + 1):
+            self._emit(events.TurnStarted(turn))
+            summarizer = self.model if isinstance(self.model, ContextSummarizer) else None
+            plan = (
+                prepare_compaction(self.messages, context_window_tokens)
+                if summarizer is not None
+                else None
+            )
+            if plan is not None and summarizer is not None:
                 try:
-                    response = await self.model.query(self.messages, tools=tool_schemas)
+                    summary_response = await summarizer.summarize_context(
+                        plan.summary_messages,
+                        max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
+                    )
+                    summary = str(summary_response.get("text") or "").strip()
+                    if not summary:
+                        raise ValueError("summary response did not contain text")
                 except Exception as exc:
-                    termination_error = f"model query failed: {type(exc).__name__}: {exc}"
+                    termination_error = f"context compaction failed: {type(exc).__name__}: {exc}"
                     break
-                cost += _cost(response)
-                response_usage = _token_usage(response)
-                token_usage = _add_token_usage(token_usage, response_usage)
+
+                cost += _cost(summary_response)
+                summary_usage = _token_usage(summary_response)
+                token_usage = _add_token_usage(token_usage, summary_usage)
                 _save_cost(run_dir, cost, token_usage)
-                text = str(response.get("text") or "")
-                tool_calls = list(response.get("tool_calls") or [])
-                assistant = {
-                    "role": "assistant",
-                    "content": text,
-                    "tool_calls": tool_calls,
-                    "token_usage": response_usage,
-                }
-                provider_content = response.get("provider_content")
-                if isinstance(provider_content, list):
-                    assistant["provider_content"] = provider_content
-                self.messages.append(assistant)
-                append_conversation(conversation_path, assistant)
-                self._emit(events.AssistantMessage(turn, text, tool_calls, response_usage))
+                self.messages = plan.apply(self.messages, summary)
+                append_conversation(
+                    conversation_path,
+                    plan.record(summary, summary_usage),
+                )
+                self._emit(events.ContextCompacted(plan.tokens_before))
+            try:
+                response = await self.model.query(self.messages, tools=tool_schemas)
+            except Exception as exc:
+                termination_error = f"model query failed: {type(exc).__name__}: {exc}"
+                break
+            cost += _cost(response)
+            response_usage = _token_usage(response)
+            token_usage = _add_token_usage(token_usage, response_usage)
+            _save_cost(run_dir, cost, token_usage)
+            text = str(response.get("text") or "")
+            tool_calls = list(response.get("tool_calls") or [])
+            assistant = {
+                "role": "assistant",
+                "content": text,
+                "tool_calls": tool_calls,
+                "token_usage": response_usage,
+            }
+            provider_content = response.get("provider_content")
+            if isinstance(provider_content, list):
+                assistant["provider_content"] = provider_content
+            self.messages.append(assistant)
+            append_conversation(conversation_path, assistant)
+            self._emit(events.AssistantMessage(turn, text, tool_calls, response_usage))
 
-                if not tool_calls:
-                    if text.strip():
-                        consecutive_empty_responses = 0
-                    else:
-                        consecutive_empty_responses += 1
+            if not tool_calls:
+                if text.strip():
+                    consecutive_empty_responses = 0
+                else:
+                    consecutive_empty_responses += 1
 
-                    workspace_is_compiled = _latest_workspace_is_compiled(context)
-                    if text.strip() and workspace_is_compiled:
-                        final_text = text
-                        break
+                workspace_is_compiled = _latest_workspace_is_compiled(context)
+                if text.strip() and workspace_is_compiled:
+                    final_text = text
+                    break
 
-                    if consecutive_empty_responses >= MAX_CONSECUTIVE_EMPTY_RESPONSES:
-                        termination_error = (
-                            "agent returned three consecutive responses with no visible text or "
-                            "tool calls"
-                        )
-                        break
-                    if consecutive_empty_responses == 2:
-                        _append_reminder(
-                            self.messages,
-                            conversation_path,
-                            _empty_response_reminder(
-                                context,
-                                workspace_is_compiled=workspace_is_compiled,
-                            ),
-                        )
-                    elif workspace_is_compiled:
-                        _append_reminder(
-                            self.messages,
-                            conversation_path,
-                            _final_response_required_reminder(),
-                        )
-                    else:
-                        _append_reminder(
-                            self.messages,
-                            conversation_path,
-                            _compile_required_reminder(context),
-                        )
-                    continue
+                if consecutive_empty_responses >= MAX_CONSECUTIVE_EMPTY_RESPONSES:
+                    termination_error = (
+                        "agent returned three consecutive responses with no visible text or "
+                        "tool calls"
+                    )
+                    break
+                if consecutive_empty_responses == 2:
+                    _append_reminder(
+                        self.messages,
+                        conversation_path,
+                        _empty_response_reminder(
+                            context,
+                            workspace_is_compiled=workspace_is_compiled,
+                        ),
+                    )
+                elif workspace_is_compiled:
+                    _append_reminder(
+                        self.messages,
+                        conversation_path,
+                        _final_response_required_reminder(),
+                    )
+                else:
+                    _append_reminder(
+                        self.messages,
+                        conversation_path,
+                        _compile_required_reminder(context),
+                    )
+                continue
 
-                consecutive_empty_responses = 0
-                await self._run_tool_calls(context, tool_calls, conversation_path)
-            else:
-                hit_max_turns = True
-        finally:
-            await context.exec_sessions.aclose()
-            # The agent owns the model for the run's duration, so a finished
-            # run never leaves a live websocket behind. Close failures are
-            # inconsequential teardown noise and must not change the outcome.
-            with contextlib.suppress(Exception):
-                await self.model.close()
+            consecutive_empty_responses = 0
+            await self._run_tool_calls(context, tool_calls, conversation_path)
+        else:
+            hit_max_turns = True
 
         workspace_is_compiled = _latest_workspace_is_compiled(context)
         record = Record.load(record_path)
@@ -412,6 +461,58 @@ def _display_payload(
     if not isinstance(full_result, dict):
         return payload
     return {**payload, "result": full_result}
+
+
+async def _finish_cleanup(
+    cleanup: Coroutine[Any, Any, Any],
+    *,
+    label: str,
+) -> bool:
+    """Run teardown to completion and report cancellation after it finishes."""
+    task = asyncio.create_task(cleanup)
+    cancelled = False
+    while True:
+        try:
+            await asyncio.shield(task)
+            return cancelled
+        except asyncio.CancelledError:
+            cancelled = True
+            if task.cancelled():
+                return True
+        except Exception:
+            LOGGER.exception("failed to close %s during run cleanup", label)
+            return cancelled
+
+
+def _save_run_error(path: Path, error: str) -> None:
+    """Best-effort terminalization without masking the original failure."""
+    try:
+        record = Record.load(path)
+        record.status = "error"
+        record.error = error
+        record.result = ""
+        record.save(path)
+    except Exception:
+        LOGGER.exception("failed to save terminal run status at %s", path)
+
+
+def _create_run(
+    workspace: Workspace,
+    prompt: str,
+    run_id: str | None,
+) -> tuple[str, Path]:
+    """Create an explicit run exactly, or atomically suffix an automatic id."""
+    if run_id is not None:
+        return run_id, workspace.create_run(run_id)
+
+    base = _run_id_for_prompt(prompt)
+    attempt = 1
+    while True:
+        candidate = base if attempt == 1 else f"{base}-{attempt}"
+        try:
+            return candidate, workspace.create_run(candidate)
+        except FileExistsError:
+            attempt += 1
 
 
 def _arguments(call: dict[str, Any]) -> dict[str, Any]:

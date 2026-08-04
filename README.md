@@ -89,6 +89,43 @@ uv run mini-articraft view runs/<run-id>
 
 Use the viewer to examine each generated version and move its joints.
 
+### Use it from Python
+
+Call the same generation loop directly from Python:
+
+```python
+import mini_articraft
+
+result = mini_articraft.generate(
+    "reconstruct this desk lamp",
+    image="reference.png",
+    provider="anthropic",
+    model="claude-sonnet-5",
+    on_event=print,
+)
+
+print(result.status, result.run_dir, result.artifact)
+```
+
+`generate()` blocks until the run finishes. Pass `on_event` to receive progress
+events as they happen.
+
+Async applications use the native coroutine:
+
+```python
+async def main():
+    result = await mini_articraft.generate_async(
+        "reconstruct this desk lamp",
+        image="reference.png",
+        on_event=print,
+    )
+    print(result.status, result.artifact)
+```
+
+`generate_async()` works with normal asyncio tasks, cancellation, and timeouts.
+Cancellation takes effect at the next await point. A compile already in progress
+finishes before cancellation completes so it is not abandoned in the background.
+
 ### Simulate a run
 
 Export validation says the USD is well formed. Simulation says whether the object

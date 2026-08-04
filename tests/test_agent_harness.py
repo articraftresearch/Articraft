@@ -804,6 +804,234 @@ def test_agent_closes_the_model_on_cancellation(tmp_path) -> None:
 
     run(exercise())
     assert model.close_calls == 1
+    record = Record.load(tmp_path / "cancel" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation cancelled"
+
+
+def test_agent_closes_the_model_when_run_setup_fails(tmp_path) -> None:
+    model = ScriptedModel([])
+    env = LocalWorkspace(output_dir=tmp_path)
+    env.create_run("existing")
+
+    with pytest.raises(FileExistsError, match="run already exists"):
+        run(Agent(model, env).run("box", run_id="existing"))
+
+    assert model.close_calls == 1
+
+
+def test_auto_run_id_atomically_retries_collisions(monkeypatch, tmp_path) -> None:
+    model = ScriptedModel([text("")])
+    env = LocalWorkspace(output_dir=tmp_path)
+    env.create_run("fixed")
+    monkeypatch.setattr("mini_articraft.agent.harness._run_id_for_prompt", lambda prompt: "fixed")
+
+    result = run(Agent(model, env, max_turns=1).run("box"))
+
+    assert result["run_id"] == "fixed-2"
+    assert (tmp_path / "fixed").is_dir()
+    assert (tmp_path / "fixed-2").is_dir()
+
+
+def test_agent_terminalizes_setup_exceptions(monkeypatch, tmp_path) -> None:
+    model = ScriptedModel([])
+
+    def fail_prompt_read(name: str, *, include_images: bool = True) -> str:
+        raise RuntimeError("prompt unavailable")
+
+    monkeypatch.setattr("mini_articraft.agent.harness._read_prompt", fail_prompt_read)
+
+    with pytest.raises(RuntimeError, match="prompt unavailable"):
+        run(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
+                "box",
+                run_id="setup-failure",
+            )
+        )
+
+    record = Record.load(tmp_path / "setup-failure" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation failed: RuntimeError: prompt unavailable"
+    assert model.close_calls == 1
+
+
+def test_agent_terminalizes_unexpected_loop_exceptions(monkeypatch, tmp_path) -> None:
+    model = ScriptedModel([text("working")])
+
+    def fail_cost_save(run_dir, cost, token_usage) -> None:
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr("mini_articraft.agent.harness._save_cost", fail_cost_save)
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        run(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
+                "box",
+                run_id="loop-failure",
+            )
+        )
+
+    record = Record.load(tmp_path / "loop-failure" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation failed: OSError: disk unavailable"
+    assert model.close_calls == 1
+
+
+def test_repeated_cancellation_waits_for_model_close(tmp_path) -> None:
+    query_started = asyncio.Event()
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+
+    async def block_forever(query: ModelQuery) -> Response:
+        query_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("blocking query unexpectedly completed")
+
+    class BlockingCloseModel(ScriptedModel):
+        def __init__(self) -> None:
+            super().__init__([block_forever])
+            self.closed = False
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            close_started.set()
+            await release_close.wait()
+            self.closed = True
+
+    model = BlockingCloseModel()
+
+    async def exercise() -> None:
+        task = asyncio.create_task(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
+                "box",
+                run_id="repeated-cancel",
+            )
+        )
+        await asyncio.wait_for(query_started.wait(), timeout=5)
+        task.cancel()
+        await asyncio.wait_for(close_started.wait(), timeout=5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release_close.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        run(exercise())
+    finally:
+        release_close.set()
+
+    assert model.close_calls == 1
+    assert model.closed
+    record = Record.load(tmp_path / "repeated-cancel" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation cancelled"
+
+
+def test_cancellation_during_model_close_terminalizes_completed_run(tmp_path) -> None:
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+
+    class BlockingCloseModel(ScriptedModel):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+                    calls(tool_call("compile")),
+                    text("done"),
+                ]
+            )
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            close_started.set()
+            await release_close.wait()
+
+    model = BlockingCloseModel()
+
+    async def exercise() -> None:
+        task = asyncio.create_task(
+            Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run(
+                "box",
+                run_id="cancel-during-close",
+            )
+        )
+        await asyncio.wait_for(close_started.wait(), timeout=10)
+        record_path = tmp_path / "cancel-during-close" / "record.json"
+        assert Record.load(record_path).status == "success"
+
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release_close.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        run(exercise())
+    finally:
+        release_close.set()
+
+    assert model.close_calls == 1
+    record = Record.load(tmp_path / "cancel-during-close" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation cancelled"
+    assert record.result == ""
+
+
+def test_event_handler_cannot_mutate_pending_tool_calls(tmp_path) -> None:
+    model = ScriptedModel(
+        [
+            calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+            calls(tool_call("compile")),
+            text("done"),
+        ]
+    )
+
+    def clear_observed_calls(event: events.Event) -> None:
+        if isinstance(event, events.AssistantMessage):
+            event.tool_calls.clear()
+
+    result = run(
+        Agent(
+            model,
+            LocalWorkspace(output_dir=tmp_path),
+            max_turns=3,
+            on_event=clear_observed_calls,
+        ).run("box")
+    )
+
+    assert result["status"] == "success"
+
+
+def test_event_handler_failure_does_not_interrupt_generation(caplog, tmp_path) -> None:
+    model = ScriptedModel(
+        [
+            calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+            calls(tool_call("compile")),
+            text("done"),
+        ]
+    )
+    failed = False
+
+    def fail_once(event: events.Event) -> None:
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise RuntimeError("observer failed")
+
+    result = run(
+        Agent(
+            model,
+            LocalWorkspace(output_dir=tmp_path),
+            max_turns=3,
+            on_event=fail_once,
+        ).run("box")
+    )
+
+    assert result["status"] == "success"
+    assert "generation event handler failed" in caplog.text
 
 
 def test_agent_emits_run_events(tmp_path) -> None:
