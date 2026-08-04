@@ -12,6 +12,8 @@ from mini_articraft.settings import DEFAULT_ANTHROPIC_MODEL, Settings, get_setti
 _AGENT_CONTEXT_WINDOW_TOKENS = 272_000
 _MAX_OUTPUT_TOKENS = 128_000
 _MAX_IMAGE_DATA_LENGTH = 10 * 1024 * 1024
+_COMPACTION_BETA = "compact-2026-01-12"
+_COMPACTION_TRIGGER_TOKENS = 50_000
 _CACHE_WRITE_5M_MULTIPLIER = 1.25
 _CACHE_WRITE_1H_MULTIPLIER = 2.0
 _CACHE_READ_MULTIPLIER = 0.1
@@ -81,24 +83,39 @@ class AnthropicModel:
         *,
         max_output_tokens: int,
     ) -> dict[str, Any]:
-        """Create one context summary."""
+        """Create one plain checkpoint with Anthropic's native compaction."""
+        system = _system(messages)
+        edit: dict[str, Any] = {
+            "type": "compact_20260112",
+            "trigger": {
+                "type": "input_tokens",
+                "value": _COMPACTION_TRIGGER_TOKENS,
+            },
+            "pause_after_compaction": True,
+        }
+        if system:
+            # Native compaction uses its own instructions instead of the normal
+            # system prompt. Keep the system prompt too so short inputs that do
+            # not reach the 50k minimum still produce the same plain summary.
+            edit["instructions"] = system
         request: dict[str, Any] = {
             "model": self.config.anthropic_model,
             "max_tokens": max_output_tokens,
             "messages": _messages(messages),
+            "betas": [_COMPACTION_BETA],
+            "context_management": {"edits": [edit]},
         }
-        system = _system(messages)
         if system:
             request["system"] = system
         try:
-            response = await self._client_or_create().messages.create(**request)
+            response = await self._client_or_create().beta.messages.create(**request)
         except Exception as exc:
             raise ModelError(f"Anthropic summary request failed: {_format_exception(exc)}") from exc
 
         response_content = list(_value(response, "content", []) or [])
-        text = _response_text(response_content)
+        text = _compaction_text(response_content) or _response_text(response_content)
         if not text:
-            raise ModelError("Anthropic summary response did not contain text")
+            raise ModelError("Anthropic summary response did not contain a checkpoint")
         token_usage = _response_token_usage(response)
         return {
             "text": text,
@@ -300,6 +317,14 @@ def _response_text(content: list[Any]) -> str:
     )
 
 
+def _compaction_text(content: list[Any]) -> str:
+    for block in reversed(content):
+        block_content = _value(block, "content", None)
+        if _block_type(block) == "compaction" and block_content:
+            return str(block_content)
+    return ""
+
+
 def _response_tool_calls(content: list[Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     for block in content:
@@ -339,24 +364,38 @@ def _response_token_usage(response: Any) -> dict[str, int]:
     if usage is None:
         return {}
 
-    input_tokens = _usage_int(usage, "input_tokens")
-    output_tokens = _usage_int(usage, "output_tokens")
-    cache_creation_input_tokens = _usage_int(usage, "cache_creation_input_tokens")
-    cache_read_input_tokens = _usage_int(usage, "cache_read_input_tokens")
-    cache_creation = _value(usage, "cache_creation", None)
-    cache_creation_5m_input_tokens = _usage_int(
-        cache_creation,
-        "ephemeral_5m_input_tokens",
-    )
-    cache_creation_1h_input_tokens = _usage_int(
-        cache_creation,
-        "ephemeral_1h_input_tokens",
-    )
-    detailed_cache_creation_tokens = cache_creation_5m_input_tokens + cache_creation_1h_input_tokens
-    if detailed_cache_creation_tokens:
-        cache_creation_input_tokens = detailed_cache_creation_tokens
-    else:
-        cache_creation_5m_input_tokens = cache_creation_input_tokens
+    iterations = _value(usage, "iterations", None)
+    rows = iterations if isinstance(iterations, list) and iterations else [usage]
+    input_tokens = 0
+    output_tokens = 0
+    cache_creation_input_tokens = 0
+    cache_creation_5m_input_tokens = 0
+    cache_creation_1h_input_tokens = 0
+    cache_read_input_tokens = 0
+    for row in rows:
+        input_tokens += _usage_int(row, "input_tokens")
+        output_tokens += _usage_int(row, "output_tokens")
+        row_cache_creation_input_tokens = _usage_int(row, "cache_creation_input_tokens")
+        cache_creation = _value(row, "cache_creation", None)
+        row_cache_creation_5m_input_tokens = _usage_int(
+            cache_creation,
+            "ephemeral_5m_input_tokens",
+        )
+        row_cache_creation_1h_input_tokens = _usage_int(
+            cache_creation,
+            "ephemeral_1h_input_tokens",
+        )
+        detailed_cache_creation_tokens = (
+            row_cache_creation_5m_input_tokens + row_cache_creation_1h_input_tokens
+        )
+        if detailed_cache_creation_tokens:
+            row_cache_creation_input_tokens = detailed_cache_creation_tokens
+        else:
+            row_cache_creation_5m_input_tokens = row_cache_creation_input_tokens
+        cache_creation_input_tokens += row_cache_creation_input_tokens
+        cache_creation_5m_input_tokens += row_cache_creation_5m_input_tokens
+        cache_creation_1h_input_tokens += row_cache_creation_1h_input_tokens
+        cache_read_input_tokens += _usage_int(row, "cache_read_input_tokens")
 
     return {
         "input_tokens": input_tokens,
