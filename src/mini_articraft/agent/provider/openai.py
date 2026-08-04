@@ -100,6 +100,39 @@ class OpenAIModel:
             "response": response,
         }
 
+    async def summarize_context(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_output_tokens: int,
+    ) -> dict[str, Any]:
+        """Create a plain checkpoint without extending the active response chain."""
+
+        input_items = [
+            _input_message(message, self.config.openai_model)
+            for message in messages
+            if "type" not in message and message["role"] != "system"
+        ]
+        request = self._request(messages, input_items, None, None)
+        request["max_output_tokens"] = max_output_tokens
+        response = await self._send_with_retries(request, request)
+        text = _response_text(response)
+        _raise_for_bad_status(response, text)
+        if not text:
+            raise ModelError("OpenAI summary response did not contain output_text")
+
+        # The agent replaces its old messages with the checkpoint after this
+        # call. Reset the incremental state so the next query sends that new
+        # message list in full instead of continuing the old response chain.
+        self._input_items.clear()
+        self._previous_response_id = None
+        self._last_message_count = 0
+        return {
+            "text": text,
+            "token_usage": _response_token_usage(response),
+            "cost": _response_cost(response),
+        }
+
     async def close(self) -> None:
         await self._close_websocket()
 
@@ -216,7 +249,10 @@ class OpenAIModel:
                 continue
             if self._previous_response_id is not None and message["role"] == "assistant":
                 continue
-            new_items.append(_input_message(message, self.config.openai_model))
+            if message["role"] == "assistant":
+                new_items.extend(_input_assistant_items(message, self.config.openai_model))
+            else:
+                new_items.append(_input_message(message, self.config.openai_model))
         return new_items
 
 
@@ -327,6 +363,29 @@ def _input_message(message: dict[str, Any], model: str) -> dict[str, Any]:
         "role": message["role"],
         "content": _normalize_image_details(content, model),
     }
+
+
+def _input_assistant_items(message: dict[str, Any], model: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    if message.get("content"):
+        items.append(_input_message(message, model))
+    for call in message.get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        arguments = call.get("arguments") or "{}"
+        items.append(
+            {
+                "type": "function_call",
+                "call_id": str(call.get("id") or ""),
+                "name": str(call.get("name") or ""),
+                "arguments": (
+                    arguments
+                    if isinstance(arguments, str)
+                    else json.dumps(arguments, sort_keys=True)
+                ),
+            }
+        )
+    return items
 
 
 def _normalize_image_details(value: Any, model: str) -> Any:
