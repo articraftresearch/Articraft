@@ -72,6 +72,22 @@ def test_a_derived_material_keeps_what_it_did_not_change() -> None:
     assert brushed == Material.STEEL.but(roughness=0.75)
 
 
+def test_a_derived_material_can_clear_optional_properties() -> None:
+    glowing = Material(
+        name="glowing",
+        density=1000.0,
+        friction=(0.5, 0.4),
+        restitution=0.3,
+        emissive=(1.0, 0.5, 0.0),
+    )
+
+    cleared = glowing.but(friction=None, restitution=None, emissive=None)
+
+    assert cleared.friction is None
+    assert cleared.restitution is None
+    assert cleared.emissive is None
+
+
 def test_an_invented_material_authors_no_friction_it_does_not_have() -> None:
     foam = Material(name="foam", density=60.0)
 
