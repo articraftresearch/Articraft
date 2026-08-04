@@ -36,6 +36,13 @@ Rgb: TypeAlias = tuple[float, float, float]
 Friction: TypeAlias = tuple[float, float]
 
 
+class _Unspecified:
+    pass
+
+
+_UNSPECIFIED = _Unspecified()
+
+
 @dataclass(frozen=True)
 class Material:
     """What a shape is made of, and everything that follows from it.
@@ -102,17 +109,18 @@ class Material:
         *,
         name: str | None = None,
         density: float | None = None,
-        friction: Friction | None = None,
-        restitution: float | None = None,
+        friction: Friction | None | _Unspecified = _UNSPECIFIED,
+        restitution: float | None | _Unspecified = _UNSPECIFIED,
         color: Sequence[float] | None = None,
         metallic: float | None = None,
         roughness: float | None = None,
-        emissive: Rgb | None = None,
+        emissive: Rgb | None | _Unspecified = _UNSPECIFIED,
     ) -> Material:
         """This material with some properties changed, keeping the rest.
 
         A derived material keeps its origin's texture, so brushed steel still
-        looks like steel when textures are enabled.
+        looks like steel when textures are enabled. Pass ``None`` to clear
+        friction, restitution, or emissive values.
         """
 
         changes: dict[str, object] = {}
@@ -120,9 +128,9 @@ class Material:
             changes["name"] = name
         if density is not None:
             changes["density"] = density
-        if friction is not None:
+        if friction is not _UNSPECIFIED:
             changes["friction"] = friction
-        if restitution is not None:
+        if restitution is not _UNSPECIFIED:
             changes["restitution"] = restitution
         if color is not None:
             changes["base_color"] = _as_color(color, field_name=f"material {self.name!r} color")
@@ -130,7 +138,7 @@ class Material:
             changes["metallic"] = metallic
         if roughness is not None:
             changes["roughness"] = roughness
-        if emissive is not None:
+        if emissive is not _UNSPECIFIED:
             changes["emissive"] = emissive
         return replace(self, **changes)  # pyright: ignore[reportArgumentType]
 
