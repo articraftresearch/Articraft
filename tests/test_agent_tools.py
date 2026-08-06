@@ -9,16 +9,19 @@ import os
 import shlex
 import sys
 import time
+from pathlib import Path
 
 import pytest
+from harness import fake_compile_payload
 from PIL import Image
 
 from mini_articraft.agent.images import LIMITS, prepare_image
 from mini_articraft.agent.tools import ToolContext, get, schemas
 from mini_articraft.agent.tools._core import workspace_digest
 from mini_articraft.agent.tools._exec import ExecSessions
-from mini_articraft.compile_feedback import build_compile_report_from_payload
-from mini_articraft.environments.local import LocalEnvironment
+from mini_articraft.agent.workspace.local import LocalWorkspace
+from mini_articraft.compiler.feedback import build_compile_report_from_payload
+from mini_articraft.compiler.result import CompilePayload
 
 
 def run(awaitable):
@@ -26,7 +29,7 @@ def run(awaitable):
 
 
 def context(tmp_path) -> ToolContext:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("tools")
     return ToolContext(env, run_dir, run_dir / "workspace")
 
@@ -55,6 +58,11 @@ def test_tool_schemas_include_prompting_guidance() -> None:
     assert get("exec_command").supports_parallel is False
 
 
+def test_tool_schemas_can_exclude_images() -> None:
+    assert "view_image" in {tool["name"] for tool in schemas()}
+    assert "view_image" not in {tool["name"] for tool in schemas(include_images=False)}
+
+
 def test_read_rejects_path_escape(tmp_path) -> None:
     ctx = context(tmp_path)
 
@@ -73,7 +81,7 @@ def test_read_text_with_offset_and_limit(tmp_path) -> None:
 
 def test_workspace_tools_handle_default_relative_run_dir(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
-    env = LocalEnvironment()
+    env = LocalWorkspace()
     run_dir = env.create_run("relative")
     ctx = ToolContext(env, run_dir, run_dir / "workspace")
 
@@ -482,7 +490,7 @@ render_view(
 
 def test_preview_output_invalidates_compile_freshness(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.successful_compile_result = {"status": "success"}
+    ctx.successful_compile_result = fake_compile_payload()
     ctx.successful_compile_digest = workspace_digest(ctx.workspace)
     assert ctx.refresh_compile_freshness()
 
@@ -709,12 +717,11 @@ def test_compile_tool_resets_failure_streak_on_success(tmp_path) -> None:
 
 def test_cached_compile_success_resets_failure_streak(tmp_path) -> None:
     ctx = context(tmp_path)
-    ctx.successful_compile_result = {
-        "status": "success",
-        "compile_report": build_compile_report_from_payload(
+    ctx.successful_compile_result = fake_compile_payload(
+        compile_report=build_compile_report_from_payload(
             {"status": "success", "test_report": None}
         ),
-    }
+    )
     ctx.successful_compile_digest = workspace_digest(ctx.workspace)
     ctx.last_compile_failure_signature = "previous-failure"
     ctx.consecutive_compile_failures = 2
@@ -730,16 +737,12 @@ class FakeCompileEnv:
     def __init__(self, *statuses: str) -> None:
         self.statuses = list(statuses)
 
-    def compile_path(self, _run_dir):
+    def compile_path(self, run_dir: Path | str) -> CompilePayload:
         status = self.statuses.pop(0)
-        payload = {
-            "status": status,
-            "error": "ValueError: bad loft" if status == "error" else "",
-            "stdout": "",
-            "stderr": "",
-            "traceback": "",
-            "returncode": 1 if status == "error" else 0,
-            "test_report": None,
-        }
+        payload = fake_compile_payload(
+            status=status,
+            error="ValueError: bad loft" if status == "error" else "",
+            returncode=1 if status == "error" else 0,
+        )
         payload["compile_report"] = build_compile_report_from_payload(payload)
         return payload

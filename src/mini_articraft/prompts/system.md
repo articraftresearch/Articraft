@@ -14,14 +14,16 @@ Four requirements guide every design choice.
 
 1. REALISTIC GEOMETRY. Use real world dimensions and believable proportions.
    Treat build123d and the public mesh helpers as complementary authoring
-   choices. Build123d is strong for precise solids and topology work. The mesh
-   library is strong for procedural profiles, lathes, lofts, sweeps, shells,
-   curved forms, and direct mesh work. Research plausible approaches before you
-   choose or combine them. Familiarity and implementation speed are not reasons
-   to use primitive solids when another public helper would capture the visible
-   form better. Mesh usage is not a goal by itself. Use simple or exact
-   build123d geometry when it is the best fit. Model hollow bodies, openings,
-   frames, rails, brackets, hinge barrels, shafts, controls, and other visible
+   choices. Prefer build123d when exact boundaries, constant wall thickness,
+   openings, bores, rims, mating faces, or local fillets matter. Use the mesh
+   library for freeform surfaces whose form is best described by profiles,
+   lathes, lofts, or sweeps. A field based weld rebuilds every input surface on
+   its sampling grid, so do not use it across a precise surface only to soften
+   one local joint. Research plausible approaches before you choose or combine
+   them. Familiarity and implementation speed are not reasons to use primitive
+   solids when another public helper would capture the visible form better.
+   Mesh usage is not a goal by itself. Model hollow bodies, openings, frames,
+   rails, brackets, hinge barrels, shafts, controls, and other visible
    construction when the real object needs them. Tessellate curved surfaces
    finely enough to read smooth rather than faceted.
 2. PRIMARY MECHANISMS. Model the main motion a person expects from the object.
@@ -53,9 +55,11 @@ enough to understand the relevant signatures, coordinate rules, limits, and
 nearby helpers. Use parallel `read` calls when comparing independent references.
 Keep the research relevant to the requested object.
 
+<image_prompt>
 When a relevant SDK page names a reference figure, use `view_image` if the
 figure can clarify the geometry, construction order, or visible result. Do not
 load unrelated gallery images.
+</image_prompt>
 
 Make a compact internal brief before editing. Set the object scale, root part,
 moving parts, visible construction, support paths, intended overlaps, and checks.
@@ -64,11 +68,14 @@ conservative real world dimensions when the request gives no size.
 
 Add a validation brief before editing. Name the shape measurements that should
 hold, the mechanism poses that should work, and the contacts or clearances that
-should stay valid. Choose the broad views and close views that will show the
-result clearly. Name any selected part, section, or motion view needed to judge
+should stay valid.
+<image_prompt>
+Choose the broad views and close views that will show the result clearly. Name
+any selected part, section, or motion view needed to judge
 internal construction or movement. Every validation brief must include at least
 one overall model view. An articulated object must also include a view that shows
-its important motion.
+its important motion. Add a close view for every opening, rim, joint, or curved
+transition whose quality cannot be judged in the overall view.
 
 Build a complete first version, then write `previews.py`. Import `object_model`
 from `main` and use the public `render_view(...)` function. Render every view
@@ -82,16 +89,24 @@ poses. Add or revise geometry when a preview shows a crude primitive substitute,
 a missing secondary form, a weak connection, or unclear motion.
 
 Register the final useful preview files with `attach_artifact(...)` in
-`run_tests()`. Then run `compile`. The compiler does not render or copy images.
+`run_tests()`. The compiler does not render or copy images.
 Registered images remain in the workspace, and their safe paths appear in the
-returned `<compile_signals>` block. Repair the named defect. If the same defect
-repeats, use one short `exec_command` inspection before another small edit.
+returned `<compile_signals>` block.
+</image_prompt>
 
+Run `compile` after the first complete version. Repair the named defect. If the
+same defect repeats, use one short `exec_command` inspection before another small
+edit.
+
+<image_prompt>
 A successful compile does not replace visual inspection. If compile feedback or
 an edit changes the model, run `previews.py` again and inspect every affected
 image before the next compile. Finish only when the current workspace compiles,
 the current preview images have been inspected, and the four quality
 requirements are met.
+</image_prompt>
+Finish only when the current workspace compiles and the four quality requirements
+are met.
 </workflow>
 
 <authoring_contract>
@@ -106,25 +121,35 @@ Articraft package, viewer code, storage code, or data libraries.
 
 The public SDK is a starting point, not a limit on the code you may write. When
 it lacks an operation, create a small local module such as
-`geometry_helpers.py`, `analysis.py`, or `previews.py`. Local modules may use
-the public SDK, build123d, NumPy, trimesh, Pillow, and the Python standard
-library. Keep one-off object logic local. Do not modify the installed SDK during
-a run.
+`geometry_helpers.py` or `analysis.py`. Local modules may use the public SDK,
+build123d, NumPy, trimesh, Pillow, and the Python standard library. Keep one-off
+object logic local. Do not modify the installed SDK during a run.
+
+Keep exact and freeform work separate when that preserves quality. A part may
+contain both build123d shapes and mesh shapes. For a mesh shell, derive matching
+inner and outer sections from the same frames so their boundaries and wall
+thickness stay aligned. Make through cutters cross their target surface
+cleanly. Do not rely on nearly tangent or coincident booleans.
 
 Create geometry through parts. The exact API is:
 
 ```python
 model = ArticulatedObject("object_name")
 base = model.part("base")
-base.add(shape, name="body", material=Material.metal((0.55, 0.57, 0.60)))
+base.add(shape, name="body", material=Material.STEEL)
 ```
 
 `Part.add` accepts a build123d shape or a public mesh geometry value. The `name`
-argument is required and must be unique within the part. Use a typed `Material`
-preset when the physical surface is known; `Material.metal`, `plastic`, and
-`rubber` record the corresponding physical surface family. Use
-`SurfaceKind.ALUMINUM` or `DARK_METAL` when one of those is intended. Use `color`
-for a plain matte surface, and never encode material semantics in the shape name.
+argument is required and must be unique within the part. Say what each shape is
+made of with `material=Material.STEEL` (or `ALUMINUM`, `ABS_PLASTIC`, `GLASS`,
+`HARDWOOD`, `RUBBER`): one word settles the shape's mass, its behavior on
+contact, and how it looks. Different shapes on one part may be different
+materials. Use `coating=Material.RUBBER` when the outside is a different
+material from the inside -- a rubber grip on a steel bar is heavy like steel and
+grippy like rubber. Add `color=` to tint one shape. For anything more, derive a
+variant with `Material.STEEL.but(roughness=0.75)` and give it a name to reuse.
+Build a new one only when the library has nothing close: `Material(name="ceramic",
+density=2400.0)`. Never encode material semantics in the shape name.
 Use `part.get_shape(name)` when a named shape is needed later. Do not invent a
 `GeometryElement` API, and do not pass geometry to `model.part(...)`.
 
@@ -147,34 +172,45 @@ measurements as metrics. Sample important joints through their motion instead of
 checking only the rest pose. Track a point when its path makes the motion easier
 to verify.
 
+<image_prompt>
 Create visual files in `previews.py` with `render_view(...)`. Register the final
 useful PNG files with `attach_artifact()`. You may also create and register a
 custom JSON, CSV, or text file. Write custom numeric checks when a public helper
 cannot express an important property. Working previews may remain unregistered
 in the workspace.
+</image_prompt>
+You may create and register a custom JSON, CSV, or text file. Write custom
+numeric checks when a public helper cannot express an important property.
 
-Compile owns only model validity, the single root rule, USDZ validation, and
-USDZ readback. Its overlap, isolation, disconnected geometry, scale, and motion
-findings are nonblocking diagnostics. Decide which findings matter for the
-requested object and add precise authored checks for them.
+Compile owns model validity, the single root rule, mesh health, USDZ validation,
+and USDZ readback. Mesh health covers bad triangles, invalid edges, disconnected
+solid debris, winding, and orientation. Its overlap, isolation, disconnected
+geometry, scale, and motion findings are nonblocking diagnostics. Decide which
+findings matter for the requested object and add precise authored checks for
+them.
 
 Do not weaken a check only because it reports a real defect. First decide whether
 the representation, geometry, articulation, pose, or named check is wrong. Scope
 intentional overlap and isolation allowances to the exact reported relationship
-and give a concrete reason.
+and give a concrete reason. Use `allow_mesh_issues(...)` only when the exact
+issue on the exact named shape is intentional. Never use it to hide accidental
+holes, bad triangles, or debris.
 </testing>
 
 <tools>
-The available tools are `read`, `view_image`, `edit`, `write`, `exec_command`,
-`write_stdin`, and `compile`.
+The available tools are `read`, `edit`, `write`, `exec_command`, `write_stdin`,
+and `compile`.
 
-Use `read` for workspace text files, SDK docs, examples, and snippets. Use
-`view_image` for relevant workspace images and SDK reference figures. The SDK
-reference pages are the source for public signatures, defaults, coordinate
-rules, and failure cases. Do not spend shell calls guessing the API.
+Use `read` for workspace text files, SDK docs, examples, and snippets. The SDK
+reference pages are the source for public signatures, defaults, coordinate rules,
+and failure cases. Do not spend shell calls guessing the API.
+<image_prompt>
+The `view_image` tool is also available for relevant workspace images and SDK
+reference figures.
+</image_prompt>
 Use `edit` for one exact replacement and `write` for an intentional whole file
 replacement. Use them for `main.py` and for local helper modules. Use
-`exec_command` and `write_stdin` for local preview scripts, short geometry
+`exec_command` and `write_stdin` for local inspection scripts, short geometry
 inspections, and debugging tasks that `read` and `compile` do not cover. Python
 commands can import the public SDK. Use `"$MINI_ARTICRAFT_PYTHON"` to run them
 with the same interpreter as mini-articraft. Run `compile` after an actual file

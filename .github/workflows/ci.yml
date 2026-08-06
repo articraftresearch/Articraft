@@ -108,7 +108,7 @@ jobs:
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
           /tmp/smoke/bin/mini-articraft --help >/dev/null
           code=0
-          /tmp/smoke/bin/mini-articraft-compile-run >/dev/null 2>&1 || code=$?
+          /tmp/smoke/bin/python -m mini_articraft.compiler.worker >/dev/null 2>&1 || code=$?
           test "$code" -eq 2
           /tmp/smoke/bin/python -c "
           import mini_articraft
@@ -135,8 +135,8 @@ jobs:
           /tmp/smoke/bin/python -c "
           import shutil
           from pathlib import Path
-          from mini_articraft.environments import LocalEnvironment
-          env = LocalEnvironment(output_dir=Path('/tmp'))
+          from mini_articraft.agent.workspace import LocalWorkspace
+          env = LocalWorkspace(output_dir=Path('/tmp'))
           run_dir = env.create_run('smoke-run')
           shutil.copyfile('examples/mesh_knob/main.py', run_dir / 'workspace' / 'main.py')
           payload = env.compile_path(run_dir)

@@ -6,11 +6,12 @@ import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Protocol, TypeVar
 
 from mini_articraft import package_dir
 from mini_articraft.agent.tools._exec import ExecSessions
 from mini_articraft.agent.tools._paths import scoped_path
+from mini_articraft.compiler.result import CompilePayload
 
 SDK_DOCS_ROOT = package_dir / "sdk" / "docs"
 WORKSPACE_SDK_DOCS_ROOT = Path("docs") / "sdk"
@@ -26,13 +27,24 @@ IGNORED_WORKSPACE_DIRECTORIES = {
 IGNORED_WORKSPACE_SUFFIXES = {".pyc", ".pyo", ".swp", ".swo"}
 
 
+class Compiler(Protocol):
+    """The one thing tools need from a Workspace.
+
+    Tools never create runs, so they are given the narrower capability rather
+    than the whole protocol. A ``Workspace`` satisfies this structurally.
+    """
+
+    def compile_path(self, run_dir: Path | str) -> CompilePayload: ...
+
+
 @dataclass
 class ToolContext:
-    env: Any
+    compiler: Compiler
     run_dir: Path
     workspace: Path
-    compile_result: dict[str, Any] | None = None
-    successful_compile_result: dict[str, Any] | None = None
+    """The directory the agent edits: ``run_dir / "workspace"``."""
+    compile_result: CompilePayload | None = None
+    successful_compile_result: CompilePayload | None = None
     successful_compile_digest: str | None = None
     last_compile_failure_signature: str | None = None
     consecutive_compile_failures: int = 0

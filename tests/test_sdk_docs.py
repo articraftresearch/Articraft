@@ -103,7 +103,7 @@ def test_key_apis_are_documented_by_their_owner_pages() -> None:
             "`ArticulatedObject`",
             "`Material`",
             "`Part`",
-            "`SurfaceKind`",
+            "`Material`",
             "`part.add(...)`",
         ),
         "common/35_joints.md": (
@@ -276,6 +276,9 @@ def test_prompts_encourage_research_and_mesh_without_a_usage_quota() -> None:
         "geometry strategy for each major visible form",
         "A successful compile does not replace visual inspection",
         "Mesh usage is not a goal by itself",
+        "Prefer build123d when exact boundaries",
+        "field based weld rebuilds every input surface",
+        "allow_mesh_issues",
     ]:
         assert required.lower() in normalized
 

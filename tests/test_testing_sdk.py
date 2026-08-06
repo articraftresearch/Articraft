@@ -7,12 +7,14 @@ from build123d import Box, Pos
 
 from mini_articraft.errors import ValidationError
 from mini_articraft.sdk import (
+    AllowedMeshIssues,
     AllowedOverlap,
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,
     FailureKind,
     MeshGeometry,
+    MeshHealthIssue,
     MotionLimits,
     Origin,
     SphereGeometry,
@@ -63,6 +65,52 @@ def test_report_records_warnings_and_shape_scoped_allowances() -> None:
     with pytest.raises(TypeError, match="shape_a"):
         ctx.allow_overlap(  # pyright: ignore[reportCallIssue]
             "base", "insert", reason="too broad"
+        )
+
+
+def test_mesh_health_allowance_is_exact_and_requires_a_reason() -> None:
+    model = ArticulatedObject("mesh-health")
+    base = model.part("base")
+    box = BoxGeometry((1.0, 1.0, 1.0))
+    open_box = MeshGeometry(box.vertices, box.faces[:-1])
+    base.add(open_box, name="intentional-sheet")
+
+    blocked = TestContext(model)
+    assert not blocked.fail_if_mesh_unhealthy()
+    assert blocked.report().failures[0].kind is FailureKind.MESH_HEALTH
+
+    allowed = TestContext(model)
+    allowed.allow_mesh_issues(
+        "base",
+        shape="intentional-sheet",
+        issues=(MeshHealthIssue.BOUNDARY_EDGES,),
+        reason="This named mesh is an intentional open surface.",
+    )
+    assert allowed.fail_if_mesh_unhealthy()
+    assert allowed.report().allowed_mesh_issues == (
+        AllowedMeshIssues(
+            "base",
+            "intentional-sheet",
+            (MeshHealthIssue.BOUNDARY_EDGES,),
+            "This named mesh is an intentional open surface.",
+        ),
+    )
+
+    wrong_issue = TestContext(model)
+    wrong_issue.allow_mesh_issues(
+        "base",
+        shape="intentional-sheet",
+        issues=(MeshHealthIssue.SLIVER_FACES,),
+        reason="Only slivers are intentional.",
+    )
+    assert not wrong_issue.fail_if_mesh_unhealthy()
+
+    with pytest.raises(ValueError, match="non-empty reason"):
+        allowed.allow_mesh_issues(
+            "base",
+            shape="intentional-sheet",
+            issues=(MeshHealthIssue.BOUNDARY_EDGES,),
+            reason="",
         )
 
 

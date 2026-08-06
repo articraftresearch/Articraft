@@ -32,11 +32,17 @@ separate open triangles is not a valid boolean input.
 The helpers validate both inputs and return a new `MeshGeometry`. They do not
 mutate either input.
 
-A valid boolean can return an empty mesh. For example, the intersection of two
-separated boxes is empty.
+A valid boolean can have no shared or remaining volume. The helpers raise an
+error for an empty result.
 
-The output can contain more than one closed body. A union of separated solids
-does not invent a bridge between them.
+A union of separated solids does not invent a bridge between them. Difference
+and intersection reject an output with more than one positive volume body.
+Keep intended separate pieces as separate named shapes. This also catches small
+fragments left by a bad cut.
+
+The helpers inspect every output for bad triangles and invalid topology. An
+unhealthy result raises an error that includes the issue count and affected
+bounds. Repair the source geometry or operation before using that result.
 
 ## boolean_union
 
@@ -107,8 +113,10 @@ region box.
 The helpers raise `TypeError` when an input is not `MeshGeometry`.
 `MeshGeometry.validate()` can raise `ValidationError` for invalid vertices or
 faces. The helpers raise `ValueError` when an input is empty, open, nonmanifold,
-or rejected by Manifold. The error names input `a` or `b` so you
-can inspect the failing mesh.
+or rejected by Manifold. They also raise when an output has bad triangles,
+invalid edges, bad winding, inward orientation, or unintended separate solids.
+The error names the operation and the affected bounds so you can inspect the
+failing region.
 
 Check these properties before retrying a failed boolean.
 
@@ -301,6 +309,11 @@ a body. Place the pieces so they overlap, then weld them and add the single
 result to the part. Use `boolean_union(...)` instead when the joint should stay
 sharp and preserve the exact input surfaces.
 
+Weld samples the full bounds of every input and rebuilds their surfaces. It is
+well suited to one continuous freeform result. It is not a local fillet for an
+otherwise exact solid. Use build123d when exact faces, wall thickness,
+openings, or rims must remain unchanged.
+
 `radius` controls how far the smooth transition reaches. `tolerance` controls
 the generated triangle size. It defaults to one quarter of the radius. Smaller
 values preserve more surface detail and produce more triangles. Large objects
@@ -328,8 +341,10 @@ molded = weld(
 kettle.add(molded, name="body_with_molded_spout", color=(0.80, 0.82, 0.83))
 ```
 
-When the body is a hollow shell and the protrusion pokes through the wall into the
-cavity, pass `trim` (the solid that fills the cavity) to difference that stub away:
+When the body is a hollow shell and the protrusion pokes through the wall into
+the cavity, pass `trim`, which is the solid that fills the cavity. The trim
+field is applied during the same surface extraction as the weld. This avoids a
+second near coincident boolean against the rebuilt surface.
 
 ```python
 molded = weld(shell, spout, trim=cavity_solid)
@@ -398,6 +413,9 @@ cutters remove the entire solid.
 
 - Use `weld(...)` for one smooth generated transition. Set its radius, tolerance,
   and profile directly. Pass `trim` to remove a stub left inside a hollow body.
+  Remember that it rebuilds every input surface.
+- Use build123d for exact shells, openings, bores, rims, mating faces, and local
+  fillets.
 - Use `boolean_union(...)` when the joint should be sharp and keep the exact input
   surfaces.
 - Use `snap_to(...)` to close a small gap before welding when the whole piece can

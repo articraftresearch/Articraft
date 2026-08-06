@@ -31,12 +31,23 @@ def test_load_viewer_run_reads_each_usdz_version(tmp_path) -> None:
         {
             "name": "base plate",
             "usd_name": "base_plate",
-            "shapes": [{"usd_name": "base_shape", "material": None}],
+            "shapes": [
+                {
+                    "usd_name": "base_shape",
+                    "appearance": None,
+                    "material": None,
+                    "coating": None,
+                }
+            ],
+            "mass": None,
         },
         {
             "name": "carriage",
             "usd_name": "carriage",
-            "shapes": [{"usd_name": "payload", "material": None}],
+            "shapes": [
+                {"usd_name": "payload", "appearance": None, "material": None, "coating": None}
+            ],
+            "mass": None,
         },
     ]
     joint = cast(list[dict[str, Any]], latest["articulations"])[0]
@@ -103,7 +114,10 @@ def test_viewer_page_exposes_only_the_minimal_view_options() -> None:
 
     assert 'id="part-colors"' in page
     assert 'id="preview-motion"' in page
-    assert page.count('role="switch"') == 2
+    # Only shown once a run has been simulated; the option list stays enumerated
+    # here so it cannot creep.
+    assert 'id="play-simulation"' in page
+    assert page.count('role="switch"') == 3
     assert "contrastingPalette(version.model.parts.length)" in page
     assert "index%palette.length" not in page
 

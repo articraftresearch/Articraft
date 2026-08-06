@@ -79,9 +79,26 @@ class _FakeProc:
     """A stand-in for a finished subprocess (returncode set, so not alive)."""
 
     def __init__(self) -> None:
-        self.returncode = 0
+        self.returncode: int | None = 0
         self.pid = None
         self.stdin = _FakeStdin()
+
+
+class _ControlledProc(_FakeProc):
+    """A subprocess whose exit order the test controls."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.returncode = None
+        self._exit = asyncio.Event()
+
+    async def wait(self) -> int:
+        await self._exit.wait()
+        self.returncode = 0
+        return 0
+
+    def finish(self) -> None:
+        self._exit.set()
 
 
 async def _dead_session() -> tuple[ExecSession, _FakeProc]:
@@ -131,3 +148,41 @@ def test_exec_session_aclose_is_idempotent() -> None:
 
     assert session._closed is True
     assert proc.stdin.close_calls == 1
+
+
+def test_reaper_completion_wakes_poll_after_streams_close() -> None:
+    async def exercise() -> dict[str, object]:
+        proc = _ControlledProc()
+        session = ExecSession(
+            session_id=1,
+            proc=cast(asyncio.subprocess.Process, proc),
+            stdout=OutputBuffer(),
+            stderr=OutputBuffer(),
+            output_event=asyncio.Event(),
+        )
+
+        async def close_stream() -> None:
+            session.output_event.set()
+
+        stream_tasks = [
+            asyncio.create_task(close_stream()),
+            asyncio.create_task(close_stream()),
+        ]
+        reaper_task = asyncio.create_task(session._reap_descendants_after_exit())
+        session._readers = [*stream_tasks, reaper_task]
+        await asyncio.gather(*stream_tasks)
+
+        poll_task = asyncio.create_task(
+            session.poll(yield_time=10.0, timeout=None, max_output_chars=100)
+        )
+        await asyncio.sleep(0)
+        assert not poll_task.done()
+        assert not session.output_event.is_set()
+
+        proc.finish()
+        return await asyncio.wait_for(poll_task, timeout=0.5)
+
+    result = run(exercise())
+
+    assert result["returncode"] == 0
+    assert result["running"] is False

@@ -68,8 +68,9 @@ part.add(
     shape: build123d.Shape | MeshGeometry,
     *,
     name: str,
-    color: Sequence[float] | None = None,
     material: Material | None = None,
+    coating: Material | None = None,
+    color: Sequence[float] | None = None,
 ) -> build123d.Shape | MeshGeometry
 ```
 
@@ -97,42 +98,19 @@ create two rigid bodies.
 
 ### Materials
 
-For a physically based surface, pass a `Material` instead of a `color`. A
-material uses the metallic/roughness workflow and is exported as a bound
-`UsdPreviewSurface`, so metal reads as metal and plastic reads as plastic in the
-viewer and in USDZ preview. `color` and `material` cannot both be set;
-`color=(r, g, b)` is shorthand for a matte dielectric material.
+`material` says what a shape is made of, which settles its mass, how it behaves
+on contact, and how it looks. `coating` covers it in a different material, and
+`color` tints one shape without changing anything physical.
 
 ```python
-from mini_articraft.sdk import Material, SurfaceKind
-
-body.add(
-    shell,
-    name="shell",
-    material=Material.metal(
-        (0.72, 0.74, 0.78),
-        roughness=0.30,
-        surface=SurfaceKind.ALUMINUM,
-    ),
-)
-body.add(trim, name="lens", material=Material.glass())
+body.add(shell, name="shell", material=Material.ALUMINUM)
+bar.add(rail, name="rail", material=Material.STEEL, coating=Material.RUBBER)
+foot.add(pad, name="foot", material=Material.RUBBER, color=(0.8, 0.1, 0.1))
 ```
 
-```python
-Material(
-    base_color: (r, g, b, a) in [0, 1],   # alpha is opacity
-    metallic: float = 0.0,                 # 0 dielectric, 1 raw metal
-    roughness: float = 0.6,                # 0 mirror, 1 fully diffuse
-    emissive: (r, g, b) | None = None,     # optional unlit glow
-    surface: SurfaceKind | None = None,     # optional physical surface family
-)
-```
-
-Presets: `Material.metal(color, roughness=...)`, `Material.plastic(color)`,
-`Material.rubber(color)`, `Material.matte(color)`, `Material.glass(color)`.
-Metal, plastic, and rubber presets record matching physical surface families by
-default. Pass a different `SurfaceKind`, or `surface=None`, when the default is
-not appropriate. Exporters never infer a material from a shape name.
+Shapes on one part may be different materials; the part weighs each in turn. See
+`docs/sdk/common/37_materials.md` for the library, deriving variants, and what
+gets measured.
 
 ### Build123d placement
 
