@@ -243,3 +243,39 @@ def test_a_rotated_joint_origin_does_not_disturb_the_axis(tmp_path: Path) -> Non
     assert joint is not None
     axis = tuple(round(float(value), 6) for value in str(joint.get("axis")).split())
     assert axis == (-1.0, 0.0, 0.0)
+
+
+def test_prismatic_travel_is_not_reported_as_part_separation(tmp_path: Path) -> None:
+    model = ArticulatedObject("lift")
+    base = model.part("base")
+    base.add(
+        BoxGeometry((0.10, 0.10, 0.02)),
+        name="base_slab",
+        material=Material.STEEL,
+    )
+    body = model.part("body")
+    body.add(
+        BoxGeometry((0.08, 0.08, 0.10)).translate(0.0, 0.0, 0.06),
+        name="body_box",
+        material=Material.STEEL,
+    )
+    model.articulation(
+        "slide",
+        ArticulationType.PRISMATIC,
+        base,
+        body,
+        axis=(0.0, 0.0, 1.0),
+        motion_limits=MotionLimits(lower=0.0, upper=0.10),
+    )
+
+    result = simulate_usdz(
+        _export(model, tmp_path),
+        tmp_path / "sim",
+        seconds=1.0,
+        scenario="release",
+    )
+
+    assert result.trajectory is not None
+    positions = [frame["joints"][0] for frame in result.trajectory.frames]
+    assert abs(positions[0]) > 0.005
+    assert result.parts_stayed_together, result.summary()

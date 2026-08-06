@@ -39,6 +39,7 @@ class FakeMessages:
 class FakeClient:
     def __init__(self, responses: list[Any]):
         self.messages = FakeMessages(responses)
+        self.beta = SimpleNamespace(messages=self.messages)
         self.closed = False
 
     async def close(self) -> None:
@@ -60,6 +61,30 @@ def text_response(
             output_tokens=output_tokens,
             cache_creation_input_tokens=cache_creation_input_tokens,
             cache_read_input_tokens=cache_read_input_tokens,
+        ),
+    )
+
+
+def compaction_response(
+    text: str | None,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+) -> Any:
+    return SimpleNamespace(
+        content=[
+            {
+                "type": "compaction",
+                "content": text,
+                "encrypted_content": None,
+            }
+        ],
+        stop_reason="compaction",
+        usage=SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=0,
         ),
     )
 
@@ -278,7 +303,7 @@ def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
 
 def test_anthropic_summary_request() -> None:
     model, client = anthropic_model(
-        [text_response("checkpoint", input_tokens=100, output_tokens=20)]
+        [compaction_response("checkpoint", input_tokens=100, output_tokens=20)]
     )
 
     result = run(
@@ -295,8 +320,76 @@ def test_anthropic_summary_request() -> None:
     request = client.messages.requests[0]
     assert request["max_tokens"] == 8_192
     assert request["system"] == "summarize"
+    assert request["betas"] == ["compact-2026-01-12"]
+    assert request["context_management"] == {
+        "edits": [
+            {
+                "type": "compact_20260112",
+                "trigger": {"type": "input_tokens", "value": 50_000},
+                "pause_after_compaction": True,
+                "instructions": "summarize",
+            }
+        ]
+    }
     assert "tools" not in request
     assert "cache_control" not in request
+
+
+def test_anthropic_compaction_becomes_plain_replayable_checkpoint() -> None:
+    model, client = anthropic_model(
+        [
+            compaction_response("checkpoint", input_tokens=100, output_tokens=20),
+            text_response("done"),
+        ]
+    )
+
+    summary = run(
+        model.summarize_context(
+            [
+                {"role": "system", "content": "summarize"},
+                {"role": "user", "content": "old work"},
+            ],
+            max_output_tokens=8_192,
+        )
+    )
+    run(
+        model.query(
+            [
+                {"role": "system", "content": "build cleanly"},
+                {"role": "user", "content": summary["text"]},
+            ]
+        )
+    )
+
+    replay = client.messages.requests[1]
+    assert replay["messages"] == [{"role": "user", "content": "checkpoint"}]
+    assert "betas" not in replay
+    assert "context_management" not in replay
+
+
+def test_anthropic_summary_falls_back_to_text_below_native_trigger() -> None:
+    model, _client = anthropic_model([text_response("checkpoint")])
+
+    result = run(
+        model.summarize_context(
+            [{"role": "user", "content": "short old work"}],
+            max_output_tokens=8_192,
+        )
+    )
+
+    assert result["text"] == "checkpoint"
+
+
+def test_anthropic_summary_rejects_empty_native_compaction() -> None:
+    model, _client = anthropic_model([compaction_response(None)])
+
+    with pytest.raises(ModelError, match="did not contain a checkpoint"):
+        run(
+            model.summarize_context(
+                [{"role": "user", "content": "old work"}],
+                max_output_tokens=8_192,
+            )
+        )
 
 
 def test_anthropic_model_groups_consecutive_tool_results() -> None:
@@ -490,6 +583,48 @@ def test_anthropic_model_reads_cache_duration_breakdown() -> None:
     }
 
 
+def test_anthropic_model_aggregates_native_compaction_iterations() -> None:
+    response = SimpleNamespace(
+        usage=SimpleNamespace(
+            input_tokens=30,
+            output_tokens=5,
+            cache_creation_input_tokens=7,
+            cache_read_input_tokens=3,
+            iterations=[
+                SimpleNamespace(
+                    type="compaction",
+                    input_tokens=100,
+                    output_tokens=20,
+                    cache_creation_input_tokens=99,
+                    cache_creation=SimpleNamespace(
+                        ephemeral_5m_input_tokens=4,
+                        ephemeral_1h_input_tokens=6,
+                    ),
+                    cache_read_input_tokens=5,
+                ),
+                SimpleNamespace(
+                    type="message",
+                    input_tokens=30,
+                    output_tokens=5,
+                    cache_creation_input_tokens=7,
+                    cache_read_input_tokens=3,
+                ),
+            ],
+        )
+    )
+
+    assert _response_token_usage(response) == {
+        "input_tokens": 130,
+        "output_tokens": 25,
+        "cache_creation_input_tokens": 17,
+        "cache_creation_5m_input_tokens": 11,
+        "cache_creation_1h_input_tokens": 6,
+        "cache_read_input_tokens": 8,
+        "cached_input_tokens": 8,
+        "total_tokens": 180,
+    }
+
+
 def test_anthropic_model_returns_sonnet_standard_cost_after_price_change() -> None:
     usage = {
         "input_tokens": 1_000,
@@ -561,6 +696,7 @@ def test_anthropic_model_wraps_provider_errors() -> None:
 
 def test_anthropic_model_loads_dotenv_key(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     get_settings.cache_clear()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     tmp_path.joinpath(".env").write_text(

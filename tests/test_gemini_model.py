@@ -466,6 +466,7 @@ def test_gemini_model_rejects_incomplete_interactions() -> None:
 
 def test_gemini_model_loads_dotenv_key(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     get_settings.cache_clear()
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     tmp_path.joinpath(".env").write_text(

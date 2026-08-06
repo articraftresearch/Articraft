@@ -33,13 +33,39 @@ async def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         context.consecutive_compile_failures = 0
         return _compact_result(context.successful_compile_result)
 
-    result = await asyncio.to_thread(context.compiler.compile_path, context.run_dir)
+    result = await _compile_path(context)
     internal_result = _internal_result(context, result)
     context.compile_result = internal_result
     if result["status"] == "success":
         context.successful_compile_result = internal_result
         context.successful_compile_digest = workspace_digest(context.workspace)
     return _compact_result(internal_result)
+
+
+async def _compile_path(context: ToolContext) -> CompilePayload:
+    """Finish a started compile before propagating task cancellation.
+
+    ``asyncio.to_thread`` cannot stop its worker. Shielding and joining it keeps
+    a cancelled generation from leaving a compiler mutating the run after the
+    task has finished.
+    """
+    task = asyncio.create_task(asyncio.to_thread(context.compiler.compile_path, context.run_dir))
+    cancelled = False
+    while True:
+        try:
+            result = await asyncio.shield(task)
+            break
+        except asyncio.CancelledError:
+            if task.cancelled():
+                raise
+            cancelled = True
+        except BaseException:
+            if cancelled:
+                raise asyncio.CancelledError from None
+            raise
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
 
 
 def _internal_result(context: ToolContext, result: CompilePayload) -> CompilePayload:

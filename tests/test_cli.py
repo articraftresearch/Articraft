@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 from typer.testing import CliRunner
 
-from mini_articraft import app
+from mini_articraft import api, app
 from mini_articraft.agent.record import Record, append_conversation
 from mini_articraft.compiler.worker import TextureRunResult
 from mini_articraft.settings import Settings, get_settings
@@ -55,9 +55,12 @@ class FakeAgent:
         *,
         image_path: Path | None = None,
     ) -> dict[str, object]:
-        self.prompt = prompt
-        self.image_path = image_path
-        return self.result
+        try:
+            self.prompt = prompt
+            self.image_path = image_path
+            return self.result
+        finally:
+            await self.model.close()
 
 
 def reset_fakes() -> None:
@@ -74,9 +77,9 @@ def reset_fakes() -> None:
 
 def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(
         app, "get_settings", lambda: Settings(openai_api_key="sk-test", max_turns=123)
     )
@@ -116,9 +119,9 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
 
 def test_cli_physics_flag_enables_the_physics_lane(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     result = CliRunner().invoke(
@@ -133,9 +136,9 @@ def test_cli_physics_flag_enables_the_physics_lane(monkeypatch, tmp_path: Path) 
 
 def test_cli_applies_textures_only_after_generation(monkeypatch) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     applied: list[dict[str, Any]] = []
     monkeypatch.setattr(app, "_apply_textures", applied.append)
@@ -210,9 +213,9 @@ def test_apply_textures_ignores_failed_generation(monkeypatch) -> None:
 
 def test_cli_passes_reference_image_to_agent(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     image_path = tmp_path / "reference.png"
     image_path.write_bytes(b"image")
@@ -270,7 +273,7 @@ def test_cli_reports_invalid_reference_image_without_traceback(
     tmp_path: Path,
 ) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
     monkeypatch.setattr(
         app,
         "get_settings",
@@ -291,9 +294,9 @@ def test_cli_reports_invalid_reference_image_without_traceback(
 
 def test_cli_selects_gemini_provider(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(
         app,
         "get_settings",
@@ -325,9 +328,9 @@ def test_cli_selects_gemini_provider(monkeypatch, tmp_path: Path) -> None:
 
 def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(
         app,
         "get_settings",
@@ -359,9 +362,9 @@ def test_cli_selects_anthropic_provider(monkeypatch, tmp_path: Path) -> None:
 
 def test_cli_selects_openrouter_provider_with_arbitrary_model(monkeypatch, tmp_path: Path) -> None:
     reset_fakes()
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(
         app,
         "get_settings",
@@ -470,7 +473,7 @@ def test_cli_rejects_unsupported_anthropic_model_without_model_call(
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test")
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
 
     result = CliRunner().invoke(
         app.cli,
@@ -493,9 +496,9 @@ def test_cli_rejects_unsupported_anthropic_model_without_model_call(
 def test_cli_exits_nonzero_when_agent_fails(monkeypatch) -> None:
     reset_fakes()
     FakeAgent.result = {"status": "error", "run": "/tmp/run", "error": "compile failed"}
-    monkeypatch.setattr(app, "create_model", FakeOpenAIModel)
-    monkeypatch.setattr(app, "LocalWorkspace", FakeEnvironment)
-    monkeypatch.setattr(app, "Agent", FakeAgent)
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
     monkeypatch.setattr(app, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     result = CliRunner().invoke(app.cli, ["generate", "make a hinge"])

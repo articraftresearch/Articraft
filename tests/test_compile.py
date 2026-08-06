@@ -74,6 +74,7 @@ def test_compile_path_exports_usdz_but_only_updates_attempt_data(tmp_path) -> No
         "shapes": 1,
         "articulations": 0,
     }
+    assert not {"run", "run_id", "workspace", "entrypoint", "result"} & result.keys()
     assert "loading main.py and building the model" in result["compile_stats"]["phases"]
     assert not run_dir.joinpath("result", ".compile-progress.json").exists()
     manifest = json.loads(run_dir.joinpath("result", "model.json").read_text())

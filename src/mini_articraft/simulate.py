@@ -241,11 +241,11 @@ def simulate_usdz(
         mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, index) for index in range(1, model.nbody)
     )
     start = data.xpos[1:].copy()
-    separations = {
-        (a, b): float(np.linalg.norm(data.xpos[a] - data.xpos[b]))
-        for a in range(1, model.nbody)
-        for b in range(a + 1, model.nbody)
-    }
+    separations = _tracked_body_separations(
+        model,
+        data.xpos,
+        slide_joint_type=mujoco.mjtJoint.mjJNT_SLIDE,
+    )
 
     root_body = 1  # the free body; MuJoCo orders bodies from the world outward
     movable = [
@@ -352,6 +352,46 @@ def simulate_usdz(
             frames=tuple(frames),
         ),
     )
+
+
+def _tracked_body_separations(
+    model: Any,
+    positions: Any,
+    *,
+    slide_joint_type: Any,
+) -> dict[tuple[int, int], float]:
+    """Body distances that should stay fixed while joints move.
+
+    A slide joint moves its whole child subtree relative to the rest of the
+    object. Distances that cross that joint are expected to change, while
+    distances within either side still catch parts that come apart.
+    """
+
+    slide_roots = {
+        int(model.jnt_bodyid[index])
+        for index in range(model.njnt)
+        if model.jnt_type[index] == slide_joint_type
+    }
+    parents = model.body_parentid
+
+    def crosses_slide(first: int, second: int) -> bool:
+        return any(
+            _is_descendant(first, root, parents) != _is_descendant(second, root, parents)
+            for root in slide_roots
+        )
+
+    return {
+        (first, second): float(np.linalg.norm(positions[first] - positions[second]))
+        for first in range(1, model.nbody)
+        for second in range(first + 1, model.nbody)
+        if not crosses_slide(first, second)
+    }
+
+
+def _is_descendant(body: int, root: int, parents: Any) -> bool:
+    while body and body != root:
+        body = int(parents[body])
+    return body == root
 
 
 def _floor_friction(model: Any, data: Any) -> float | None:

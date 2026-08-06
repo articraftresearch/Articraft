@@ -804,17 +804,14 @@ class WarmEnvironment(LocalWorkspace):
         )
         if status == "timeout":
             return _error_result(
-                run_dir,
                 error=f"compile timed out after {self.config.timeout_seconds:g}s",
             )
         if payload is None:
             return _error_result(
-                run_dir,
                 error="compile worker exited mid-compile "
                 "(workspace code may have exited the process)",
             )
         return _finalize_payload(
-            run_dir,
             payload,
             stderr="",
             returncode=0 if payload["status"] == "success" else 1,

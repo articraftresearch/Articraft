@@ -89,6 +89,43 @@ uv run mini-articraft view runs/<run-id>
 
 Use the viewer to examine each generated version and move its joints.
 
+### Use it from Python
+
+Call the same generation loop directly from Python:
+
+```python
+import mini_articraft
+
+result = mini_articraft.generate(
+    "reconstruct this desk lamp",
+    image="reference.png",
+    provider="anthropic",
+    model="claude-sonnet-5",
+    on_event=print,
+)
+
+print(result.status, result.run_dir, result.artifact)
+```
+
+`generate()` blocks until the run finishes. Pass `on_event` to receive progress
+events as they happen.
+
+Async applications use the native coroutine:
+
+```python
+async def main():
+    result = await mini_articraft.generate_async(
+        "reconstruct this desk lamp",
+        image="reference.png",
+        on_event=print,
+    )
+    print(result.status, result.artifact)
+```
+
+`generate_async()` works with normal asyncio tasks, cancellation, and timeouts.
+Cancellation takes effect at the next await point. A compile already in progress
+finishes before cancellation completes so it is not abandoned in the background.
+
 ### Simulate a run
 
 Export validation says the USD is well formed. Simulation says whether the object
@@ -149,10 +186,28 @@ uv run pytest -q
 uv run ruff check .
 ```
 
+## Preview releases
+
+Preview releases attach the exact wheel and sdist that the release workflow verified. Install a
+wheel from the [releases page](https://github.com/mattzh72/mini-articraft/releases):
+
+```shell
+uv pip install https://github.com/mattzh72/mini-articraft/releases/download/<tag>/<wheel-file>
+```
+
+To record a preview as a project dependency instead, pin its release tag:
+
+```shell
+uv add "mini-articraft @ git+https://github.com/mattzh72/mini-articraft.git@<tag>"
+```
+
+Maintainers create releases with a manual workflow. Read the [release guide](docs/releasing.md).
+
 ## Docs
 
 - [**Mesh authoring SDK**](docs/sdk.md)
 - [**Agent design**](docs/agent.md)
+- [**Release guide**](docs/releasing.md)
 - [**Examples**](examples)
 - [**Repository guide**](AGENTS.md)
 

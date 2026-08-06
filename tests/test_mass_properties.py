@@ -110,6 +110,26 @@ def test_overlapping_shapes_do_not_double_count_mass() -> None:
     assert resolved.mass == pytest.approx(union_volume * 1000.0, rel=1e-3)
 
 
+def test_union_failure_does_not_silently_double_count_mass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _box((0.1, 0.1, 0.1))
+    second = _box((0.1, 0.1, 0.1))
+    second.apply_translation((0.05, 0.0, 0.0))
+
+    def fail_union(_meshes):
+        raise RuntimeError("boolean engine failed")
+
+    monkeypatch.setattr(trimesh.boolean, "union", fail_union)
+
+    with pytest.raises(ValidationError, match="could not be combined"):
+        resolve_mass(
+            MassProperties(density=1000.0),
+            [(first, None), (second, None)],
+            part_name="pair",
+        )
+
+
 def test_export_writes_mass_api_attributes(tmp_path) -> None:
     model = ArticulatedObject("massed")
     part = model.part("body")

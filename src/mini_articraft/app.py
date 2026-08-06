@@ -3,25 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
 import typer
 from pydantic import ValidationError
 
-from mini_articraft.agent import Agent, events
-from mini_articraft.agent.provider import create_model
-from mini_articraft.agent.provider.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
-from mini_articraft.agent.provider.anthropic import anthropic_api_key_value
-from mini_articraft.agent.provider.anthropic import (
-    context_window_tokens_for as anthropic_context_window_tokens_for,
-)
-from mini_articraft.agent.provider.gemini import (
-    context_window_tokens_for as gemini_context_window_tokens_for,
-)
+from mini_articraft import api
 from mini_articraft.agent.record import Record
-from mini_articraft.agent.workspace import LocalWorkspace
 from mini_articraft.compiler.worker import texture_run
 from mini_articraft.settings import DEFAULT_OUTPUT_DIR, Settings, get_settings
 from mini_articraft.tui import print_settings_error, replay_run, run_live
@@ -220,30 +209,6 @@ def texture(
         raise typer.Exit(1)
 
 
-async def _generate(
-    settings: Settings,
-    prompt: str,
-    *,
-    image_path: Path | None = None,
-    on_event: Callable[[events.Event], None] | None = None,
-) -> dict[str, Any]:
-    model_client = create_model(settings)
-    try:
-        env = LocalWorkspace(
-            output_dir=settings.output_dir,
-            timeout_seconds=settings.compile_timeout_seconds,
-            physics_enabled=settings.physics_enabled,
-        )
-        agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
-        if on_event is not None:
-            agent_kwargs["on_event"] = on_event
-        return await Agent(model_client, env, **agent_kwargs).run(prompt, image_path=image_path)
-    finally:
-        # Agent.run closes the model too; close() is idempotent, and this
-        # finally covers failures before the agent loop starts.
-        await model_client.close()
-
-
 def _run_generation(
     settings: Settings,
     prompt: str,
@@ -253,13 +218,13 @@ def _run_generation(
 ) -> dict[str, Any]:
     if use_tui:
         return _generate_with_tui(settings, prompt, image_path)
-    return asyncio.run(_generate(settings, prompt, image_path=image_path))
+    return asyncio.run(api._run_generation(settings, prompt, image_path=image_path))
 
 
 def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> dict[str, Any]:
     try:
         result = run_live(
-            lambda on_event: _generate(
+            lambda on_event: api._run_generation(
                 settings,
                 prompt,
                 image_path=image_path,
@@ -343,80 +308,30 @@ def _settings(
     compile_timeout: float | None,
     physics: bool = False,
 ) -> Settings:
-    updates = {
-        key: value
-        for key, value in (
-            ("provider", provider),
-            ("output_dir", output_dir),
-            ("openai_reasoning_effort", effort),
-            ("compile_timeout_seconds", compile_timeout),
-            # The flag only turns the lane on; leaving it off keeps whatever the
-            # environment or .env already said.
-            ("physics_enabled", True if physics else None),
-        )
-        if value is not None
-    }
     try:
         settings = get_settings()
     except ValidationError as exc:
         _report_settings_error(exc)
         raise typer.Exit(1) from None
-    settings = settings.model_copy(update=updates)
 
-    if model is not None:
-        model_key = {
-            "anthropic": "anthropic_model",
-            "gemini": "gemini_model",
-            "openai": "openai_model",
-            "openrouter": "openrouter_model",
-        }[settings.provider]
-        settings = settings.model_copy(update={model_key: model})
-
-    if (
-        settings.provider == "anthropic"
-        and anthropic_context_window_tokens_for(settings.anthropic_model) is None
-    ):
-        print_settings_error(
-            detail=(
-                "unsupported Anthropic model: "
-                f"{settings.anthropic_model}. Supported models: {', '.join(ANTHROPIC_MODELS)}"
-            )
+    try:
+        settings = api._resolved_settings(
+            settings,
+            provider=provider,
+            model=model,
+            output_dir=output_dir,
+            effort=effort,
+            compile_timeout=compile_timeout,
+            physics=physics,
         )
-        raise typer.Exit(1)
+    except ValueError as exc:
+        print_settings_error(detail=str(exc))
+        raise typer.Exit(1) from None
 
-    if (
-        settings.provider == "gemini"
-        and gemini_context_window_tokens_for(settings.gemini_model) is None
-    ):
-        print_settings_error(
-            detail=(
-                "unsupported Gemini model: "
-                f"{settings.gemini_model}. Supported models: gemini-3.1-pro-preview, "
-                "gemini-3.6-flash"
-            )
-        )
-        raise typer.Exit(1)
-
-    missing = _missing_provider_settings(settings)
-    if missing:
+    if missing := api._missing_provider_settings(settings):
         print_settings_error(missing=missing)
         raise typer.Exit(1)
     return settings
-
-
-def _missing_provider_settings(settings: Settings) -> list[str]:
-    if settings.provider == "openrouter":
-        missing = []
-        if not (settings.openrouter_api_key or "").strip():
-            missing.append("OPENROUTER_API_KEY")
-        if not settings.openrouter_model.strip():
-            missing.append("MINI_ARTICRAFT_OPENROUTER_MODEL or --model")
-        return missing
-    if settings.provider == "anthropic":
-        return [] if anthropic_api_key_value(settings) else ["ANTHROPIC_API_KEY"]
-    if settings.provider == "gemini":
-        return [] if (settings.gemini_api_key or "").strip() else ["GEMINI_API_KEY"]
-    return [] if settings.openai_api_key else ["OPENAI_API_KEY"]
 
 
 def _report_settings_error(exc: ValidationError) -> None:

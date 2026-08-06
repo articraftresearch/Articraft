@@ -1,0 +1,151 @@
+name: release preview
+run-name: release ${{ inputs.tag }} from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag matching the package version, for example v0.1.1a1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preview-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build and verify release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.17"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Validate preview tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(python -c '
+          import sys
+          sys.path.insert(0, "src")
+          import mini_articraft
+          print(mini_articraft.__version__)
+          ')
+          expected_tag="v${version}"
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "release tag $RELEASE_TAG must match package version $expected_tag" >&2
+            exit 1
+          fi
+          if [[ ! "$version" =~ (a|b|rc|dev)[0-9]+$ ]]; then
+            echo "preview version must end in a PEP 440 prerelease segment: $version" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "release tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Build wheel and sdist
+        run: uv build --no-sources --clear
+
+      - name: Check distribution metadata
+        run: uvx twine check dist/*
+
+      - name: Smoke-test installed wheel
+        run: |
+          uv venv /tmp/release-wheel
+          uv pip install --python /tmp/release-wheel/bin/python dist/*.whl
+          /tmp/release-wheel/bin/python -I -c '
+          from pathlib import Path
+          import mini_articraft
+          import runpy
+          import sys
+
+          assert "/tmp/release-wheel/" in str(mini_articraft.__file__)
+          import mini_articraft.sdk
+          assert "pxr" not in sys.modules
+
+          example = runpy.run_path("examples/hinged_box/main.py")
+          assert example["run_tests"]().passed
+
+          from mini_articraft.sdk.export import export_object
+          result = export_object(example["object_model"], Path("/tmp/release-output"))
+          assert result.manifest.is_file()
+          assert result.usdz.is_file()
+          '
+
+      - name: Smoke-test installed sdist
+        run: |
+          uv venv /tmp/release-sdist
+          uv pip install --no-deps --python /tmp/release-sdist/bin/python dist/*.tar.gz
+          /tmp/release-sdist/bin/python -I -c '
+          import mini_articraft
+          assert "/tmp/release-sdist/" in str(mini_articraft.__file__)
+          '
+
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum *.whl *.tar.gz > SHA256SUMS
+
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ inputs.tag }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: publish GitHub prerelease
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-${{ inputs.tag }}
+          path: dist
+
+      - name: Verify downloaded artifacts
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            dist/*.whl \
+            dist/*.tar.gz \
+            dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "mini-articraft $RELEASE_TAG (preview)" \
+            --generate-notes \
+            --prerelease \
+            --latest=false
