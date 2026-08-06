@@ -43,6 +43,7 @@ _MODELS = {
     "gpt-5.4": _ModelSpec(1_050_000, 2.5, 0.25, 15.0),
 }
 _MODEL_ALIASES = {"gpt-5.6": "gpt-5.6-sol"}
+SUPPORTED_MODELS = tuple(sorted(_MODELS))
 
 
 class OpenAIModel:

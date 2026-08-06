@@ -91,7 +91,7 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
             "generate",
             "make a hinge",
             "--model",
-            "gpt-test",
+            "gpt-5.4-mini",
             "--output-dir",
             str(output_dir),
             "--effort",
@@ -102,7 +102,7 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
     )
 
     assert result.exit_code == 0
-    assert FakeOpenAIModel.instances[0].settings.openai_model == "gpt-test"
+    assert FakeOpenAIModel.instances[0].settings.openai_model == "gpt-5.4-mini"
     assert FakeOpenAIModel.instances[0].settings.output_dir == output_dir
     assert FakeOpenAIModel.instances[0].settings.openai_reasoning_effort == "low"
     assert FakeOpenAIModel.instances[0].closed is True
@@ -490,6 +490,32 @@ def test_cli_rejects_unsupported_anthropic_model_without_model_call(
 
     assert result.exit_code == 1
     assert "unsupported Anthropic model" in result.output
+    assert FakeOpenAIModel.instances == []
+
+
+def test_cli_rejects_unsupported_openai_model_without_model_call(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    reset_fakes()
+    monkeypatch.chdir(tmp_path)
+    get_settings.cache_clear()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+
+    result = CliRunner().invoke(
+        app.cli,
+        [
+            "generate",
+            "make a hinge",
+            "--model",
+            "gpt-4.1",
+            "--no-tui",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "unsupported OpenAI model" in result.output
     assert FakeOpenAIModel.instances == []
 
 
