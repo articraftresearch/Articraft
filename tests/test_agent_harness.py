@@ -345,6 +345,7 @@ def test_agent_sends_and_saves_initial_reference_image(tmp_path) -> None:
         assert isinstance(content, list)
         assert content[0]["type"] == "input_text"
         assert "a box" in content[0]["text"]
+        assert "`reference.png`" in content[0]["text"]
         assert content[1]["type"] == "input_image"
         assert content[1]["detail"] == "original"
         assert content[1]["image_url"].startswith("data:image/png;base64,")
@@ -375,6 +376,7 @@ def test_agent_sends_and_saves_initial_reference_image(tmp_path) -> None:
     assert result["status"] == "success"
     saved_image = run_dir / "input" / "reference.png"
     assert saved_image.read_bytes() == image_path.read_bytes()
+    assert run_dir.joinpath("workspace", "reference.png").read_bytes() == saved_image.read_bytes()
     conversation_text = run_dir.joinpath("conversation.jsonl").read_text(encoding="utf-8")
     assert "base64" not in conversation_text
     image_event = next(

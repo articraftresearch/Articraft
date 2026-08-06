@@ -81,12 +81,15 @@ from mini_articraft.sdk.testing import (
     TestReport,
 )
 from mini_articraft.sdk.visual import (
+    ImagePoint,
     LineOverlay,
     MeridionalSectionView,
     ModelView,
     MotionStripView,
     PointOverlay,
+    Reticle,
     SectionView,
+    annotate_image,
     render_view,
 )
 
@@ -107,6 +110,7 @@ __all__ = [
     "ExtrudeWithHolesGeometry",
     "FailureKind",
     "GeometryMetrics",
+    "ImagePoint",
     "LatheGeometry",
     "LineOverlay",
     "LoftGeometry",
@@ -125,6 +129,7 @@ __all__ = [
     "PipeGeometry",
     "PointOverlay",
     "PoseSample",
+    "Reticle",
     "RoundedBoxGeometry",
     "SDKError",
     "SectionView",
@@ -140,5 +145,6 @@ __all__ = [
     "ValidationError",
     "WirePolylineGeometry",
     "analyze_mesh_health",
+    "annotate_image",
     "render_view",
 ]

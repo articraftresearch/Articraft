@@ -141,6 +141,14 @@ class Agent:
         recorded_task = task_message
         if image is not None:
             saved_path = _save_input_image(run_dir, image)
+            reference_path = _save_workspace_reference(context.workspace, image)
+            task += (
+                "\n\n<reference_image>\n"
+                f"The prepared reference image is available at `{reference_path}` in the run "
+                "workspace. Use normalized image coordinates with u right and v down when "
+                "recording visual landmarks.\n"
+                "</reference_image>"
+            )
             task_message = {
                 "role": "user",
                 "content": [
@@ -653,6 +661,12 @@ def _save_input_image(run_dir: Path, image: PreparedImage) -> str:
     path = run_dir / relative
     path.parent.mkdir()
     path.write_bytes(image.data)
+    return relative.as_posix()
+
+
+def _save_workspace_reference(workspace: Path, image: PreparedImage) -> str:
+    relative = Path("reference").with_suffix(image.suffix)
+    workspace.joinpath(relative).write_bytes(image.data)
     return relative.as_posix()
 
 

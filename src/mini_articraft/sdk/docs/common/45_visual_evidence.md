@@ -8,16 +8,43 @@ Import these public names from `mini_articraft.sdk`.
 
 ```python
 from mini_articraft.sdk import (
+    ImagePoint,
     LineOverlay,
     MeridionalSectionView,
     ModelView,
     MotionStripView,
     PointOverlay,
+    Reticle,
     SectionView,
     TestArtifact,
+    annotate_image,
     render_view,
 )
 ```
+
+## Reference reticles
+
+`ImagePoint` stores one normalized coordinate and `Reticle` gives it a label and
+display color. `annotate_image` draws those reticles on a reference image.
+
+Image-driven runs place the prepared input at `reference.png`, `reference.jpg`, or
+`reference.webp` in the workspace. Use normalized coordinates (`u` right, `v`
+down) to mark evidence without depending on the image resolution.
+
+```python
+annotate_image(
+    "reference.png",
+    (
+        Reticle(ImagePoint(0.18, 0.52), "handle root"),
+        Reticle(ImagePoint(0.82, 0.34), "tip"),
+    ),
+    "qa/previews/reference-markers.png",
+)
+```
+
+Open the annotated output with `view_image` to confirm each reticle is on the
+intended feature. Reticles record visible evidence; they do not infer depth from
+a single image.
 
 ## Preview before compile
 

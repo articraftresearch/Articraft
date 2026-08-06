@@ -13,6 +13,7 @@ from mini_articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,
+    ImagePoint,
     LatheGeometry,
     LineOverlay,
     MeridionalSectionView,
@@ -21,9 +22,11 @@ from mini_articraft.sdk import (
     MotionStripView,
     Origin,
     PointOverlay,
+    Reticle,
     SectionView,
     TestContext,
     ValidationError,
+    annotate_image,
     render_view,
 )
 from mini_articraft.sdk.export import export_object
@@ -201,3 +204,22 @@ def test_model_section_meridional_and_motion_views_render(monkeypatch, tmp_path:
     artifact = ctx.attach_artifact("motion.png", name="slider motion")
     assert artifact.path == "motion.png"
     assert Path(artifact.path).is_file()
+
+
+def test_reference_reticles_use_normalized_coordinates(tmp_path: Path) -> None:
+    source = tmp_path / "reference.webp"
+    Image.new("RGB", (200, 100), (240, 240, 240)).save(source)
+
+    output = annotate_image(
+        source,
+        (Reticle(ImagePoint(0.25, 0.75), "joint"),),
+        tmp_path / "marked.png",
+    )
+
+    image = np.asarray(Image.open(output))
+    assert output == tmp_path / "marked.png"
+    assert np.any(np.all(image[70:81, 45:56] == np.asarray((235, 55, 170)), axis=2))
+    with pytest.raises(ValidationError, match="between 0 and 1"):
+        ImagePoint(1.1, 0.5)
+    with pytest.raises(ValidationError, match=r"\.png"):
+        annotate_image(source, (), tmp_path / "marked.jpg")
