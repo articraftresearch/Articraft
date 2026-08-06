@@ -97,7 +97,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Build sdist and wheel
-        run: uv build
+        run: uv build --no-sources
 
       - name: Check distributions
         run: uvx twine check dist/*
@@ -106,6 +106,10 @@ jobs:
         run: |
           uv venv /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/mini-articraft --help >/dev/null
+          code=0
+          /tmp/smoke/bin/python -m mini_articraft.compiler.worker >/dev/null 2>&1 || code=$?
+          test "$code" -eq 2
           /tmp/smoke/bin/python -c "
           import mini_articraft
           from mini_articraft import package_dir

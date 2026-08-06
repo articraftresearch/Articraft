@@ -186,10 +186,28 @@ uv run pytest -q
 uv run ruff check .
 ```
 
+## Preview releases
+
+Preview releases attach the exact wheel and sdist that the release workflow verified. Install a
+wheel from the [releases page](https://github.com/mattzh72/mini-articraft/releases):
+
+```shell
+uv pip install https://github.com/mattzh72/mini-articraft/releases/download/<tag>/<wheel-file>
+```
+
+To record a preview as a project dependency instead, pin its release tag:
+
+```shell
+uv add "mini-articraft @ git+https://github.com/mattzh72/mini-articraft.git@<tag>"
+```
+
+Maintainers create releases with a manual workflow. Read the [release guide](docs/releasing.md).
+
 ## Docs
 
 - [**Mesh authoring SDK**](docs/sdk.md)
 - [**Agent design**](docs/agent.md)
+- [**Release guide**](docs/releasing.md)
 - [**Examples**](examples)
 - [**Repository guide**](AGENTS.md)
 
