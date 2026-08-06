@@ -205,6 +205,46 @@ def test_releasing_a_joint_produces_motion_worth_watching(tmp_path: Path) -> Non
     assert result.peak_joint_speed is not None and result.peak_joint_speed > 1.0
 
 
+def _negative_axis_hinge(rpy: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> ArticulatedObject:
+    """The crate, hinged on -X instead of +X, optionally with a rotated origin."""
+    model = _hinged_box()
+    joint = model.articulations[-1]
+    joint.axis = (-1.0, 0.0, 0.0)
+    joint.origin = Origin(xyz=joint.origin.xyz, rpy=rpy)
+    return model
+
+
+def test_a_negative_hinge_axis_survives_the_round_trip(tmp_path: Path) -> None:
+    """UsdPhysics names a cardinal axis and rotates the joint frame to aim it.
+
+    A -X hinge is written as "X" plus a half turn about Z, so reading the axis
+    token alone flips it. A flipped hinge does not fail loudly -- gravity simply
+    drives the joint the wrong way, and a lid that should hang shut swings open.
+    """
+    write_mjcf(_export(_negative_axis_hinge(), tmp_path), tmp_path / "sim")
+    joint = ET.parse(tmp_path / "sim" / "model.xml").getroot().find(".//joint")
+
+    assert joint is not None
+    axis = tuple(round(float(value), 6) for value in str(joint.get("axis")).split())
+    assert axis == (-1.0, 0.0, 0.0)
+
+
+def test_a_rotated_joint_origin_does_not_disturb_the_axis(tmp_path: Path) -> None:
+    """The axis rotation is localRot1; localRot0 also carries the origin's rpy.
+
+    Both frames agree when the origin is unrotated, so reading localRot0 passes
+    the simple case and then quietly bends the axis for any joint whose origin
+    is turned -- a -X hinge with a 90 degree yaw comes out as -Y.
+    """
+    model = _negative_axis_hinge(rpy=(0.0, 0.0, math.pi / 2))
+    write_mjcf(_export(model, tmp_path), tmp_path / "sim")
+    joint = ET.parse(tmp_path / "sim" / "model.xml").getroot().find(".//joint")
+
+    assert joint is not None
+    axis = tuple(round(float(value), 6) for value in str(joint.get("axis")).split())
+    assert axis == (-1.0, 0.0, 0.0)
+
+
 def test_prismatic_travel_is_not_reported_as_part_separation(tmp_path: Path) -> None:
     model = ArticulatedObject("lift")
     base = model.part("base")

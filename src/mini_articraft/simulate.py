@@ -473,12 +473,48 @@ def _read_scene(stage: Usd.Stage) -> _Scene:
                 parent=bodies[0][0].name,
                 child=bodies[1][0].name,
                 anchor=_triple(_attr(prim, "physics:localPos1", (0.0, 0.0, 0.0))),
-                axis=_AXES.get(str(_attr(prim, "physics:axis", "Z")), (0.0, 0.0, 1.0)),
+                axis=_joint_axis(prim),
                 lower=_number(_attr(prim, "physics:lowerLimit")),
                 upper=_number(_attr(prim, "physics:upperLimit")),
             )
         )
     return scene
+
+
+def _joint_axis(prim: Usd.Prim) -> tuple[float, float, float]:
+    """The joint's axis in the child body's frame, which is what MJCF wants.
+
+    UsdPhysics names one of three cardinal axes and then rotates the joint
+    frame to point it wherever it belongs, so the token alone is only half the
+    answer -- a hinge on -X is written as "X" plus a half turn. Reading the
+    token by itself silently flips every joint whose axis is not a positive
+    cardinal direction.
+
+    The rotation to apply is localRot1, not localRot0. MJCF writes the axis
+    inside the child body, and only localRot1 is the bare axis rotation;
+    localRot0 also folds in the joint origin's rpy, which is a different
+    quantity and produces a wrong axis for any joint with a rotated origin.
+    """
+
+    axis = np.array(_AXES.get(str(_attr(prim, "physics:axis", "Z")), (0.0, 0.0, 1.0)))
+    rotation = _attr(prim, "physics:localRot1")
+    if rotation is not None:
+        axis = _quat_matrix(rotation) @ axis
+    return (float(round(axis[0], 12)), float(round(axis[1], 12)), float(round(axis[2], 12)))
+
+
+def _quat_matrix(rotation: Any) -> np.ndarray:
+    """Rotation matrix for a USD quaternion (real part plus imaginary vector)."""
+
+    w = float(rotation.GetReal())
+    x, y, z = (float(v) for v in rotation.GetImaginary())
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ]
+    )
 
 
 def _add_body(
