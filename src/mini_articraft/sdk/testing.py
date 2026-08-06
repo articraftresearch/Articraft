@@ -22,10 +22,12 @@ from mini_articraft.sdk._collision import (
     Vec3,
     _pair_key,
 )
-from mini_articraft.sdk._mesh_core import geometry_to_trimesh
-from mini_articraft.sdk._mesh_health import MeshHealthIssue, analyze_mesh_health
+from mini_articraft.sdk._mesh.core import geometry_to_trimesh
+from mini_articraft.sdk._mesh.health import MeshHealthIssue, analyze_mesh_health
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType
+from mini_articraft.sdk.mass import resolve_mass
+from mini_articraft.sdk.materials import LIBRARY
 from mini_articraft.sdk.object import ArticulatedObject, Part, PartRef
 
 DEFAULT_MESH_TOLERANCE = 0.001
@@ -51,6 +53,7 @@ class FailureKind(StrEnum):
     OVERLAP = "overlap"
     CONTACT = "contact"
     ARTICULATION_SEPARATION = "articulation_separation"
+    MISSING_MASS = "missing_mass"
     AUTHORED = "authored"
 
 
@@ -1018,6 +1021,39 @@ class TestContext:
             "" if not findings else "Unhealthy mesh geometry detected:\n" + "\n".join(findings),
             kind=FailureKind.MESH_HEALTH,
         )
+
+    def fail_if_parts_have_no_mass(self) -> bool:
+        """Every part must be weighable when physics is enabled.
+
+        A part is weighable when its shapes say what they are made of, or when the
+        part carries an explicit mass or density. Anything else would export a
+        silently invented weight.
+        """
+
+        unresolved: list[str] = []
+        for part in self.model.parts:
+            try:
+                resolve_mass(
+                    part.mass_properties,
+                    [
+                        (geometry_to_trimesh(shape.geometry, self.mesh_tolerance), shape.material)
+                        for shape in part._iter_shapes()
+                    ],
+                    part_name=part.name,
+                )
+            except Exception as exc:
+                unresolved.append(str(exc))
+        if unresolved:
+            materials = ", ".join(f"{item.name} ({item.density:g})" for item in LIBRARY)
+            return self._record(
+                "fail_if_parts_have_no_mass",
+                False,
+                "Physics is enabled, so every part must be weighable.\n"
+                + "\n".join(unresolved)
+                + f".\nMaterials and their densities in kg/m^3: {materials}.",
+                kind=FailureKind.MISSING_MASS,
+            )
+        return self._record("fail_if_parts_have_no_mass", True)
 
     def fail_if_isolated_parts(
         self,

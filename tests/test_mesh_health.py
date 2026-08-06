@@ -8,6 +8,7 @@ from mini_articraft.sdk import (
     MeshHealthIssue,
     analyze_mesh_health,
 )
+from mini_articraft.sdk.mesh import boolean_difference
 
 
 def test_analyze_mesh_health_accepts_a_clean_solid() -> None:
@@ -91,6 +92,37 @@ def test_analyze_mesh_health_counts_disconnected_components_without_trimesh_spli
         if finding.issue is MeshHealthIssue.MULTIPLE_COMPONENTS
     )
     assert finding.count == 2
+    assert finding.bounds is not None
+
+
+def test_analyze_mesh_health_accepts_a_closed_inner_cavity() -> None:
+    shell = boolean_difference(
+        BoxGeometry((1.0, 1.0, 1.0)),
+        BoxGeometry((0.8, 0.8, 0.8)),
+    )
+
+    report = analyze_mesh_health(shell)
+
+    assert report.healthy
+    assert report.component_count == 2
+    assert report.signed_volume > 0.0
+
+
+def test_analyze_mesh_health_rejects_a_detached_inward_solid() -> None:
+    outer = BoxGeometry((1.0, 1.0, 1.0))
+    detached = BoxGeometry((0.2, 0.2, 0.2)).translate(2.0, 0.0, 0.0)
+    detached.faces = [(first, third, second) for first, second, third in detached.faces]
+    outer.merge(detached)
+
+    report = analyze_mesh_health(outer)
+
+    assert not report.healthy
+    finding = next(
+        finding
+        for finding in report.findings
+        if finding.issue is MeshHealthIssue.INWARD_ORIENTATION
+    )
+    assert finding.count == 1
     assert finding.bounds is not None
 
 

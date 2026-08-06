@@ -66,7 +66,11 @@ Not every public helper failure is an `SDKError`.
 - Mesh builders and transforms often raise `ValueError` for an impossible
   dimension, a zero rotation axis, or an invalid profile.
 - Manifold boolean helpers raise `ValueError` unless each input is a nonempty
-  closed manifold solid. A valid operation can still return an empty mesh.
+  closed manifold solid and the result has healthy topology. Empty results,
+  bad triangles, and unintended separate solid fragments are errors.
+- Field based welds and smooth cuts raise `ValueError` when their result has
+  unhealthy mesh geometry. The message includes issue counts and affected
+  bounds.
 - Allowance helpers raise `ValueError` when their required reason is empty.
 
 Catch the narrow error that the operation documents. Do not catch an error only

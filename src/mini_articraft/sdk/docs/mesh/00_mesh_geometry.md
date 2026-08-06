@@ -37,13 +37,19 @@ from mini_articraft.sdk.mesh import build123d_to_mesh
 ## Choose a geometry type
 
 Use build123d for exact solid modeling, cuts, fillets, and topology based work.
-Add the resulting build123d shape directly to a part when no mesh operation is
-needed.
+It is the default when a shape depends on constant wall thickness, a clean
+opening or bore, a rim, a mating face, or a local edge treatment. Add the
+resulting build123d shape directly to a part when no mesh operation is needed.
 
 Use `MeshGeometry` when you need direct vertex editing, a procedural mesh
-builder, a mesh boolean, or a mesh repair helper. Use
+builder, a mesh boolean, or a freeform surface described by sections and paths.
+Keep matching shell boundaries derived from the same sections and frames. Use
 `build123d_to_mesh(...)` only when a build123d shape must enter one of those
 mesh workflows.
+
+Use `analyze_mesh_health(...)` on custom or imported mesh work. Watertightness
+alone does not find bad triangles, duplicate data, disconnected solid debris,
+or winding errors. The compile worker repeats this check for every named shape.
 
 ## MeshGeometry
 

@@ -11,16 +11,17 @@ from __future__ import annotations
 import shutil
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 from harness import WarmEnvironment
+
+from mini_articraft.compiler.result import CompilePayload
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 EXAMPLES = ("hinged_box", "mesh_knob")
 
 
-def compile_example(env: WarmEnvironment, name: str) -> tuple[dict[str, Any], float]:
+def compile_example(env: WarmEnvironment, name: str) -> tuple[CompilePayload, float]:
     run_dir = env.create_run(name)
     shutil.copy(EXAMPLES_DIR / name / "main.py", run_dir / "workspace" / "main.py")
     started = time.perf_counter()

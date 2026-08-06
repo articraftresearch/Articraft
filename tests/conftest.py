@@ -9,7 +9,8 @@ from typing import Protocol
 import pytest
 from harness import TAPE_ROOT, ReplayHarness
 
-from mini_articraft import Model
+from mini_articraft.agent import Model
+from mini_articraft.settings import Settings, get_settings
 
 
 @pytest.fixture(scope="session")
@@ -41,6 +42,16 @@ def _event_loop():
 def _use_session_loop(_event_loop):
     asyncio.set_event_loop(_event_loop)
     return _event_loop
+
+
+@pytest.fixture(autouse=True)
+def _ignore_local_dotenv(monkeypatch: pytest.MonkeyPatch):
+    """Keep developer settings out of tests unless a test opts in."""
+
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -128,7 +139,7 @@ def tape_model(request: pytest.FixtureRequest) -> TapeModelOpener:
 
 def _live_model() -> Model:
     try:
-        from mini_articraft.models.openai import OpenAIModel
+        from mini_articraft.agent.provider.openai import OpenAIModel
 
         return OpenAIModel()
     except Exception as exc:

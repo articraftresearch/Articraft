@@ -10,14 +10,14 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import mini_articraft.environments.local as local_module
-from mini_articraft.environments.local import (
+import mini_articraft.agent.workspace.local as local_module
+from mini_articraft.agent.record import Record, read_conversation
+from mini_articraft.agent.workspace.local import (
     DEFAULT_MAIN_PY,
-    LocalEnvironment,
+    LocalWorkspace,
     _run_isolated_process,
 )
-from mini_articraft.environments.worker import _merge_test_reports, _serialize_test_report
-from mini_articraft.record import Record, read_conversation
+from mini_articraft.compiler.worker import _merge_test_reports, _serialize_test_report
 from mini_articraft.sdk import TestFailure, TestReport
 
 
@@ -49,7 +49,7 @@ def _process_exists(pid: int) -> bool:
 
 
 def test_create_run_seeds_an_editable_scaffold_and_docs(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("seeded")
 
     assert run_dir.joinpath("workspace", "main.py").read_text() == DEFAULT_MAIN_PY
@@ -58,7 +58,7 @@ def test_create_run_seeds_an_editable_scaffold_and_docs(tmp_path) -> None:
 
 
 def test_compile_path_exports_usdz_but_only_updates_attempt_data(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("box")
 
     result = env.compile_path(run_dir)
@@ -74,6 +74,7 @@ def test_compile_path_exports_usdz_but_only_updates_attempt_data(tmp_path) -> No
         "shapes": 1,
         "articulations": 0,
     }
+    assert not {"run", "run_id", "workspace", "entrypoint", "result"} & result.keys()
     assert "loading main.py and building the model" in result["compile_stats"]["phases"]
     assert not run_dir.joinpath("result", ".compile-progress.json").exists()
     manifest = json.loads(run_dir.joinpath("result", "model.json").read_text())
@@ -92,7 +93,7 @@ def test_compile_path_exports_usdz_but_only_updates_attempt_data(tmp_path) -> No
 
 
 def test_failed_checks_save_a_usdz_without_publishing_it(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("failure")
     write_main(
         run_dir,
@@ -128,7 +129,7 @@ def run_tests() -> TestReport:
 
 
 def test_a_fatal_attempt_does_not_consume_the_next_usdz_number(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("versions")
     first = env.compile_path(run_dir)
     write_main(run_dir, "raise RuntimeError('bad edit')\n")
@@ -143,7 +144,7 @@ def test_a_fatal_attempt_does_not_consume_the_next_usdz_number(tmp_path) -> None
 
 
 def test_compile_path_supports_workspace_modules(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("modules")
     parts = run_dir / "workspace" / "parts"
     parts.mkdir()
@@ -178,7 +179,7 @@ def test_compile_worker_runs_from_run_dir_without_api_credentials(monkeypatch, t
     monkeypatch.setenv("OPENAI_API_KEY", "openai-secret")
     monkeypatch.setenv("EXAMPLE_API_KEY", "example-secret")
     monkeypatch.setenv("VISIBLE_SETTING", "visible")
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("worker-boundary")
     write_main(
         run_dir,
@@ -217,11 +218,11 @@ def run_tests() -> TestReport:
 
 
 def test_local_environment_starts_worker_from_run_dir(monkeypatch, tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("worker-cwd")
     captured: dict[str, Path] = {}
 
-    def run_worker(args, *, cwd, timeout_seconds):
+    def run_worker(args, *, cwd, timeout_seconds, physics_enabled=None):
         captured["cwd"] = cwd
         return local_module._ProcessResult(
             stdout=json.dumps({"status": "success"}),
@@ -236,7 +237,7 @@ def test_local_environment_starts_worker_from_run_dir(monkeypatch, tmp_path) -> 
 
 
 def test_create_run_requires_a_new_simple_run_id(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     env.create_run("one")
     with pytest.raises(FileExistsError):
         env.create_run("one")
@@ -245,7 +246,7 @@ def test_create_run_requires_a_new_simple_run_id(tmp_path) -> None:
 
 
 def test_compile_path_reports_missing_required_entrypoint_values(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
 
     missing_main = env.create_run("missing_main")
     missing_main.joinpath("workspace", "main.py").unlink()
@@ -283,7 +284,7 @@ def run_tests():
 
 
 def test_baseline_overlap_is_a_nonblocking_compiler_diagnostic(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("overlap")
     write_main(
         run_dir,
@@ -311,7 +312,7 @@ def run_tests() -> TestReport:
 
 
 def test_compile_reports_custom_visual_artifacts_without_copying_files(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("custom-evidence")
     write_main(
         run_dir,
@@ -354,7 +355,7 @@ def run_tests() -> TestReport:
 
 
 def test_disconnected_geometry_is_a_compiler_warning(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("disconnected")
     write_main(
         run_dir,
@@ -379,7 +380,7 @@ def run_tests() -> TestReport:
 
 
 def test_compile_honors_an_exact_shape_overlap_allowance(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     run_dir = env.create_run("allowance")
     write_main(
         run_dir,
@@ -408,7 +409,7 @@ def run_tests() -> TestReport:
 
 
 def test_compile_blocks_unhealthy_mesh_and_honors_exact_issue_allowance(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     blocked_run = env.create_run("unhealthy-mesh")
     source = """from mini_articraft.sdk import (
     ArticulatedObject,
@@ -462,7 +463,7 @@ def run_tests() -> TestReport:
 
 
 def test_compile_path_reports_timeout(tmp_path) -> None:
-    env = LocalEnvironment(output_dir=tmp_path, timeout_seconds=0.2)
+    env = LocalWorkspace(output_dir=tmp_path, timeout_seconds=0.2)
     run_dir = env.create_run("slow")
     write_main(run_dir, "import time\ntime.sleep(60)\n")
 

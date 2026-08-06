@@ -6,8 +6,9 @@ from typing import Any, cast
 
 import pytest
 
+from mini_articraft.agent import ContextSummarizer
+from mini_articraft.agent.provider.openai import OpenAIModel, context_window_tokens_for
 from mini_articraft.errors import ModelError
-from mini_articraft.models.openai import OpenAIModel, context_window_tokens_for
 from mini_articraft.settings import DEFAULT_MAX_TURNS, Settings, get_settings
 
 
@@ -77,7 +78,7 @@ def patch_websocket(monkeypatch: pytest.MonkeyPatch, socket: FakeWebSocket) -> N
         assert max_size is None
         return socket
 
-    monkeypatch.setattr("mini_articraft.models.openai.websockets.connect", connect)
+    monkeypatch.setattr("mini_articraft.agent.provider.openai.websockets.connect", connect)
 
 
 def openai_model(**kwargs: Any) -> OpenAIModel:
@@ -236,9 +237,11 @@ def test_openai_model_returns_estimated_cost_for_gpt_5_6_sol(
 
 
 def test_openai_model_exposes_context_window() -> None:
-    assert openai_model().config.openai_model == "gpt-5.5-2026-04-23"
+    model = openai_model()
+    assert model.config.openai_model == "gpt-5.5-2026-04-23"
+    assert isinstance(model, ContextSummarizer)
     assert DEFAULT_MAX_TURNS == 100
-    assert openai_model().context_window_tokens == 272_000
+    assert model.context_window_tokens == 272_000
     assert context_window_tokens_for("gpt-5.6-sol") == 272_000
     assert context_window_tokens_for("gpt-5.6") == 272_000
     assert context_window_tokens_for("gpt-5.6-terra") is None
@@ -246,6 +249,93 @@ def test_openai_model_exposes_context_window() -> None:
     assert context_window_tokens_for("gpt-5.5-pro") == 272_000
     assert context_window_tokens_for("gpt-5.4-mini-2026-03-17") == 400_000
     assert context_window_tokens_for("gpt-test") is None
+
+
+def test_openai_summary_resets_incremental_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FakeWebSocket(
+        [
+            response_event("first", response_id="resp_1"),
+            response_event(
+                "checkpoint",
+                response_id="resp_summary",
+                usage={"input_tokens": 100, "output_tokens": 20},
+            ),
+            response_event("done", response_id="resp_2"),
+        ]
+    )
+    patch_websocket(monkeypatch, socket)
+    model = openai_model()
+
+    run(model.query([{"role": "user", "content": "build"}]))
+    summary = run(
+        model.summarize_context(
+            [
+                {"role": "system", "content": "summarize the work"},
+                {"role": "user", "content": "old work"},
+            ],
+            max_output_tokens=8_192,
+        )
+    )
+    run(
+        model.query(
+            [
+                {"role": "system", "content": "agent instructions"},
+                {"role": "user", "content": "checkpoint"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "compile",
+                            "arguments": "{}",
+                        }
+                    ],
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": '{"status": "success"}',
+                },
+                {"role": "user", "content": "continue"},
+            ]
+        )
+    )
+
+    assert summary == {
+        "text": "checkpoint",
+        "token_usage": {
+            "input_tokens": 100,
+            "cached_input_tokens": 0,
+            "cache_write_tokens": 0,
+            "output_tokens": 20,
+            "total_tokens": 120,
+        },
+        "cost": 0.0011,
+    }
+    assert socket.sent[1]["input"] == [{"role": "user", "content": "old work"}]
+    assert socket.sent[1]["instructions"] == "summarize the work"
+    assert socket.sent[1]["max_output_tokens"] == 8_192
+    assert "previous_response_id" not in socket.sent[1]
+    assert socket.sent[2]["input"] == [
+        {"role": "user", "content": "checkpoint"},
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "compile",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": '{"status": "success"}',
+        },
+        {"role": "user", "content": "continue"},
+    ]
+    assert socket.sent[2]["instructions"] == "agent instructions"
+    assert "previous_response_id" not in socket.sent[2]
 
 
 def test_openai_model_sends_function_call_outputs_with_previous_response(
@@ -402,6 +492,7 @@ def test_openai_model_round_trips_response_items(
 
 def test_openai_model_loads_dotenv(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     get_settings.cache_clear()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("MINI_ARTICRAFT_OUTPUT_DIR", raising=False)
@@ -507,9 +598,9 @@ def test_openai_model_retries_transient_errors_on_a_new_socket(
     async def sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("mini_articraft.models.openai.websockets.connect", connect)
-    monkeypatch.setattr("mini_articraft.models.openai.asyncio.sleep", sleep)
-    monkeypatch.setattr("mini_articraft.models.openai.random.random", lambda: 0.5)
+    monkeypatch.setattr("mini_articraft.agent.provider.openai.websockets.connect", connect)
+    monkeypatch.setattr("mini_articraft.agent.provider.openai.asyncio.sleep", sleep)
+    monkeypatch.setattr("mini_articraft.agent.provider.openai.random.random", lambda: 0.5)
 
     result = run(openai_model().query([{"role": "user", "content": "hello"}]))
 
@@ -559,7 +650,7 @@ def test_openai_model_resends_full_context_when_previous_response_is_lost(
     async def connect(*args: Any, **kwargs: Any) -> FakeWebSocket:
         return next(sockets)
 
-    monkeypatch.setattr("mini_articraft.models.openai.websockets.connect", connect)
+    monkeypatch.setattr("mini_articraft.agent.provider.openai.websockets.connect", connect)
     model = openai_model()
     messages = [{"role": "user", "content": "first question"}]
 

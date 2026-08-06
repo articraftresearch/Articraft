@@ -28,10 +28,25 @@ from mini_articraft.agent.harness import (
     _read_sdk_quickstart,
     _run_id_for_prompt,
 )
+from mini_articraft.agent.record import Record, read_conversation
 from mini_articraft.agent.tools import Tool, ToolContext, ToolResult
 from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.environments.local import DEFAULT_MAIN_PY, LocalEnvironment
-from mini_articraft.record import Record, read_conversation
+from mini_articraft.agent.workspace.local import DEFAULT_MAIN_PY, LocalWorkspace
+
+
+class CompactingScriptedModel(ScriptedModel):
+    def __init__(self, responses, summary_response):
+        super().__init__(
+            responses,
+            model_name="claude-test",
+            context_window_tokens=272_000,
+        )
+        self.summary_response = summary_response
+        self.summary_max_output_tokens = 0
+
+    async def summarize_context(self, messages, *, max_output_tokens):
+        self.summary_max_output_tokens = max_output_tokens
+        return self.summary_response
 
 
 def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
@@ -85,7 +100,7 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
             },
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=3)
 
     result = run(agent.run("a box", run_id="box"))
@@ -134,6 +149,115 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
         "write_stdin",
         "compile",
     }
+
+
+def test_agent_removes_image_tools_and_prompting_for_text_only_model(tmp_path) -> None:
+    def inspect_text_only_query(query: ModelQuery) -> Response:
+        prompt = "\n".join(str(message.get("content") or "") for message in query.messages)
+        assert "view_image" not in prompt
+        assert "previews.py" not in prompt
+        assert "render_view" not in prompt
+        assert "45_visual_evidence" not in prompt
+        assert "view_image" not in {tool["name"] for tool in query.tools}
+        return calls(
+            tool_call(
+                "write",
+                {"path": "main.py", "content": GOOD_MAIN_PY},
+                call_id="call_write",
+            )
+        )
+
+    model = ScriptedModel(
+        [
+            inspect_text_only_query,
+            calls(tool_call("compile", {}, call_id="call_compile")),
+            text("done"),
+        ]
+    )
+    model.supports_images = False
+
+    result = run(
+        Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run(
+            "a box",
+            run_id="box",
+        )
+    )
+
+    assert result["status"] == "success"
+
+
+def test_agent_rejects_reference_image_for_text_only_model(tmp_path) -> None:
+    image_path = tmp_path / "reference.png"
+    Image.new("RGB", (12, 8), color="white").save(image_path)
+    model = ScriptedModel([])
+    model.supports_images = False
+
+    with pytest.raises(ValueError, match="does not support reference images"):
+        run(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
+                "a box",
+                image_path=image_path,
+            )
+        )
+
+
+def test_agent_compacts_context_before_next_query_and_records_cost(tmp_path) -> None:
+    seen_events = []
+    old_text = "old work " * 10_000
+    recent_text = "recent work " * 8_000
+
+    def inspect_compacted_query(query: ModelQuery) -> Response:
+        assert query.messages[3]["compaction"]["summary"] == "CAD checkpoint"
+        assert query.messages[4]["content"] == recent_text
+        return text("done", cost=0.5, token_usage={"total_tokens": 500})
+
+    model = CompactingScriptedModel(
+        [
+            calls(
+                tool_call(
+                    "write",
+                    {"path": "main.py", "content": GOOD_MAIN_PY},
+                    call_id="call_write",
+                ),
+                text=old_text,
+                cost=0.1,
+                token_usage={"total_tokens": 100_000},
+            ),
+            calls(
+                tool_call("compile", {}, call_id="call_compile"),
+                text=recent_text,
+                cost=0.2,
+                token_usage={"total_tokens": 260_000},
+            ),
+            inspect_compacted_query,
+        ],
+        {
+            "text": "CAD checkpoint",
+            "cost": 0.25,
+            "token_usage": {"total_tokens": 100},
+        },
+    )
+    agent = Agent(
+        model,
+        LocalWorkspace(output_dir=tmp_path),
+        max_turns=3,
+        on_event=seen_events.append,
+    )
+
+    result = run(agent.run("a box", run_id="box"))
+
+    assert result["status"] == "success"
+    assert result["cost"] == 1.05
+    assert result["token_usage"]["total_tokens"] == 360_600
+    assert model.summary_max_output_tokens == 8_192
+
+    conversation = read_conversation(tmp_path / "box" / "conversation.jsonl")
+    compaction = next(row for row in conversation if row.get("type") == "compaction")
+    assert compaction["summary"] == "CAD checkpoint"
+    assert any(
+        row.get("role") == "assistant" and row.get("content") == old_text for row in conversation
+    )
+    assert any(isinstance(event, events.ContextCompacted) for event in seen_events)
 
 
 def test_agent_sends_typed_image_content_but_records_only_metadata(
@@ -198,7 +322,7 @@ def test_agent_sends_typed_image_content_but_records_only_metadata(
             text("done"),
         ]
     )
-    agent = Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=4)
+    agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=4)
 
     result = run(agent.run("a box", run_id="box"))
 
@@ -242,7 +366,7 @@ def test_agent_sends_and_saves_initial_reference_image(tmp_path) -> None:
     )
     run_dir = tmp_path / "box"
     result = run(
-        Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run(
+        Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run(
             "a box",
             run_id="box",
             image_path=image_path,
@@ -281,7 +405,7 @@ def test_agent_requires_compile_before_final_response(tmp_path) -> None:
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=4)
 
     result = run(agent.run("a box", run_id="box"))
@@ -327,7 +451,7 @@ def test_agent_keeps_compile_fresh_after_read(
             text("done after read"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=4)
 
     result = run(agent.run("a box", run_id="box"))
@@ -370,7 +494,7 @@ def test_agent_keeps_compile_fresh_after_inspection_and_noop_edits(
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=6).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=6).run("box"))
 
     assert result["status"] == "success"
     assert result["message"] == "done"
@@ -394,7 +518,7 @@ def test_agent_requires_new_compile_after_real_file_change(monkeypatch, tmp_path
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=6).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=6).run("box"))
 
     assert result["status"] == "success"
     assert result["message"] == "done"
@@ -448,7 +572,7 @@ def test_running_exec_session_blocks_compile_and_finalization(monkeypatch, tmp_p
     result = run(
         Agent(
             model,
-            LocalEnvironment(output_dir=tmp_path),
+            LocalWorkspace(output_dir=tmp_path),
             max_turns=6,
         ).run("box", run_id="box")
     )
@@ -478,7 +602,7 @@ def test_agent_requires_visible_final_after_fresh_compile(monkeypatch, tmp_path)
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=4).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=4).run("box"))
 
     assert result["message"] == "done"
     assert model.queries[3].contains("<final_response_required>")
@@ -504,7 +628,7 @@ def test_agent_does_not_finalize_success_without_a_usdz_result(monkeypatch, tmp_
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=2).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=2).run("box"))
 
     assert result["status"] == "error"
     assert result["result"] == ""
@@ -558,7 +682,7 @@ def test_cached_success_survives_a_later_failed_compile(monkeypatch, tmp_path) -
     )
 
     result = run(
-        Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=6).run("box", run_id="cached")
+        Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=6).run("box", run_id="cached")
     )
 
     assert attempts == 2
@@ -600,7 +724,7 @@ def test_agent_cancellation_terminates_a_live_exec_session(monkeypatch, tmp_path
     )
 
     async def exercise() -> None:
-        env = LocalEnvironment(output_dir=tmp_path)
+        env = LocalWorkspace(output_dir=tmp_path)
         task = asyncio.create_task(Agent(model, env, max_turns=3).run("box", run_id="cancel"))
         await asyncio.wait_for(waiting.wait(), timeout=5)
         assert contexts[0].exec_sessions.live_ids()
@@ -615,7 +739,7 @@ def test_agent_cancellation_terminates_a_live_exec_session(monkeypatch, tmp_path
 def test_agent_fails_third_consecutive_empty_response(tmp_path) -> None:
     model = ScriptedModel([text("") for _ in range(3)])
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert result["status"] == "error"
     assert "three consecutive responses" in result["error"]
@@ -628,7 +752,7 @@ def test_agent_records_model_query_failure(tmp_path) -> None:
 
     model = ScriptedModel([fail])
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert result["status"] == "error"
     assert result["result"] == ""
@@ -644,7 +768,7 @@ def test_agent_closes_the_model_after_a_successful_run(tmp_path) -> None:
         ]
     )
 
-    result = run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    result = run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert result["status"] == "success"
     assert model.close_calls == 1
@@ -656,7 +780,7 @@ def test_agent_closes_the_model_after_a_model_failure(tmp_path) -> None:
 
     model = ScriptedModel([fail])
 
-    run(Agent(model, LocalEnvironment(output_dir=tmp_path), max_turns=3).run("box"))
+    run(Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run("box"))
 
     assert model.close_calls == 1
 
@@ -673,7 +797,7 @@ def test_agent_closes_the_model_on_cancellation(tmp_path) -> None:
     model = ScriptedModel([block_forever])
 
     async def exercise() -> None:
-        env = LocalEnvironment(output_dir=tmp_path)
+        env = LocalWorkspace(output_dir=tmp_path)
         task = asyncio.create_task(Agent(model, env, max_turns=3).run("box", run_id="cancel"))
         await asyncio.wait_for(waiting.wait(), timeout=5)
         task.cancel()
@@ -682,6 +806,234 @@ def test_agent_closes_the_model_on_cancellation(tmp_path) -> None:
 
     run(exercise())
     assert model.close_calls == 1
+    record = Record.load(tmp_path / "cancel" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation cancelled"
+
+
+def test_agent_closes_the_model_when_run_setup_fails(tmp_path) -> None:
+    model = ScriptedModel([])
+    env = LocalWorkspace(output_dir=tmp_path)
+    env.create_run("existing")
+
+    with pytest.raises(FileExistsError, match="run already exists"):
+        run(Agent(model, env).run("box", run_id="existing"))
+
+    assert model.close_calls == 1
+
+
+def test_auto_run_id_atomically_retries_collisions(monkeypatch, tmp_path) -> None:
+    model = ScriptedModel([text("")])
+    env = LocalWorkspace(output_dir=tmp_path)
+    env.create_run("fixed")
+    monkeypatch.setattr("mini_articraft.agent.harness._run_id_for_prompt", lambda prompt: "fixed")
+
+    result = run(Agent(model, env, max_turns=1).run("box"))
+
+    assert result["run_id"] == "fixed-2"
+    assert (tmp_path / "fixed").is_dir()
+    assert (tmp_path / "fixed-2").is_dir()
+
+
+def test_agent_terminalizes_setup_exceptions(monkeypatch, tmp_path) -> None:
+    model = ScriptedModel([])
+
+    def fail_prompt_read(name: str, *, include_images: bool = True) -> str:
+        raise RuntimeError("prompt unavailable")
+
+    monkeypatch.setattr("mini_articraft.agent.harness._read_prompt", fail_prompt_read)
+
+    with pytest.raises(RuntimeError, match="prompt unavailable"):
+        run(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
+                "box",
+                run_id="setup-failure",
+            )
+        )
+
+    record = Record.load(tmp_path / "setup-failure" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation failed: RuntimeError: prompt unavailable"
+    assert model.close_calls == 1
+
+
+def test_agent_terminalizes_unexpected_loop_exceptions(monkeypatch, tmp_path) -> None:
+    model = ScriptedModel([text("working")])
+
+    def fail_cost_save(run_dir, cost, token_usage) -> None:
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr("mini_articraft.agent.harness._save_cost", fail_cost_save)
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        run(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
+                "box",
+                run_id="loop-failure",
+            )
+        )
+
+    record = Record.load(tmp_path / "loop-failure" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation failed: OSError: disk unavailable"
+    assert model.close_calls == 1
+
+
+def test_repeated_cancellation_waits_for_model_close(tmp_path) -> None:
+    query_started = asyncio.Event()
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+
+    async def block_forever(query: ModelQuery) -> Response:
+        query_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("blocking query unexpectedly completed")
+
+    class BlockingCloseModel(ScriptedModel):
+        def __init__(self) -> None:
+            super().__init__([block_forever])
+            self.closed = False
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            close_started.set()
+            await release_close.wait()
+            self.closed = True
+
+    model = BlockingCloseModel()
+
+    async def exercise() -> None:
+        task = asyncio.create_task(
+            Agent(model, LocalWorkspace(output_dir=tmp_path)).run(
+                "box",
+                run_id="repeated-cancel",
+            )
+        )
+        await asyncio.wait_for(query_started.wait(), timeout=5)
+        task.cancel()
+        await asyncio.wait_for(close_started.wait(), timeout=5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release_close.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        run(exercise())
+    finally:
+        release_close.set()
+
+    assert model.close_calls == 1
+    assert model.closed
+    record = Record.load(tmp_path / "repeated-cancel" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation cancelled"
+
+
+def test_cancellation_during_model_close_terminalizes_completed_run(tmp_path) -> None:
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+
+    class BlockingCloseModel(ScriptedModel):
+        def __init__(self) -> None:
+            super().__init__(
+                [
+                    calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+                    calls(tool_call("compile")),
+                    text("done"),
+                ]
+            )
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            close_started.set()
+            await release_close.wait()
+
+    model = BlockingCloseModel()
+
+    async def exercise() -> None:
+        task = asyncio.create_task(
+            Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3).run(
+                "box",
+                run_id="cancel-during-close",
+            )
+        )
+        await asyncio.wait_for(close_started.wait(), timeout=10)
+        record_path = tmp_path / "cancel-during-close" / "record.json"
+        assert Record.load(record_path).status == "success"
+
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release_close.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        run(exercise())
+    finally:
+        release_close.set()
+
+    assert model.close_calls == 1
+    record = Record.load(tmp_path / "cancel-during-close" / "record.json")
+    assert record.status == "error"
+    assert record.error == "generation cancelled"
+    assert record.result == ""
+
+
+def test_event_handler_cannot_mutate_pending_tool_calls(tmp_path) -> None:
+    model = ScriptedModel(
+        [
+            calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+            calls(tool_call("compile")),
+            text("done"),
+        ]
+    )
+
+    def clear_observed_calls(event: events.Event) -> None:
+        if isinstance(event, events.AssistantMessage):
+            event.tool_calls.clear()
+
+    result = run(
+        Agent(
+            model,
+            LocalWorkspace(output_dir=tmp_path),
+            max_turns=3,
+            on_event=clear_observed_calls,
+        ).run("box")
+    )
+
+    assert result["status"] == "success"
+
+
+def test_event_handler_failure_does_not_interrupt_generation(caplog, tmp_path) -> None:
+    model = ScriptedModel(
+        [
+            calls(tool_call("write", {"path": "main.py", "content": GOOD_MAIN_PY})),
+            calls(tool_call("compile")),
+            text("done"),
+        ]
+    )
+    failed = False
+
+    def fail_once(event: events.Event) -> None:
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise RuntimeError("observer failed")
+
+    result = run(
+        Agent(
+            model,
+            LocalWorkspace(output_dir=tmp_path),
+            max_turns=3,
+            on_event=fail_once,
+        ).run("box")
+    )
+
+    assert result["status"] == "success"
+    assert "generation event handler failed" in caplog.text
 
 
 def test_agent_emits_run_events(tmp_path) -> None:
@@ -694,7 +1046,7 @@ def test_agent_emits_run_events(tmp_path) -> None:
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     captured: list[events.Event] = []
     agent = Agent(model, env, max_turns=3, on_event=captured.append)
 
@@ -763,7 +1115,7 @@ def test_agent_runs_parallel_safe_tools_concurrently(monkeypatch, tmp_path) -> N
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=3)
 
     result = run(agent.run("a box", run_id="box"))
@@ -808,7 +1160,7 @@ def test_agent_serializes_non_parallel_tools(monkeypatch, tmp_path) -> None:
             text("done"),
         ]
     )
-    env = LocalEnvironment(output_dir=tmp_path)
+    env = LocalWorkspace(output_dir=tmp_path)
     agent = Agent(model, env, max_turns=3)
 
     result = run(agent.run("a box", run_id="box"))
