@@ -26,7 +26,7 @@ def generate(
     image: Path | None = typer.Option(
         None,
         "--image",
-        exists=True,
+        exists=False,
         file_okay=True,
         dir_okay=False,
         readable=True,
@@ -69,6 +69,9 @@ def generate(
     ),
 ) -> None:
     """Generate an object from a prompt."""
+    if image is not None and not image.exists():
+        typer.echo(f"reference image does not exist: {image}", err=True)
+        raise typer.Exit(2)
     settings = _settings(provider, model, output_dir, effort, compile_timeout, physics)
     if image is not None and settings.provider == "openrouter":
         typer.echo("OpenRouter does not support reference images.", err=True)

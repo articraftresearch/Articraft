@@ -38,7 +38,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync --group dev --frozen
+        run: uv sync --group dev --group sim --frozen
 
       - name: Check repository hygiene
         run: uv run --frozen python scripts/check_repo_hygiene.py
