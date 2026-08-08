@@ -16,6 +16,7 @@ import trimesh
 import xatlas
 from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
     Gf,
+    Kind,
     Sdf,
     Tf,
     Usd,
@@ -29,6 +30,14 @@ from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
 from articraft.sdk import ambientcg
 from articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
 from articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
+from articraft.sdk.assembly import (
+    WORLD,
+    Joint,
+    JointAxis,
+    JointFrame,
+    ResolvedRigidBodyAssembly,
+    RigidBodyAssembly,
+)
 from articraft.sdk.joints import (
     Articulation,
     ArticulationType,
@@ -41,7 +50,15 @@ from articraft.sdk.object import ArticulatedObject, Geometry, Part
 from articraft.sdk.physics import BodyState, PhysicsScene
 from articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
-__all__ = ["ExportAudit", "ExportResult", "TextureExportReport", "export_object"]
+__all__ = [
+    "AssemblyExportAudit",
+    "AssemblyExportResult",
+    "ExportAudit",
+    "ExportResult",
+    "TextureExportReport",
+    "export_assembly",
+    "export_object",
+]
 
 
 @dataclass(frozen=True)
@@ -69,6 +86,27 @@ class ExportAudit:
     bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
     meshes_with_normals: int
     material_bindings: int
+
+
+@dataclass(frozen=True)
+class AssemblyExportAudit:
+    rigid_body_count: int
+    shape_count: int
+    joint_count: int
+    articulation_count: int
+    triangle_count: int
+    bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
+    meshes_with_normals: int
+    material_bindings: int
+
+
+@dataclass(frozen=True)
+class AssemblyExportResult:
+    root: Path
+    manifest: Path
+    usdz: Path
+    textures: TextureExportReport
+    audit: AssemblyExportAudit
 
 
 @dataclass
@@ -129,6 +167,50 @@ def export_object(
     finally:
         manifest_temp.unlink(missing_ok=True)
     return ExportResult(
+        root=root,
+        manifest=manifest,
+        usdz=usdz,
+        textures=texture_report,
+        audit=audit,
+    )
+
+
+def export_assembly(
+    assembly: RigidBodyAssembly,
+    output_dir: Path | str,
+    *,
+    mesh_tolerance: float = DEFAULT_MESH_TOLERANCE,
+    textured: bool = False,
+) -> AssemblyExportResult:
+    """Publish a rigid-body graph as a validated USDZ package and manifest v2."""
+
+    if not isinstance(assembly, RigidBodyAssembly):
+        raise TypeError("export_assembly requires a RigidBodyAssembly")
+    resolved = assembly.resolve()
+    root = Path(output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    usdz = _next_usdz_path(root / "usdz")
+    manifest = root / "model.json"
+    manifest_temp = manifest.with_name(f".{manifest.name}.tmp")
+    try:
+        texture_report, masses = _write_assembly_usdz(
+            resolved,
+            usdz,
+            mesh_tolerance,
+            textured=textured,
+        )
+        audit = _audit_assembly_usdz(resolved, usdz, mesh_tolerance)
+        payload = _assembly_to_payload(resolved, masses) | {
+            "files": {"usdz": usdz.relative_to(root).as_posix()}
+        }
+        manifest_temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        manifest_temp.replace(manifest)
+    except BaseException:
+        usdz.unlink(missing_ok=True)
+        raise
+    finally:
+        manifest_temp.unlink(missing_ok=True)
+    return AssemblyExportResult(
         root=root,
         manifest=manifest,
         usdz=usdz,
@@ -225,6 +307,63 @@ def _write_body_state(rigid_body, state: BodyState) -> None:
     )
 
 
+def _write_assembly_usdz(
+    resolved: ResolvedRigidBodyAssembly,
+    path: Path,
+    mesh_tolerance: float,
+    *,
+    textured: bool = False,
+) -> tuple[TextureExportReport, dict[str, dict[str, object]]]:
+    if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
+        raise ValueError("mesh_tolerance must be a positive finite number")
+
+    with tempfile.TemporaryDirectory(prefix="mini-articraft-usd-") as temp_dir:
+        stage_path = Path(temp_dir) / "model.usdc"
+        stage = Usd.Stage.CreateNew(str(stage_path))
+        UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+        UsdPhysics.SetStageKilogramsPerUnit(stage, 1.0)  # pyright: ignore[reportAttributeAccessIssue]
+        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+
+        world = UsdGeom.Xform.Define(stage, "/World")
+        stage.SetDefaultPrim(world.GetPrim())
+        assembly_path = f"/World/{_safe_name(resolved.name)}"
+        assembly_prim = UsdGeom.Xform.Define(stage, assembly_path).GetPrim()
+        Usd.ModelAPI(assembly_prim).SetKind(Kind.Tokens.assembly)
+        _attrs(assembly_prim, {"name": resolved.name, "units": "meters", "schemaVersion": 2})
+
+        transforms = resolved.world_transforms()
+        body_paths, texture_report, masses = _write_body_geometry(
+            stage,
+            f"{assembly_path}/rigid_bodies",
+            resolved.rigid_bodies,
+            transforms,
+            mesh_tolerance,
+            textured=textured,
+            asset_dir=Path(temp_dir),
+        )
+        joint_paths = _write_graph_joints(
+            stage,
+            f"{assembly_path}/joints",
+            resolved,
+            body_paths,
+        )
+        _write_articulation_roots(resolved, body_paths, joint_paths, stage)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stage.GetRootLayer().Save()
+        _validate_stage(stage)
+        temp_path = path.with_name(f".{path.stem}.tmp.usdz")
+        temp_path.unlink(missing_ok=True)
+        try:
+            if not UsdUtils.CreateNewUsdzPackage(str(stage_path), str(temp_path)):
+                raise RuntimeError(f"failed to create USDZ package: {path}")
+            _validate_usdz(temp_path)
+            temp_path.replace(path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+    return texture_report, masses
+
+
 def _write_parts(
     stage: Usd.Stage,
     scope_path: str,
@@ -234,109 +373,17 @@ def _write_parts(
     textured: bool = False,
     asset_dir: Path | None = None,
 ) -> tuple[dict[str, str], TextureExportReport, dict[str, dict[str, object]]]:
-    UsdGeom.Scope.Define(stage, scope_path)
     # Bake at the authored zero pose, drives unresolved: joint value zero must
     # stay the baked pose so limits, sliders, and MJCF qpos0 line up.
     transforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance)._place({})
-    safe_part_names = _safe_name_map(part.name for part in obj.parts)
-    paths: dict[str, str] = {}
-    masses: dict[str, dict[str, object]] = {}
-    resolver = _TextureResolver() if textured else None
-    # Contact behavior is a property of the substance, so one prim per material
-    # is shared by every collider made of it.
-    # A sibling of parts and joints, not a child of parts: these are shared by the
-    # whole object rather than belonging to any one rigid body.
-    physics_materials_path = f"{scope_path.rsplit('/', 1)[0]}/physics_materials"
-    # The same Material value used by several shapes should be one prim, so a
-    # named appearance can be attached across shapes and parts.
-    appearances_path = f"{scope_path.rsplit('/', 1)[0]}/appearances"
-    shared_appearances: dict[Material, str] = {}
-    requested_shapes = 0
-    textured_shapes = 0
-
-    for part in obj.parts:
-        part_path = f"{scope_path}/{safe_part_names[part.name]}"
-        paths[part.name] = part_path
-        part_prim = UsdGeom.Xform.Define(stage, part_path).GetPrim()
-        _attrs(part_prim, {"name": part.name})
-        _write_body_state(UsdPhysics.RigidBodyAPI.Apply(part_prim), part.body_state)
-        resolved_mass = _resolve_part_mass(part, mesh_tolerance)
-        if resolved_mass is not None:
-            _write_mass(part_prim, resolved_mass)
-            masses[part.name] = _mass_entry(part, resolved_mass)
-        UsdGeom.Xformable(part_prim).AddTransformOp().Set(_gf_matrix(transforms[part.name]))
-
-        shapes_path = f"{part_path}/shapes"
-        UsdGeom.Scope.Define(stage, shapes_path)
-        materials_path = f"{part_path}/materials"
-        shape_entries = list(part._iter_shapes())
-        safe_shape_names = _safe_name_map(shape.name for shape in shape_entries)
-        if textured or any(shape.display_material is not None for shape in shape_entries):
-            UsdGeom.Scope.Define(stage, materials_path)
-        for shape in shape_entries:
-            safe_shape = safe_shape_names[shape.name]
-            mesh_path = f"{shapes_path}/{safe_shape}"
-            material_path = f"{materials_path}/{safe_shape}"
-
-            display = shape.display_material
-            surface = shape.surface_material
-            selection = resolver.resolve(surface) if resolver and surface else None
-            if resolver is not None and surface is not None and surface.texture is not None:
-                requested_shapes += 1
-            if selection is not None and display is not None and asset_dir is not None:
-                _write_textured_shape(
-                    stage,
-                    mesh_path,
-                    material_path,
-                    shape,
-                    selection,
-                    display,
-                    asset_dir,
-                    mesh_tolerance,
-                )
-                _write_physics_material(
-                    stage,
-                    UsdGeom.Mesh.Get(stage, mesh_path),  # pyright: ignore[reportAttributeAccessIssue]
-                    shape.surface_material,
-                    physics_materials_path,
-                )
-                textured_shapes += 1
-                continue
-
-            trimesh_obj = geometry_to_trimesh(shape.geometry, mesh_tolerance)
-            points, faces = _mesh_arrays(trimesh_obj)
-            normals, normal_interpolation = _normal_data(
-                trimesh_obj,
-                _normal_crease_angle(shape.geometry),
-            )
-            mesh = UsdGeom.Mesh.Define(stage, mesh_path)
-            mesh.CreatePointsAttr(points)
-            mesh.CreateFaceVertexCountsAttr([3] * len(faces))
-            mesh.CreateFaceVertexIndicesAttr([index for face in faces for index in face])
-            mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
-            mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(points))
-            mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
-            mesh.SetNormalsInterpolation(normal_interpolation)
-            mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
-            _attrs(mesh.GetPrim(), {"name": shape.name, **_substance_attrs(shape)})
-            _write_collision(mesh, trimesh_obj)
-            _write_physics_material(stage, mesh, shape.surface_material, physics_materials_path)
-            if display is not None:
-                # displayColor stays as a fallback for renderers that ignore
-                # UsdShade; the bound UsdPreviewSurface carries the full surface.
-                mesh.CreateDisplayColorAttr([Gf.Vec3f(*display.base_color[:3])])
-                mesh.CreateDisplayOpacityAttr([display.opacity])
-                _bind_shared_appearance(stage, mesh, display, appearances_path, shared_appearances)
-                _attrs(mesh.GetPrim(), _material_attrs(display))
-    errors = tuple(resolver.errors.values()) if resolver is not None else ()
-    return (
-        paths,
-        TextureExportReport(
-            requested_shapes=requested_shapes,
-            textured_shapes=textured_shapes,
-            errors=errors,
-        ),
-        masses,
+    return _write_body_geometry(
+        stage,
+        scope_path,
+        tuple(obj.parts),
+        transforms,
+        mesh_tolerance,
+        textured=textured,
+        asset_dir=asset_dir,
     )
 
 
@@ -667,6 +714,127 @@ def _collision_approximation(mesh: trimesh.Trimesh) -> str:
     return "convexHull" if mesh.is_convex else "convexDecomposition"
 
 
+def _write_graph_joints(
+    stage: Usd.Stage,
+    scope_path: str,
+    resolved: ResolvedRigidBodyAssembly,
+    body_paths: dict[str, str],
+) -> dict[str, str]:
+    UsdGeom.Scope.Define(stage, scope_path)
+    safe_names = _safe_name_map(item.joint.name for item in resolved.joints)
+    paths: dict[str, str] = {}
+    for item in resolved.joints:
+        joint = item.joint
+        path = f"{scope_path}/{safe_names[joint.name]}"
+        paths[joint.name] = path
+        schema = _graph_joint_schema(stage, path, joint)
+        if joint.body0 is not WORLD:
+            schema.CreateBody0Rel().SetTargets([body_paths[joint.body0.name]])
+        if joint.body1 is not WORLD:
+            schema.CreateBody1Rel().SetTargets([body_paths[joint.body1.name]])
+        schema.CreateExcludeFromArticulationAttr(item.exclude_from_articulation)
+        _attrs(
+            schema.GetPrim(),
+            {
+                "name": joint.name,
+                "jointType": _graph_joint_type(joint),
+                "body0": "WORLD" if joint.body0 is WORLD else joint.body0.name,
+                "body1": "WORLD" if joint.body1 is WORLD else joint.body1.name,
+                "frame0:xyz": Gf.Vec3d(*joint.frame0.xyz),
+                "frame0:rpy": Gf.Vec3d(*joint.frame0.rpy),
+                "frame1:xyz": Gf.Vec3d(*joint.frame1.xyz),
+                "frame1:rpy": Gf.Vec3d(*joint.frame1.rpy),
+                "dofs": json.dumps(
+                    [
+                        {
+                            "axis": cast(JointAxis, dof.axis).value,
+                            "limits": dof.limits,
+                        }
+                        for dof in joint.dofs
+                    ],
+                    separators=(",", ":"),
+                ),
+                "articulation": item.articulation or "",
+                "excludeFromArticulation": item.exclude_from_articulation,
+            },
+        )
+    return paths
+
+
+def _graph_joint_schema(stage: Usd.Stage, path: str, joint: Joint):
+    if joint.is_fixed:
+        schema = UsdPhysics.FixedJoint.Define(stage, path)
+    elif joint.is_revolute:
+        schema = UsdPhysics.RevoluteJoint.Define(stage, path)
+        axis = cast(JointAxis, joint.dofs[0].axis)
+        schema.CreateAxisAttr(axis.value[-1].upper())
+        _write_specialized_limits(schema, joint)
+    elif joint.is_prismatic:
+        schema = UsdPhysics.PrismaticJoint.Define(stage, path)
+        axis = cast(JointAxis, joint.dofs[0].axis)
+        schema.CreateAxisAttr(axis.value[-1].upper())
+        _write_specialized_limits(schema, joint)
+    else:
+        schema = UsdPhysics.Joint.Define(stage, path)
+        authored = {cast(JointAxis, dof.axis): dof for dof in joint.dofs}
+        for axis in JointAxis:
+            dof = authored.get(axis)
+            if dof is not None and dof.limits is None:
+                continue
+            limit = UsdPhysics.LimitAPI.Apply(schema.GetPrim(), axis.value)
+            if dof is None:
+                limit.CreateLowAttr(1.0)
+                limit.CreateHighAttr(-1.0)
+                continue
+            lower, upper = cast(tuple[float, float], dof.limits)
+            if axis.is_rotational:
+                lower, upper = math.degrees(lower), math.degrees(upper)
+            limit.CreateLowAttr(lower)
+            limit.CreateHighAttr(upper)
+    _set_joint_frame_attrs(schema, joint.frame0, joint.frame1)
+    return schema
+
+
+def _write_specialized_limits(schema, joint: Joint) -> None:
+    dof = joint.dofs[0]
+    if dof.limits is None:
+        return
+    lower, upper = dof.limits
+    if cast(JointAxis, dof.axis).is_rotational:
+        lower, upper = math.degrees(lower), math.degrees(upper)
+    schema.CreateLowerLimitAttr(lower)
+    schema.CreateUpperLimitAttr(upper)
+
+
+def _set_joint_frame_attrs(schema, frame0: JointFrame, frame1: JointFrame) -> None:
+    schema.CreateLocalPos0Attr(Gf.Vec3f(*frame0.xyz))
+    schema.CreateLocalRot0Attr(_quat(_gf_matrix(_rpy_matrix(frame0.rpy))))
+    schema.CreateLocalPos1Attr(Gf.Vec3f(*frame1.xyz))
+    schema.CreateLocalRot1Attr(_quat(_gf_matrix(_rpy_matrix(frame1.rpy))))
+
+
+def _write_articulation_roots(
+    resolved: ResolvedRigidBodyAssembly,
+    body_paths: dict[str, str],
+    joint_paths: dict[str, str],
+    stage: Usd.Stage,
+) -> None:
+    for item in resolved.articulations:
+        root = item.articulation.root
+        path = joint_paths[root.name] if isinstance(root, Joint) else body_paths[root.name]
+        UsdPhysics.ArticulationRootAPI.Apply(stage.GetPrimAtPath(path))
+
+
+def _graph_joint_type(joint: Joint) -> str:
+    if joint.is_fixed:
+        return "fixed"
+    if joint.is_revolute:
+        return "revolute"
+    if joint.is_prismatic:
+        return "prismatic"
+    return "d6"
+
+
 def _write_articulations(
     stage: Usd.Stage,
     scope_path: str,
@@ -778,6 +946,8 @@ def _articulation_attrs(prim: Usd.Prim, articulation: Articulation) -> None:
 def _attrs(prim: Usd.Prim, values: dict[str, object]) -> None:
     types = {
         str: Sdf.ValueTypeNames.String,
+        bool: Sdf.ValueTypeNames.Bool,
+        int: Sdf.ValueTypeNames.Int,
         float: Sdf.ValueTypeNames.Double,
         Gf.Vec3d: Sdf.ValueTypeNames.Double3,
     }
@@ -886,6 +1056,84 @@ def _body_state_payload(part: Part) -> dict[str, object]:
         "linear_velocity": list(state.linear_velocity),
         "angular_velocity": list(state.angular_velocity),
         "starts_asleep": state.starts_asleep,
+    }
+
+
+def _assembly_to_payload(
+    resolved: ResolvedRigidBodyAssembly,
+    masses: dict[str, dict[str, object]] | None = None,
+) -> dict[str, object]:
+    masses = masses or {}
+    return {
+        "schema_version": 2,
+        "name": resolved.name,
+        "units": "meters",
+        "meters_per_unit": 1.0,
+        "up_axis": "Z",
+        "rigid_bodies": [
+            {
+                "name": body.name,
+                "mass": masses.get(body.name),
+                "shapes": [
+                    {
+                        "name": shape.name,
+                        "geometry_type": type(shape.geometry).__name__,
+                        "color": shape.color,
+                        "material": _material_payload(shape.material),
+                        "coating": _material_payload(shape.coating),
+                    }
+                    for shape in body._iter_shapes()
+                ],
+            }
+            for body in resolved.rigid_bodies
+        ],
+        "joints": [
+            {
+                "name": item.joint.name,
+                "type": _graph_joint_type(item.joint),
+                "body0": None if item.joint.body0 is WORLD else item.joint.body0.name,
+                "body1": None if item.joint.body1 is WORLD else item.joint.body1.name,
+                "frame0": {
+                    "xyz": item.joint.frame0.xyz,
+                    "rpy": item.joint.frame0.rpy,
+                },
+                "frame1": {
+                    "xyz": item.joint.frame1.xyz,
+                    "rpy": item.joint.frame1.rpy,
+                },
+                "dofs": [
+                    {
+                        "axis": cast(JointAxis, dof.axis).value,
+                        "limits": None if dof.limits is None else list(dof.limits),
+                    }
+                    for dof in item.joint.dofs
+                ],
+                "articulation": item.articulation,
+                "exclude_from_articulation": item.exclude_from_articulation,
+            }
+            for item in resolved.joints
+        ],
+        "articulations": [
+            {
+                "name": item.articulation.name,
+                "root": {
+                    "type": (
+                        "joint" if isinstance(item.articulation.root, Joint) else "rigid_body"
+                    ),
+                    "name": item.articulation.root.name,
+                },
+                "joints": [joint.name for joint in item.joints],
+                "rigid_bodies": [body.name for body in item.rigid_bodies],
+            }
+            for item in resolved.articulations
+        ],
+        "reference_state": {
+            "body_poses": {
+                name: [list(row) for row in matrix]
+                for name, matrix in resolved.reference_state.body_poses.items()
+            },
+            "dof_positions": dict(resolved.reference_state.dof_positions),
+        },
     }
 
 
@@ -1168,6 +1416,179 @@ def _audit_usdz(
         part_count=len(found_parts),
         shape_count=len(found_shapes),
         articulation_count=len(found_joints),
+        triangle_count=triangle_count,
+        bounds=package_bounds,
+        meshes_with_normals=normal_meshes,
+        material_bindings=material_bindings,
+    )
+
+
+def _audit_assembly_usdz(
+    resolved: ResolvedRigidBodyAssembly,
+    path: Path,
+    mesh_tolerance: float,
+) -> AssemblyExportAudit:
+    stage = Usd.Stage.Open(str(path))
+    if stage is None:
+        raise RuntimeError("OpenUSD could not reopen the generated USDZ package for audit")
+    world = stage.GetDefaultPrim()
+    assembly_prims = [prim for prim in world.GetChildren() if prim.GetChild("rigid_bodies")]
+    if len(assembly_prims) != 1:
+        raise RuntimeError("USDZ audit expected exactly one rigid-body assembly")
+    if Usd.ModelAPI(assembly_prims[0]).GetKind() != Kind.Tokens.assembly:
+        raise RuntimeError("USDZ audit assembly prim is not kind=assembly")
+
+    expected_bodies = {body.name for body in resolved.rigid_bodies}
+    expected_shapes = {
+        (body.name, shape.name) for body in resolved.rigid_bodies for shape in body._iter_shapes()
+    }
+    expected_joints = {item.joint.name: item for item in resolved.joints}
+    body_prims: dict[str, Usd.Prim] = {}
+    joint_prims: dict[str, Usd.Prim] = {}
+    found_shapes: set[tuple[str, str]] = set()
+    source_meshes: dict[tuple[str, str], trimesh.Trimesh] = {}
+    source_points: list[np.ndarray] = []
+    exported_points: list[np.ndarray] = []
+    triangle_count = 0
+    normal_meshes = 0
+    material_bindings = 0
+    transforms = resolved.world_transforms()
+    for body in resolved.rigid_bodies:
+        for shape in body._iter_shapes():
+            mesh = geometry_to_trimesh(shape.geometry, mesh_tolerance).copy()
+            mesh.apply_transform(transforms[body.name])
+            source_meshes[(body.name, shape.name)] = mesh
+            source_points.append(np.asarray(mesh.vertices, dtype=np.float64))
+
+    cache = UsdGeom.XformCache(  # pyright: ignore[reportAttributeAccessIssue]
+        Usd.TimeCode.Default()  # pyright: ignore[reportAttributeAccessIssue]
+    )
+    for prim in stage.Traverse():
+        path_text = str(prim.GetPath())
+        authored_name = _custom_string(prim, "name")
+        if "/rigid_bodies/" in path_text and "/shapes/" not in path_text and authored_name:
+            body_prims[authored_name] = prim
+        if "/joints/" in path_text and authored_name:
+            joint_prims[authored_name] = prim
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        mesh = UsdGeom.Mesh(prim)  # pyright: ignore[reportCallIssue]
+        body_name = _custom_string(prim.GetParent().GetParent(), "name")
+        selector = (body_name, authored_name)
+        found_shapes.add(selector)
+        points = mesh.GetPointsAttr().Get()
+        faces = mesh.GetFaceVertexIndicesAttr().Get()
+        if points is None or faces is None:
+            raise RuntimeError(f"USDZ audit found an empty mesh at {prim.GetPath()}")
+        triangle_count += len(faces) // 3
+        matrix = cache.GetLocalToWorldTransform(prim)
+        exported_points.append(
+            np.asarray(
+                [
+                    tuple(
+                        matrix.Transform(
+                            Gf.Vec3d(float(point[0]), float(point[1]), float(point[2]))
+                        )
+                    )
+                    for point in points
+                ],
+                dtype=np.float64,
+            )
+        )
+        normals = mesh.GetNormalsAttr().Get()
+        if normals is None or len(normals) == 0:
+            raise RuntimeError(f"USDZ audit found a mesh without normals at {prim.GetPath()}")
+        normal_meshes += 1
+        if mesh.GetOrientationAttr().Get() != UsdGeom.Tokens.rightHanded:
+            raise RuntimeError(f"USDZ audit found non-right-handed winding at {prim.GetPath()}")
+        if UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel("").GetTargets():
+            material_bindings += 1
+        source = source_meshes.get(selector)
+        if source is None:
+            raise RuntimeError(f"USDZ audit found an unexpected mesh {selector!r}")
+        if len(source.faces) != len(faces) // 3:
+            raise RuntimeError(f"USDZ audit triangle mismatch for {selector!r}")
+
+    if set(body_prims) != expected_bodies:
+        raise RuntimeError(
+            f"USDZ audit rigid body mismatch: expected={sorted(expected_bodies)!r} "
+            f"found={sorted(body_prims)!r}"
+        )
+    if found_shapes != expected_shapes:
+        raise RuntimeError(
+            f"USDZ audit shape mismatch: expected={sorted(expected_shapes)!r} "
+            f"found={sorted(found_shapes)!r}"
+        )
+    if set(joint_prims) != set(expected_joints):
+        raise RuntimeError(
+            f"USDZ audit joint mismatch: expected={sorted(expected_joints)!r} "
+            f"found={sorted(joint_prims)!r}"
+        )
+
+    for name, item in expected_joints.items():
+        joint = item.joint
+        prim = joint_prims[name]
+        schema = UsdPhysics.Joint(prim)  # pyright: ignore[reportCallIssue]
+        expected0 = [] if joint.body0 is WORLD else [body_prims[joint.body0.name].GetPath()]
+        expected1 = [] if joint.body1 is WORLD else [body_prims[joint.body1.name].GetPath()]
+        if list(schema.GetBody0Rel().GetTargets()) != expected0:
+            raise RuntimeError(f"USDZ audit body0 relationship mismatch for joint {name!r}")
+        if list(schema.GetBody1Rel().GetTargets()) != expected1:
+            raise RuntimeError(f"USDZ audit body1 relationship mismatch for joint {name!r}")
+        if bool(schema.GetExcludeFromArticulationAttr().Get()) != item.exclude_from_articulation:
+            raise RuntimeError(f"USDZ audit exclusion mismatch for joint {name!r}")
+        if _custom_string(prim, "jointType") != _graph_joint_type(joint):
+            raise RuntimeError(f"USDZ audit joint type mismatch for {name!r}")
+        _expect_vector_attr(prim, "frame0:xyz", joint.frame0.xyz, joint_name=name)
+        _expect_vector_attr(prim, "frame0:rpy", joint.frame0.rpy, joint_name=name)
+        _expect_vector_attr(prim, "frame1:xyz", joint.frame1.xyz, joint_name=name)
+        _expect_vector_attr(prim, "frame1:rpy", joint.frame1.rpy, joint_name=name)
+        expected_schema = (
+            UsdPhysics.FixedJoint
+            if joint.is_fixed
+            else UsdPhysics.RevoluteJoint
+            if joint.is_revolute
+            else UsdPhysics.PrismaticJoint
+            if joint.is_prismatic
+            else UsdPhysics.Joint
+        )
+        if not prim.IsA(expected_schema):
+            raise RuntimeError(f"USDZ audit native schema mismatch for joint {name!r}")
+
+    expected_roots = {item.articulation.root.name for item in resolved.articulations}
+    found_roots = {
+        _custom_string(prim, "name")
+        for prim in stage.Traverse()
+        if prim.HasAPI(UsdPhysics.ArticulationRootAPI)
+    }
+    if found_roots != expected_roots:
+        raise RuntimeError(
+            f"USDZ audit articulation root mismatch: expected={sorted(expected_roots)!r} "
+            f"found={sorted(found_roots)!r}"
+        )
+
+    expected_materials = sum(
+        shape.display_material is not None
+        for body in resolved.rigid_bodies
+        for shape in body._iter_shapes()
+    )
+    if material_bindings != expected_materials:
+        raise RuntimeError(
+            f"USDZ audit material binding mismatch: "
+            f"expected={expected_materials} found={material_bindings}"
+        )
+    source_bounds = _point_bounds(np.concatenate(source_points, axis=0))
+    package_bounds = _point_bounds(np.concatenate(exported_points, axis=0))
+    tolerance = max(mesh_tolerance * 2.0, 1e-6)
+    if not np.allclose(source_bounds, package_bounds, rtol=1e-6, atol=tolerance):
+        raise RuntimeError(
+            f"USDZ audit bounds mismatch: source={source_bounds!r} package={package_bounds!r}"
+        )
+    return AssemblyExportAudit(
+        rigid_body_count=len(body_prims),
+        shape_count=len(found_shapes),
+        joint_count=len(joint_prims),
+        articulation_count=len(resolved.articulations),
         triangle_count=triangle_count,
         bounds=package_bounds,
         meshes_with_normals=normal_meshes,
