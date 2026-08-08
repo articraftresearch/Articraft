@@ -8,7 +8,7 @@ from typing import Any
 from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_ANTHROPIC_MODEL, Settings, get_settings
 
-# Use the same conservative working budget as Codex instead of the full API window.
+# Claude 5 has a 1M API window; use the same conservative working budget as Codex.
 _AGENT_CONTEXT_WINDOW_TOKENS = 272_000
 _MAX_OUTPUT_TOKENS = 128_000
 _MAX_IMAGE_DATA_LENGTH = 10 * 1024 * 1024
@@ -27,6 +27,8 @@ class _Prices:
 
 
 _MODEL_PRICES = {
+    "claude-fable-5": _Prices(input_price=10.00, output_price=50.00),
+    "claude-mythos-5": _Prices(input_price=10.00, output_price=50.00),
     "claude-opus-5": _Prices(input_price=5.00, output_price=25.00),
     "claude-sonnet-5": _Prices(input_price=2.00, output_price=10.00),
 }
@@ -34,13 +36,12 @@ _SONNET_5_STANDARD_PRICES = _Prices(
     input_price=3.00,
     output_price=15.00,
 )
-SUPPORTED_MODELS = tuple(_MODEL_PRICES)
+KNOWN_MODELS = tuple(_MODEL_PRICES)
 
 
 class AnthropicModel:
     def __init__(self, settings: Settings | None = None, *, client: Any | None = None):
         self.config = settings or get_settings()
-        _raise_for_unsupported_model(self.config.anthropic_model)
         self._client = client
 
     @property
@@ -449,13 +450,7 @@ def _prices_for(model: str, *, today: date | None = None) -> _Prices | None:
 
 
 def context_window_tokens_for(model: str) -> int | None:
-    return _AGENT_CONTEXT_WINDOW_TOKENS if model in SUPPORTED_MODELS else None
-
-
-def _raise_for_unsupported_model(model: str) -> None:
-    if model not in SUPPORTED_MODELS:
-        supported = ", ".join(SUPPORTED_MODELS)
-        raise ModelError(f"Unsupported Anthropic model: {model}. Supported models: {supported}")
+    return _AGENT_CONTEXT_WINDOW_TOKENS if model in _MODEL_PRICES else None
 
 
 def _value(source: Any, name: str, default: Any = None) -> Any:
@@ -471,7 +466,7 @@ def _format_exception(exc: BaseException) -> str:
 
 __all__ = [
     "DEFAULT_ANTHROPIC_MODEL",
-    "SUPPORTED_MODELS",
+    "KNOWN_MODELS",
     "AnthropicModel",
     "anthropic_api_key_value",
     "context_window_tokens_for",

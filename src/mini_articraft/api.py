@@ -20,19 +20,7 @@ from typing import Any, Literal, cast, get_args
 
 from mini_articraft.agent import Agent, events
 from mini_articraft.agent.provider import create_model
-from mini_articraft.agent.provider.anthropic import SUPPORTED_MODELS as ANTHROPIC_MODELS
 from mini_articraft.agent.provider.anthropic import anthropic_api_key_value
-from mini_articraft.agent.provider.anthropic import (
-    context_window_tokens_for as anthropic_context_window_tokens_for,
-)
-from mini_articraft.agent.provider.gemini import SUPPORTED_MODELS as GEMINI_MODELS
-from mini_articraft.agent.provider.gemini import (
-    context_window_tokens_for as gemini_context_window_tokens_for,
-)
-from mini_articraft.agent.provider.openai import SUPPORTED_MODELS as OPENAI_MODELS
-from mini_articraft.agent.provider.openai import (
-    context_window_tokens_for as openai_context_window_tokens_for,
-)
 from mini_articraft.agent.workspace import LocalWorkspace
 from mini_articraft.settings import Settings, get_settings
 
@@ -206,36 +194,7 @@ def _resolved_settings(
 
     values = base.model_dump()
     values.update(updates)
-    settings = Settings.model_validate(values)
-
-    if (
-        settings.provider == "openai"
-        and openai_context_window_tokens_for(settings.openai_model) is None
-    ):
-        raise ValueError(
-            "unsupported OpenAI model: "
-            f"{settings.openai_model}. Supported models: {', '.join(OPENAI_MODELS)}"
-        )
-
-    if (
-        settings.provider == "anthropic"
-        and anthropic_context_window_tokens_for(settings.anthropic_model) is None
-    ):
-        raise ValueError(
-            "unsupported Anthropic model: "
-            f"{settings.anthropic_model}. Supported models: {', '.join(ANTHROPIC_MODELS)}"
-        )
-
-    if (
-        settings.provider == "gemini"
-        and gemini_context_window_tokens_for(settings.gemini_model) is None
-    ):
-        raise ValueError(
-            "unsupported Gemini model: "
-            f"{settings.gemini_model}. Supported models: {', '.join(GEMINI_MODELS)}"
-        )
-
-    return settings
+    return Settings.model_validate(values)
 
 
 def _missing_provider_settings(settings: Settings) -> list[str]:

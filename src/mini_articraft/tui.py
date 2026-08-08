@@ -177,6 +177,14 @@ class RunRenderer:
                     title_parts.append(f"reasoning {reasoning_effort}")
                 title = " · ".join(title_parts)
                 self._print(Rule(title, style=PRIMARY_STYLE))
+                if model and not self._context_window_tokens:
+                    self._print(
+                        Text(
+                            f"  ⚠ unrecognized model slug {model!r}; context window and pricing "
+                            "are unavailable locally. The provider API will validate it.",
+                            style="yellow",
+                        )
+                    )
             case events.TurnStarted(turn=turn):
                 self._turn = turn
                 self._activity = "thinking"

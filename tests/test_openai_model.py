@@ -19,7 +19,7 @@ def run(awaitable):
 def response_event(
     text: str,
     *,
-    model: str = "gpt-5.5-2026-04-23",
+    model: str = "gpt-5.6",
     response_id: str = "resp_1",
     status: str = "completed",
     incomplete_details: dict[str, object] | None = None,
@@ -82,7 +82,7 @@ def patch_websocket(monkeypatch: pytest.MonkeyPatch, socket: FakeWebSocket) -> N
 
 
 def openai_model(**kwargs: Any) -> OpenAIModel:
-    kwargs.setdefault("openai_model", "gpt-5.5-2026-04-23")
+    kwargs.setdefault("openai_model", "gpt-5.6")
     kwargs.setdefault("openai_reasoning_effort", "high")
     return OpenAIModel(Settings(openai_api_key="sk-test", **kwargs))
 
@@ -104,7 +104,7 @@ def test_openai_model_uses_websocket(monkeypatch: pytest.MonkeyPatch) -> None:
     assert socket.sent == [
         {
             "type": "response.create",
-            "model": "gpt-5.5-2026-04-23",
+            "model": "gpt-5.6",
             "input": [{"role": "user", "content": "build a hinge"}],
             "reasoning": {"effort": "high"},
             "include": ["reasoning.encrypted_content"],
@@ -201,14 +201,24 @@ def test_openai_model_returns_estimated_cost(monkeypatch: pytest.MonkeyPatch) ->
     }
 
 
-def test_openai_model_returns_estimated_cost_for_gpt_5_6_sol(
+@pytest.mark.parametrize(
+    ("model_name", "expected_cost"),
+    [
+        ("gpt-5.6-sol", 0.0054),
+        ("gpt-5.6-terra", 0.00216),
+        ("gpt-5.6-luna", 0.000216),
+    ],
+)
+def test_openai_model_returns_estimated_cost_for_gpt_5_6_family(
     monkeypatch: pytest.MonkeyPatch,
+    model_name: str,
+    expected_cost: float,
 ) -> None:
     socket = FakeWebSocket(
         [
             response_event(
                 "result",
-                model="gpt-5.6-sol",
+                model=model_name,
                 usage={
                     "input_tokens": 1_000,
                     "input_tokens_details": {
@@ -223,10 +233,10 @@ def test_openai_model_returns_estimated_cost_for_gpt_5_6_sol(
     patch_websocket(monkeypatch, socket)
 
     result = run(
-        openai_model(openai_model="gpt-5.6-sol").query([{"role": "user", "content": "build"}])
+        openai_model(openai_model=model_name).query([{"role": "user", "content": "build"}])
     )
 
-    assert result["cost"] == 0.0054
+    assert result["cost"] == expected_cost
     assert result["token_usage"] == {
         "input_tokens": 1_000,
         "cached_input_tokens": 100,
@@ -238,16 +248,16 @@ def test_openai_model_returns_estimated_cost_for_gpt_5_6_sol(
 
 def test_openai_model_exposes_context_window() -> None:
     model = openai_model()
-    assert model.config.openai_model == "gpt-5.5-2026-04-23"
+    assert model.config.openai_model == "gpt-5.6"
     assert isinstance(model, ContextSummarizer)
     assert DEFAULT_MAX_TURNS == 100
     assert model.context_window_tokens == 272_000
     assert context_window_tokens_for("gpt-5.6-sol") == 272_000
     assert context_window_tokens_for("gpt-5.6") == 272_000
-    assert context_window_tokens_for("gpt-5.6-terra") is None
-    assert context_window_tokens_for("gpt-5.5-2026-04-23") == 272_000
-    assert context_window_tokens_for("gpt-5.5-pro") == 272_000
-    assert context_window_tokens_for("gpt-5.4-mini-2026-03-17") == 400_000
+    assert context_window_tokens_for("gpt-5.6-terra") == 272_000
+    assert context_window_tokens_for("gpt-5.6-luna") == 272_000
+    assert context_window_tokens_for("gpt-5.5-2026-04-23") is None
+    assert context_window_tokens_for("gpt-5.6-sol-unknown-snapshot") is None
     assert context_window_tokens_for("gpt-test") is None
 
 

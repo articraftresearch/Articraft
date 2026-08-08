@@ -22,9 +22,9 @@ from mini_articraft.settings import Settings, get_settings
 @pytest.mark.parametrize(
     ("provider", "model", "field"),
     [
-        ("openai", "gpt-5.4-mini", "openai_model"),
-        ("gemini", "gemini-3.6-flash", "gemini_model"),
-        ("anthropic", "claude-opus-5", "anthropic_model"),
+        ("openai", "gpt-future-preview", "openai_model"),
+        ("gemini", "gemini-future-preview", "gemini_model"),
+        ("anthropic", "claude-future-preview", "anthropic_model"),
     ],
 )
 def test_resolved_settings_routes_model_to_selected_provider(
@@ -53,40 +53,6 @@ def test_resolved_settings_validates_overrides(tmp_path: Path) -> None:
 def test_resolved_settings_rejects_unknown_provider() -> None:
     with pytest.raises(ValueError, match="unsupported provider: mistral"):
         api._resolved_settings(Settings(openai_api_key="sk-test"), provider="mistral")
-
-
-@pytest.mark.parametrize(
-    ("provider", "model", "message"),
-    [
-        ("openai", "gpt-4.1", "unsupported OpenAI model"),
-        ("anthropic", "claude-haiku-4-5", "unsupported Anthropic model"),
-        ("gemini", "gemini-1.5-flash", "unsupported Gemini model"),
-    ],
-)
-def test_resolved_settings_rejects_unsupported_models(
-    provider: str, model: str, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        api._resolved_settings(
-            Settings(
-                openai_api_key="sk-test",
-                anthropic_api_key="sk-test",
-                gemini_api_key="sk-test",
-            ),
-            provider=provider,
-            model=model,
-        )
-
-
-def test_resolved_settings_accepts_dated_and_aliased_openai_models() -> None:
-    """The catalog matches by prefix/alias, so dated variants stay valid."""
-
-    base = Settings(openai_api_key="sk-test")
-
-    dated = api._resolved_settings(base, provider="openai", model="gpt-5.5-2026-04-23")
-    assert dated.openai_model == "gpt-5.5-2026-04-23"
-    aliased = api._resolved_settings(base, provider="openai", model="gpt-5.6")
-    assert aliased.openai_model == "gpt-5.6"
 
 
 def test_missing_provider_settings_treats_whitespace_as_missing() -> None:

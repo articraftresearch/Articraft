@@ -637,21 +637,32 @@ def test_anthropic_model_returns_sonnet_standard_cost_after_price_change() -> No
     assert _response_cost("claude-sonnet-5", usage, today=date(2026, 9, 1)) == 0.00369
 
 
-def test_anthropic_model_rejects_unsupported_models() -> None:
-    with pytest.raises(ModelError, match="Unsupported Anthropic model"):
-        AnthropicModel(
-            Settings(
-                provider="anthropic",
-                anthropic_api_key="anthropic-test",
-                anthropic_model="claude-haiku-4-5",
-            )
-        )
+@pytest.mark.parametrize("model_name", ["claude-fable-5", "claude-mythos-5"])
+def test_anthropic_model_prices_latest_high_end_models(model_name: str) -> None:
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+
+    assert _response_cost(model_name, usage) == 60.0
+
+
+def test_anthropic_model_passes_unrecognized_model_to_provider() -> None:
+    model, client = anthropic_model(
+        [text_response("done")],
+        anthropic_model="claude-future-preview",
+    )
+
+    result = run(model.query([{"role": "user", "content": "build"}]))
+
+    assert client.messages.requests[0]["model"] == "claude-future-preview"
+    assert model.context_window_tokens == 0
+    assert result["cost"] == 0.0
 
 
 def test_anthropic_model_exposes_conservative_context_window() -> None:
     model, _client = anthropic_model([text_response("done")])
 
     assert model.context_window_tokens == 272_000
+    assert context_window_tokens_for("claude-fable-5") == 272_000
+    assert context_window_tokens_for("claude-mythos-5") == 272_000
     assert context_window_tokens_for("claude-sonnet-5") == 272_000
     assert context_window_tokens_for("claude-opus-5") == 272_000
     assert context_window_tokens_for("claude-haiku-4-5") is None

@@ -401,34 +401,36 @@ def test_gemini_model_converts_image_tool_results() -> None:
     }
 
 
-def test_gemini_model_charges_pro_long_context_and_thought_tokens() -> None:
+def test_gemini_model_charges_flash_lite_thought_tokens() -> None:
     model, _client = gemini_model(
         [
             text_response(
                 "result",
-                input_tokens=200_001,
-                cached_tokens=100_000,
-                output_tokens=1_000,
-                thought_tokens=500,
+                input_tokens=1_000,
+                cached_tokens=100,
+                output_tokens=20,
+                thought_tokens=5,
             )
         ],
-        gemini_model="gemini-3.1-pro-preview",
+        gemini_model="gemini-3.5-flash-lite",
     )
 
     result = run(model.query([{"role": "user", "content": "build"}]))
 
-    assert result["cost"] == 0.467004
+    assert result["cost"] == 0.0003355
 
 
-def test_gemini_model_rejects_unsupported_models() -> None:
-    with pytest.raises(ModelError, match="Unsupported Gemini model"):
-        GeminiModel(
-            Settings(
-                provider="gemini",
-                gemini_api_key="gemini-test",
-                gemini_model="gemini-3.5-flash",
-            )
-        )
+def test_gemini_model_passes_unrecognized_model_to_provider() -> None:
+    model, client = gemini_model(
+        [text_response("done")],
+        gemini_model="gemini-future-preview",
+    )
+
+    result = run(model.query([{"role": "user", "content": "build"}]))
+
+    assert client.interactions.requests[0]["model"] == "gemini-future-preview"
+    assert model.context_window_tokens == 0
+    assert result["cost"] == 0.0
 
 
 def test_gemini_model_exposes_conservative_context_window() -> None:
@@ -436,7 +438,8 @@ def test_gemini_model_exposes_conservative_context_window() -> None:
 
     assert model.context_window_tokens == 272_000
     assert context_window_tokens_for("gemini-3.6-flash") == 272_000
-    assert context_window_tokens_for("gemini-3.1-pro-preview") == 272_000
+    assert context_window_tokens_for("gemini-3.5-flash-lite") == 272_000
+    assert context_window_tokens_for("gemini-3.1-pro-preview") is None
     assert context_window_tokens_for("gemini-3.5-flash") is None
 
 

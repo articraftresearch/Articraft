@@ -63,7 +63,20 @@ ANTHROPIC_API_KEY=your_key_here uv run mini-articraft \
   --image reference.png "reconstruct this folding chair"
 ```
 
-The Anthropic provider supports `claude-sonnet-5` and `claude-opus-5`.
+The local model catalog tracks current pricing and context metadata for:
+
+- OpenAI GPT-5.6: `gpt-5.6` / `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+- Anthropic Claude 5: `claude-fable-5`, `claude-mythos-5`, `claude-opus-5`, and
+  `claude-sonnet-5` (`claude-mythos-5` is invitation-only).
+- Google production models: `gemini-3.6-flash` and `gemini-3.5-flash-lite`.
+
+These families expose roughly 1M-token API context windows. Mini-articraft keeps its existing
+272k working budget for compaction and TUI context tracking.
+
+Other model slugs are passed through to the selected provider. The live TUI warns when a slug
+has no local metadata, so context tracking and cost estimates are unavailable. If the provider
+rejects the slug, the run fails with the provider error.
+
 Each run keeps the complete Anthropic response blocks in `conversation.jsonl`.
 
 To use OpenRouter, provide an API key:

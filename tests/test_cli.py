@@ -91,7 +91,7 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
             "generate",
             "make a hinge",
             "--model",
-            "gpt-5.4-mini",
+            "gpt-future-preview",
             "--output-dir",
             str(output_dir),
             "--effort",
@@ -102,7 +102,7 @@ def test_cli_runs_agent_with_only_core_overrides(monkeypatch, tmp_path: Path) ->
     )
 
     assert result.exit_code == 0
-    assert FakeOpenAIModel.instances[0].settings.openai_model == "gpt-5.4-mini"
+    assert FakeOpenAIModel.instances[0].settings.openai_model == "gpt-future-preview"
     assert FakeOpenAIModel.instances[0].settings.output_dir == output_dir
     assert FakeOpenAIModel.instances[0].settings.openai_reasoning_effort == "low"
     assert FakeOpenAIModel.instances[0].closed is True
@@ -465,15 +465,19 @@ def test_cli_uses_default_openrouter_model_and_warns_on_missing_key(
     assert "Traceback" not in result.output
 
 
-def test_cli_rejects_unsupported_anthropic_model_without_model_call(
+def test_cli_passes_unrecognized_anthropic_model_to_model_call(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     reset_fakes()
-    monkeypatch.chdir(tmp_path)
-    get_settings.cache_clear()
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test")
     monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
+    monkeypatch.setattr(api, "LocalWorkspace", FakeEnvironment)
+    monkeypatch.setattr(api, "Agent", FakeAgent)
+    monkeypatch.setattr(
+        app,
+        "get_settings",
+        lambda: Settings(anthropic_api_key="anthropic-test", output_dir=tmp_path / "runs"),
+    )
 
     result = CliRunner().invoke(
         app.cli,
@@ -483,40 +487,14 @@ def test_cli_rejects_unsupported_anthropic_model_without_model_call(
             "--provider",
             "anthropic",
             "--model",
-            "claude-haiku-4-5",
+            "claude-future-preview",
             "--no-tui",
         ],
     )
 
-    assert result.exit_code == 1
-    assert "unsupported Anthropic model" in result.output
-    assert FakeOpenAIModel.instances == []
-
-
-def test_cli_rejects_unsupported_openai_model_without_model_call(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    reset_fakes()
-    monkeypatch.chdir(tmp_path)
-    get_settings.cache_clear()
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(api, "create_model", FakeOpenAIModel)
-
-    result = CliRunner().invoke(
-        app.cli,
-        [
-            "generate",
-            "make a hinge",
-            "--model",
-            "gpt-4.1",
-            "--no-tui",
-        ],
-    )
-
-    assert result.exit_code == 1
-    assert "unsupported OpenAI model" in result.output
-    assert FakeOpenAIModel.instances == []
+    assert result.exit_code == 0
+    assert FakeOpenAIModel.instances[0].settings.anthropic_model == "claude-future-preview"
+    assert "unrecognized model slug" not in result.output
 
 
 def test_cli_exits_nonzero_when_agent_fails(monkeypatch) -> None:

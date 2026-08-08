@@ -35,15 +35,11 @@ class _ModelSpec:
 # Prices are USD per million tokens: input, cached input, output, cache write.
 _MODELS = {
     "gpt-5.6-sol": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 5.0, 0.5, 30.0, 6.25),
-    "gpt-5.5-pro": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 30.0, 30.0, 180.0),
-    "gpt-5.5": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 5.0, 0.5, 30.0),
-    "gpt-5.4-pro": _ModelSpec(1_050_000, 30.0, 30.0, 180.0),
-    "gpt-5.4-mini": _ModelSpec(400_000, 0.75, 0.075, 4.5),
-    "gpt-5.4-nano": _ModelSpec(400_000, 0.2, 0.02, 1.25),
-    "gpt-5.4": _ModelSpec(1_050_000, 2.5, 0.25, 15.0),
+    "gpt-5.6-terra": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 2.0, 0.2, 12.0, 2.5),
+    "gpt-5.6-luna": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 0.2, 0.02, 1.2, 0.25),
 }
 _MODEL_ALIASES = {"gpt-5.6": "gpt-5.6-sol"}
-SUPPORTED_MODELS = tuple(sorted(_MODELS))
+KNOWN_MODELS = tuple(sorted((*_MODELS, *_MODEL_ALIASES)))
 
 
 class OpenAIModel:
@@ -513,10 +509,7 @@ def _response_token_usage(response: dict[str, Any]) -> dict[str, int]:
 
 def _model_spec(model: str) -> _ModelSpec | None:
     model = _MODEL_ALIASES.get(model, model)
-    for name, spec in sorted(_MODELS.items(), key=lambda item: -len(item[0])):
-        if model == name or model.startswith(f"{name}-"):
-            return spec
-    return None
+    return _MODELS.get(model)
 
 
 def context_window_tokens_for(model: str) -> int | None:

@@ -8,7 +8,7 @@ from mini_articraft.errors import ModelError
 from mini_articraft.settings import DEFAULT_GEMINI_MODEL, Settings, get_settings
 
 _LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
-# Use the same conservative working budget as Codex instead of the full API window.
+# These models have a 1M API window; use the same conservative working budget as Codex.
 _AGENT_CONTEXT_WINDOW_TOKENS = 272_000
 
 
@@ -24,21 +24,14 @@ class _ModelSpec:
 # Prices are USD per million tokens for the Gemini Developer API Standard tier.
 _MODELS = {
     "gemini-3.6-flash": _ModelSpec(_AGENT_CONTEXT_WINDOW_TOKENS, 1.50, 0.15, 7.50),
-    "gemini-3.1-pro-preview": _ModelSpec(
-        _AGENT_CONTEXT_WINDOW_TOKENS,
-        2.00,
-        0.20,
-        12.00,
-        long_context_prices=(4.00, 0.40, 18.00),
-    ),
+    "gemini-3.5-flash-lite": _ModelSpec(_AGENT_CONTEXT_WINDOW_TOKENS, 0.30, 0.03, 2.50),
 }
-SUPPORTED_MODELS = tuple(sorted(_MODELS))
+KNOWN_MODELS = tuple(sorted(_MODELS))
 
 
 class GeminiModel:
     def __init__(self, settings: Settings | None = None, *, client: Any | None = None):
         self.config = settings or get_settings()
-        _raise_for_unsupported_model(self.config.gemini_model)
         self._client = client
 
     @property
@@ -411,12 +404,6 @@ def context_window_tokens_for(model: str) -> int | None:
     return spec.context_window_tokens if spec is not None else None
 
 
-def _raise_for_unsupported_model(model: str) -> None:
-    if model not in _MODELS:
-        supported = ", ".join(SUPPORTED_MODELS)
-        raise ModelError(f"Unsupported Gemini model: {model}. Supported models: {supported}")
-
-
 def _raise_for_bad_status(response: Any, tool_calls: list[dict[str, Any]]) -> None:
     status = _value(response, "status")
     if status in {None, "completed"} or (status == "requires_action" and tool_calls):
@@ -429,4 +416,4 @@ def _format_exception(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message or repr(exc)}"
 
 
-__all__ = ["DEFAULT_GEMINI_MODEL", "SUPPORTED_MODELS", "GeminiModel", "context_window_tokens_for"]
+__all__ = ["DEFAULT_GEMINI_MODEL", "KNOWN_MODELS", "GeminiModel", "context_window_tokens_for"]

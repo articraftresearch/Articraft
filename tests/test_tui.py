@@ -29,7 +29,7 @@ def test_renderer_primary_status_style_is_white() -> None:
 def test_renderer_streams_transcript() -> None:
     renderer, console = _renderer()
     sequence = [
-        events.RunStarted("run-x", "gpt-5.5", "a box", "high"),
+        events.RunStarted("run-x", "gpt-5.6", "a box", "high"),
         events.TurnStarted(1),
         events.AssistantMessage(1, "I'll write the file.", [{"id": "c1", "name": "write"}]),
         events.ToolStarted("c1", "write", '{"path": "main.py"}'),
@@ -40,7 +40,7 @@ def test_renderer_streams_transcript() -> None:
 
     out = _text(console)
     assert "run-x" in out
-    assert "gpt-5.5" in out
+    assert "gpt-5.6" in out
     assert "reasoning high" in out
     assert "I'll write the file." in out
     assert "write(main.py)" in out
@@ -160,6 +160,19 @@ def test_renderer_uses_gpt_5_6_sol_context_window() -> None:
     assert "tokens 10.5k" in out
     assert "/ 272k" in out
     assert "(3.9%)" in out
+    assert "unrecognized model slug" not in out
+
+
+def test_renderer_warns_when_model_metadata_is_unavailable() -> None:
+    renderer, console = _renderer()
+
+    renderer.handle(events.RunStarted("run-x", "gpt-future-preview", "a box", "high"))
+
+    out = _text(console)
+    assert "unrecognized model slug" in out
+    assert "context window and pricing are unavailable locally" in out
+    assert "provider API" in out
+    assert "will validate it" in out
 
 
 def test_renderer_shows_full_compile_signals_without_protocol_tags_or_truncation() -> None:
