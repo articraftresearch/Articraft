@@ -45,6 +45,7 @@ valid USD identifiers:
 
 ```text
 /World
+  /physicsScene
   /<object>
     /parts
       /<part>
@@ -59,6 +60,9 @@ The exact path for a named shape is:
 ```text
 /World/<object>/parts/<part>/shapes/<shape>
 ```
+
+`/World/physicsScene` is the single `UsdPhysics.Scene` the stage is simulated in. There is always
+exactly one, so no body carries a simulation owner relationship.
 
 `/World/<object>` is an `Xform` with `UsdPhysics.ArticulationRootAPI`. The `parts` and `shapes`
 containers are `Scope` prims. Each part is an `Xform` with `UsdPhysics.RigidBodyAPI`. Each named
@@ -147,9 +151,20 @@ The manifest is plain JSON with this shape:
   "units": "meters",
   "meters_per_unit": 1.0,
   "up_axis": "Z",
+  "scene": {
+    "gravity_direction": [0.0, 0.0, -1.0],
+    "gravity_magnitude": 9.81
+  },
   "parts": [
     {
       "name": "body",
+      "body_state": {
+        "enabled": true,
+        "kinematic": false,
+        "linear_velocity": [0.0, 0.0, 0.0],
+        "angular_velocity": [0.0, 0.0, 0.0],
+        "starts_asleep": false
+      },
       "shapes": [
         {
           "name": "shell",
@@ -167,7 +182,9 @@ The manifest is plain JSON with this shape:
 ```
 
 Each articulation entry includes its name, type, parent, child, origin, axis, and motion limits.
-`geometry_type` is the Python class name of the authored build123d shape or mesh value.
+`geometry_type` is the Python class name of the authored build123d shape or mesh value. Manifest
+angular velocities stay in radians per second; the USD attribute holds the same value in degrees
+per second. See [articulated objects](30_articulated_object.md) for what these settings mean.
 
 ## Validation and safe publication
 

@@ -32,7 +32,8 @@ from mini_articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
 from mini_articraft.sdk.mass import ResolvedMass, resolve_mass
 from mini_articraft.sdk.materials import Material, is_library_material
-from mini_articraft.sdk.object import ArticulatedObject, Geometry
+from mini_articraft.sdk.object import ArticulatedObject, Geometry, Part
+from mini_articraft.sdk.physics import BodyState, PhysicsScene
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
 __all__ = ["ExportAudit", "ExportResult", "TextureExportReport", "export_object"]
@@ -156,6 +157,8 @@ def _write_usdz(
         world = UsdGeom.Xform.Define(stage, "/World")
         stage.SetDefaultPrim(world.GetPrim())
 
+        _write_scene(stage, "/World/physicsScene", obj.scene)
+
         object_path = f"/World/{_safe_name(obj.name)}"
         object_prim = UsdGeom.Xform.Define(stage, object_path).GetPrim()
         UsdPhysics.ArticulationRootAPI.Apply(object_prim)
@@ -187,6 +190,34 @@ def _write_usdz(
         finally:
             temp_path.unlink(missing_ok=True)
     return texture_report, masses
+
+
+def _write_scene(stage: Usd.Stage, path: str, scene: PhysicsScene) -> None:
+    """Author the one physics scene the whole stage is simulated in.
+
+    There is exactly one, so no body needs a simulation owner relationship: a
+    simulator that finds a single scene uses it for everything.
+    """
+
+    usd_scene = UsdPhysics.Scene.Define(stage, path)
+    usd_scene.CreateGravityDirectionAttr(Gf.Vec3f(*scene.direction))
+    usd_scene.CreateGravityMagnitudeAttr(scene.magnitude)
+
+
+def _write_body_state(rigid_body, state: BodyState) -> None:
+    """Author how the part starts, on the RigidBodyAPI already applied to it.
+
+    USD measures angular velocity in degrees per second; the SDK uses radians
+    everywhere, as it does for revolute joint limits.
+    """
+
+    rigid_body.CreateRigidBodyEnabledAttr(state.enabled)
+    rigid_body.CreateKinematicEnabledAttr(state.kinematic)
+    rigid_body.CreateStartsAsleepAttr(state.starts_asleep)
+    rigid_body.CreateVelocityAttr(Gf.Vec3f(*state.linear_velocity))
+    rigid_body.CreateAngularVelocityAttr(
+        Gf.Vec3f(*(math.degrees(value) for value in state.angular_velocity))
+    )
 
 
 def _write_parts(
@@ -221,7 +252,7 @@ def _write_parts(
         paths[part.name] = part_path
         part_prim = UsdGeom.Xform.Define(stage, part_path).GetPrim()
         _attrs(part_prim, {"name": part.name})
-        UsdPhysics.RigidBodyAPI.Apply(part_prim)
+        _write_body_state(UsdPhysics.RigidBodyAPI.Apply(part_prim), part.body_state)
         resolved_mass = _resolve_part_mass(part, mesh_tolerance)
         if resolved_mass is not None:
             _write_mass(part_prim, resolved_mass)
@@ -767,10 +798,15 @@ def _object_to_payload(
         "units": "meters",
         "meters_per_unit": 1.0,
         "up_axis": "Z",
+        "scene": {
+            "gravity_direction": list(obj.scene.direction),
+            "gravity_magnitude": obj.scene.magnitude,
+        },
         "parts": [
             {
                 "name": part.name,
                 "mass": masses.get(part.name),
+                "body_state": _body_state_payload(part),
                 "shapes": [
                     {
                         "name": shape.name,
@@ -796,6 +832,19 @@ def _object_to_payload(
             }
             for item in obj.articulations
         ],
+    }
+
+
+def _body_state_payload(part: Part) -> dict[str, object]:
+    """The manifest view of how a part starts. Angles stay in radians here."""
+
+    state = part.body_state
+    return {
+        "enabled": state.enabled,
+        "kinematic": state.kinematic,
+        "linear_velocity": list(state.linear_velocity),
+        "angular_velocity": list(state.angular_velocity),
+        "starts_asleep": state.starts_asleep,
     }
 
 
@@ -924,6 +973,7 @@ def _audit_usdz(
     found_parts: set[str] = set()
     found_shapes: set[tuple[str, str]] = set()
     found_joints: dict[str, Usd.Prim] = {}
+    physics_scenes = 0
     exported_points: list[np.ndarray] = []
     triangle_count = 0
     normal_meshes = 0
@@ -949,6 +999,8 @@ def _audit_usdz(
             found_parts.add(authored_name)
         if "/joints/" in path_text and authored_name:
             found_joints[authored_name] = prim
+        if prim.IsA(UsdPhysics.Scene):
+            physics_scenes += 1
         if not prim.IsA(UsdGeom.Mesh):
             continue
         mesh = UsdGeom.Mesh(prim)  # pyright: ignore[reportCallIssue]
@@ -1007,6 +1059,10 @@ def _audit_usdz(
         if source.is_watertight and source_sign != exported_sign:
             raise RuntimeError(f"USDZ audit winding changed for {selector!r}")
 
+    # Bodies carry no simulation owner, so a second scene would leave which one
+    # governs them up to the reader.
+    if physics_scenes != 1:
+        raise RuntimeError(f"USDZ audit expected exactly one physics scene, found {physics_scenes}")
     if found_parts != expected_parts:
         raise RuntimeError(
             f"USDZ audit part mismatch: expected={sorted(expected_parts)!r} "

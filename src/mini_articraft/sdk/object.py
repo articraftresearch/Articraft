@@ -19,10 +19,20 @@ from mini_articraft.sdk.joints import (
 )
 from mini_articraft.sdk.mass import MassProperties
 from mini_articraft.sdk.materials import Color, Material, _as_color, _as_material
+from mini_articraft.sdk.physics import BodyState, PhysicsScene
 
 Geometry: TypeAlias = Shape | MeshGeometry
 
-__all__ = ["ArticulatedObject", "Color", "Geometry", "Material", "Part", "PartRef"]
+__all__ = [
+    "ArticulatedObject",
+    "BodyState",
+    "Color",
+    "Geometry",
+    "Material",
+    "Part",
+    "PartRef",
+    "PhysicsScene",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,13 +75,11 @@ class Part:
     name: str
     _shapes: dict[str, _ShapeData] = field(default_factory=dict, init=False, repr=False)
     mass_properties: MassProperties | None = field(default=None, kw_only=True)
+    body_state: BodyState = field(default=BodyState(), kw_only=True)
 
     def __post_init__(self) -> None:
         self.name = _as_name(self.name, field_name="part name")
-        if self.mass_properties is not None and not isinstance(
-            self.mass_properties, MassProperties
-        ):
-            raise ValidationError(f"part {self.name!r} mass must be MassProperties")
+        self._validate_physics()
 
     def add(
         self,
@@ -134,12 +142,17 @@ class Part:
     def _iter_shapes(self) -> Iterator[_ShapeData]:
         return iter(self._shapes.values())
 
-    def validate(self) -> None:
-        self.name = _as_name(self.name, field_name="part name")
+    def _validate_physics(self) -> None:
         if self.mass_properties is not None and not isinstance(
             self.mass_properties, MassProperties
         ):
             raise ValidationError(f"part {self.name!r} mass must be MassProperties")
+        if not isinstance(self.body_state, BodyState):
+            raise ValidationError(f"part {self.name!r} body_state must be BodyState")
+
+    def validate(self) -> None:
+        self.name = _as_name(self.name, field_name="part name")
+        self._validate_physics()
         if not self._shapes:
             raise ValidationError(f"part {self.name!r} must contain at least one shape")
         for name, entry in self._shapes.items():
@@ -160,18 +173,31 @@ PartRef: TypeAlias = str | Part
 @dataclass
 class ArticulatedObject:
     name: str
+    scene: PhysicsScene = field(default=PhysicsScene(), kw_only=True)
     parts: list[Part] = field(default_factory=list, init=False)
     articulations: list[Articulation] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         self.name = _as_name(self.name, field_name="object name")
+        if not isinstance(self.scene, PhysicsScene):
+            raise ValidationError(f"object {self.name!r} scene must be a PhysicsScene")
 
     @property
     def meters_per_unit(self) -> float:
         return 1.0
 
-    def part(self, name: str, *, mass_properties: MassProperties | None = None) -> Part:
-        part = Part(name=name, mass_properties=mass_properties)
+    def part(
+        self,
+        name: str,
+        *,
+        mass_properties: MassProperties | None = None,
+        body_state: BodyState | None = None,
+    ) -> Part:
+        part = Part(
+            name=name,
+            mass_properties=mass_properties,
+            body_state=BodyState() if body_state is None else body_state,
+        )
         if any(existing.name == part.name for existing in self.parts):
             raise ValidationError(f"duplicate part name: {part.name!r}")
         self.parts.append(part)
@@ -226,6 +252,8 @@ class ArticulatedObject:
 
     def validate(self) -> None:
         self.name = _as_name(self.name, field_name="object name")
+        if not isinstance(self.scene, PhysicsScene):
+            raise ValidationError(f"object {self.name!r} scene must be a PhysicsScene")
         if not self.parts:
             raise ValidationError("object must contain at least one part")
 

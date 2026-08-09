@@ -67,6 +67,7 @@ from mini_articraft.sdk.joints import (
 from mini_articraft.sdk.mass import MassProperties
 from mini_articraft.sdk.materials import Material
 from mini_articraft.sdk.object import ArticulatedObject, Part
+from mini_articraft.sdk.physics import BodyState, PhysicsScene
 from mini_articraft.sdk.testing import (
     AllowedMeshIssues,
     AllowedOverlap,
@@ -100,6 +101,7 @@ __all__ = [
     "ArticulatedObject",
     "Articulation",
     "ArticulationType",
+    "BodyState",
     "BoxGeometry",
     "CapsuleGeometry",
     "ConeGeometry",
@@ -126,6 +128,7 @@ __all__ = [
     "MotionStripView",
     "Origin",
     "Part",
+    "PhysicsScene",
     "PipeGeometry",
     "PointOverlay",
     "PoseSample",
