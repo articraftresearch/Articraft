@@ -62,11 +62,12 @@ class Agent:
         *,
         run_id: str | None = None,
         image_path: Path | None = None,
+        source: Path | None = None,
     ) -> dict[str, Any]:
         """Run one generation and release the model exactly once."""
         data: dict[str, Any] | None = None
         try:
-            data = await self._run(prompt, run_id=run_id, image_path=image_path)
+            data = await self._run(prompt, run_id=run_id, image_path=image_path, source=source)
             return data
         finally:
             # The agent owns the model for the whole run, including setup
@@ -84,6 +85,7 @@ class Agent:
         *,
         run_id: str | None = None,
         image_path: Path | None = None,
+        source: Path | None = None,
     ) -> dict[str, Any]:
         supports_images = bool(getattr(self.model, "supports_images", True))
         if image_path is not None and not supports_images:
@@ -91,7 +93,7 @@ class Agent:
         image = prepare_image(image_path) if image_path is not None else None
         tool_schemas = tools.schemas(include_images=supports_images)
         self._enabled_tool_names = {str(schema["name"]) for schema in tool_schemas}
-        run_id, run_dir = _create_run(self.workspace, prompt, run_id)
+        run_id, run_dir = _create_run(self.workspace, prompt, run_id, source=source)
         context = ToolContext(self.workspace, run_dir, run_dir / "workspace")
         record_path = run_dir / "record.json"
         try:
@@ -103,6 +105,7 @@ class Agent:
                 context,
                 supports_images=supports_images,
                 tool_schemas=tool_schemas,
+                modifying=source is not None,
             )
         except asyncio.CancelledError:
             _save_run_error(record_path, "generation cancelled")
@@ -125,6 +128,7 @@ class Agent:
         *,
         supports_images: bool,
         tool_schemas: list[dict[str, Any]],
+        modifying: bool = False,
     ) -> dict[str, Any]:
         conversation_path = run_dir / "conversation.jsonl"
         record_path = run_dir / "record.json"
@@ -134,9 +138,9 @@ class Agent:
         record.result = ""
         record.save(record_path)
 
-        task = _read_prompt("task.md", include_images=supports_images).replace(
-            "{{ prompt }}", prompt
-        )
+        task = _read_prompt(
+            "task.md", include_images=supports_images, include_source=modifying
+        ).replace("{{ prompt }}", prompt)
         task_message: dict[str, Any] = {"role": "user", "content": task}
         recorded_task = task_message
         if image is not None:
@@ -508,17 +512,19 @@ def _create_run(
     workspace: Workspace,
     prompt: str,
     run_id: str | None,
+    *,
+    source: Path | None = None,
 ) -> tuple[str, Path]:
     """Create an explicit run exactly, or atomically suffix an automatic id."""
     if run_id is not None:
-        return run_id, workspace.create_run(run_id)
+        return run_id, workspace.create_run(run_id, source=source)
 
     base = _run_id_for_prompt(prompt)
     attempt = 1
     while True:
         candidate = base if attempt == 1 else f"{base}-{attempt}"
         try:
-            return candidate, workspace.create_run(candidate)
+            return candidate, workspace.create_run(candidate, source=source)
         except FileExistsError:
             attempt += 1
 
@@ -649,11 +655,23 @@ def _add_token_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, i
     return {key: left.get(key, 0) + right.get(key, 0) for key in keys}
 
 
-def _read_prompt(name: str, *, include_images: bool = True) -> str:
+def _read_prompt(
+    name: str,
+    *,
+    include_images: bool = True,
+    include_source: bool = False,
+) -> str:
     prompt = (package_dir / "prompts" / name).read_text(encoding="utf-8")
-    if include_images:
-        return prompt.replace("<image_prompt>\n", "").replace("</image_prompt>\n", "")
-    return re.sub(r"<image_prompt>\n.*?</image_prompt>\n?", "", prompt, flags=re.DOTALL)
+    for tag, include in (("image_prompt", include_images), ("source_prompt", include_source)):
+        prompt = _optional_block(prompt, tag, include)
+    return prompt
+
+
+def _optional_block(prompt: str, tag: str, include: bool) -> str:
+    """Keep or drop a tagged block, leaving the surrounding prompt untouched."""
+    if include:
+        return prompt.replace(f"<{tag}>\n", "").replace(f"</{tag}>\n", "")
+    return re.sub(rf"<{tag}>\n.*?</{tag}>\n?", "", prompt, flags=re.DOTALL)
 
 
 def _save_input_image(run_dir: Path, image: PreparedImage) -> str:

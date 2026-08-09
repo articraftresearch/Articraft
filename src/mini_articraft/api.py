@@ -62,6 +62,7 @@ def generate(
     provider: Provider | None = None,
     model: str | None = None,
     image: Path | str | None = None,
+    source: Path | str | None = None,
     output_dir: Path | str | None = None,
     on_event: EventHandler | None = None,
 ) -> GenerationResult:
@@ -88,6 +89,7 @@ def generate(
             provider=provider,
             model=model,
             image=image,
+            source=source,
             output_dir=output_dir,
             on_event=on_event,
         )
@@ -100,6 +102,7 @@ async def generate_async(
     provider: Provider | None = None,
     model: str | None = None,
     image: Path | str | None = None,
+    source: Path | str | None = None,
     output_dir: Path | str | None = None,
     on_event: EventHandler | None = None,
 ) -> GenerationResult:
@@ -111,17 +114,19 @@ async def generate_async(
     background thread. ``on_event`` runs on the current event loop and must not
     block it.
     """
-    settings, image_path = _resolve_request(
+    settings, image_path, source_path = _resolve_request(
         prompt,
         provider=provider,
         model=model,
         image=image,
+        source=source,
         output_dir=output_dir,
     )
     payload = await _run_generation(
         settings,
         prompt,
         image_path=image_path,
+        source_path=source_path,
         on_event=on_event,
     )
     return _result_from_payload(payload)
@@ -133,8 +138,9 @@ def _resolve_request(
     provider: Provider | None,
     model: str | None,
     image: Path | str | None,
+    source: Path | str | None,
     output_dir: Path | str | None,
-) -> tuple[Settings, Path | None]:
+) -> tuple[Settings, Path | None, Path | None]:
     if not prompt.strip():
         raise ValueError("prompt must not be empty")
 
@@ -150,7 +156,11 @@ def _resolve_request(
     image_path = Path(image) if image is not None else None
     if image_path is not None and not image_path.is_file():
         raise FileNotFoundError(f"reference image not found: {image_path}")
-    return settings, image_path
+
+    source_path = Path(source) if source is not None else None
+    if source_path is not None and not source_path.is_file():
+        raise FileNotFoundError(f"source script not found: {source_path}")
+    return settings, image_path, source_path
 
 
 def _resolved_settings(
@@ -217,6 +227,7 @@ async def _run_generation(
     prompt: str,
     *,
     image_path: Path | None = None,
+    source_path: Path | None = None,
     on_event: EventHandler | None = None,
 ) -> dict[str, Any]:
     """Run one agent generation against fully resolved settings."""
@@ -229,7 +240,9 @@ async def _run_generation(
     agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
     if on_event is not None:
         agent_kwargs["on_event"] = on_event
-    return await Agent(model_client, workspace, **agent_kwargs).run(prompt, image_path=image_path)
+    return await Agent(model_client, workspace, **agent_kwargs).run(
+        prompt, image_path=image_path, source=source_path
+    )
 
 
 def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:

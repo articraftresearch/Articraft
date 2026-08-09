@@ -6,6 +6,13 @@ User request:
 Edit `main.py` in the run workspace and build the requested object. Meet the four
 quality requirements from the system prompt. Use realistic geometry, model the
 primary mechanism, support every part, and avoid unintended overlap.
+<source_prompt>
+`main.py` already contains a working object. The request above is a change to
+that object, not a fresh build. Read the script first and understand what it
+already models. Then make the smallest edit that satisfies the request and keep
+the rest of the object as it is: existing parts, names, materials, and
+articulations are all deliberate. Do not rebuild what was not asked about.
+</source_prompt>
 
 Start with the preloaded SDK quickstart. Before choosing a representation, use
 `read` to survey the relevant SDK references and compare plausible build123d and

@@ -107,9 +107,16 @@ def test_generate_routes_inputs_and_returns_typed_paths(monkeypatch, tmp_path: P
         def __init__(self, model: Any, env: Any, **kwargs: Any):
             captured["agent_kwargs"] = kwargs
 
-        async def run(self, prompt: str, *, image_path: Path | None = None) -> dict[str, Any]:
+        async def run(
+            self,
+            prompt: str,
+            *,
+            image_path: Path | None = None,
+            source: Path | None = None,
+        ) -> dict[str, Any]:
             captured["prompt"] = prompt
             captured["image_path"] = image_path
+            captured["source"] = source
             return {
                 "status": "success",
                 "run_id": "test-run",

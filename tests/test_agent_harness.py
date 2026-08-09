@@ -838,7 +838,9 @@ def test_auto_run_id_atomically_retries_collisions(monkeypatch, tmp_path) -> Non
 def test_agent_terminalizes_setup_exceptions(monkeypatch, tmp_path) -> None:
     model = ScriptedModel([])
 
-    def fail_prompt_read(name: str, *, include_images: bool = True) -> str:
+    def fail_prompt_read(
+        name: str, *, include_images: bool = True, include_source: bool = False
+    ) -> str:
         raise RuntimeError("prompt unavailable")
 
     monkeypatch.setattr("mini_articraft.agent.harness._read_prompt", fail_prompt_read)

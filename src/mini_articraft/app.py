@@ -33,6 +33,16 @@ def generate(
         resolve_path=True,
         help="Local reference image for reconstruction.",
     ),
+    source: Path | None = typer.Option(
+        None,
+        "--source",
+        exists=False,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Existing run main.py to modify instead of starting from scratch.",
+    ),
     provider: Literal["openai", "gemini", "anthropic", "openrouter"] | None = typer.Option(
         None,
         "--provider",
@@ -72,6 +82,9 @@ def generate(
     if image is not None and not image.exists():
         typer.echo(f"reference image does not exist: {image}", err=True)
         raise typer.Exit(2)
+    if source is not None and not source.exists():
+        typer.echo(f"source script does not exist: {source}", err=True)
+        raise typer.Exit(2)
     settings = _settings(provider, model, output_dir, effort, compile_timeout, physics)
     if image is not None and settings.provider == "openrouter":
         typer.echo("OpenRouter does not support reference images.", err=True)
@@ -82,6 +95,7 @@ def generate(
             settings,
             prompt,
             image,
+            source,
             use_tui=use_tui,
         )
         if textures:
@@ -216,21 +230,30 @@ def _run_generation(
     settings: Settings,
     prompt: str,
     image_path: Path | None,
+    source_path: Path | None = None,
     *,
     use_tui: bool,
 ) -> dict[str, Any]:
     if use_tui:
-        return _generate_with_tui(settings, prompt, image_path)
-    return asyncio.run(api._run_generation(settings, prompt, image_path=image_path))
+        return _generate_with_tui(settings, prompt, image_path, source_path)
+    return asyncio.run(
+        api._run_generation(settings, prompt, image_path=image_path, source_path=source_path)
+    )
 
 
-def _generate_with_tui(settings: Settings, prompt: str, image_path: Path | None) -> dict[str, Any]:
+def _generate_with_tui(
+    settings: Settings,
+    prompt: str,
+    image_path: Path | None,
+    source_path: Path | None = None,
+) -> dict[str, Any]:
     try:
         result = run_live(
             lambda on_event: api._run_generation(
                 settings,
                 prompt,
                 image_path=image_path,
+                source_path=source_path,
                 on_event=on_event,
             )
         )

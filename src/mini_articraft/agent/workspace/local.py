@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -53,16 +54,20 @@ class LocalWorkspace:
     def __init__(self, **kwargs: Any):
         self.config = LocalWorkspaceConfig(**kwargs)
 
-    def create_run(self, run_id: str) -> Path:
+    def create_run(self, run_id: str, *, source: Path | str | None = None) -> Path:
         run_id = _validate_run_id(run_id)
         run_dir = self.config.output_dir / run_id
         if run_dir.exists():
             raise FileExistsError(f"run already exists: {run_id}")
 
+        # Read the seed before anything is created, so a bad path fails without
+        # leaving half a run behind.
+        main_py = DEFAULT_MAIN_PY if source is None else _read_source(Path(source))
+
         (run_dir / "workspace").mkdir(parents=True)
         (run_dir / "result").mkdir()
         _link_sdk_docs(run_dir / "workspace")
-        run_dir.joinpath("workspace", "main.py").write_text(DEFAULT_MAIN_PY, encoding="utf-8")
+        run_dir.joinpath("workspace", "main.py").write_text(main_py, encoding="utf-8")
         (run_dir / "conversation.jsonl").touch()
         Record(run_id=run_id).save(run_dir / "record.json")
         return run_dir
@@ -142,6 +147,36 @@ class LocalWorkspace:
         record.run_id = run_dir.name
         record.attempts += 1
         record.save(run_dir / "record.json")
+
+
+_REQUIRED_FUNCTIONS = ("build_object_model", "run_tests")
+
+
+def _read_source(path: Path) -> str:
+    """Read a seed ``main.py`` for a run that modifies an existing object.
+
+    The compile worker calls ``build_object_model()`` and ``run_tests()``, so a
+    script without them fails deep in the worker with nothing useful to say.
+    Parsing catches the common mistake -- pointing at the wrong file -- here,
+    and parsing rather than importing means the script is never executed.
+    """
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"source script cannot be read: {path} ({exc})") from exc
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        raise ValueError(f"source script is not valid Python: {path} ({exc})") from exc
+    defined = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    missing = [name for name in _REQUIRED_FUNCTIONS if name not in defined]
+    if missing:
+        raise ValueError(
+            f"source script must define {' and '.join(_REQUIRED_FUNCTIONS)} at the top level: "
+            f"{path} is missing {', '.join(missing)}"
+        )
+    return text
 
 
 def _validate_run_id(run_id: str) -> str:

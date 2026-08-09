@@ -47,6 +47,7 @@ class FakeAgent:
         self.kwargs = kwargs
         self.prompt = ""
         self.image_path: Path | None = None
+        self.source: Path | None = None
         self.instances.append(self)
 
     async def run(
@@ -54,10 +55,12 @@ class FakeAgent:
         prompt: str,
         *,
         image_path: Path | None = None,
+        source: Path | None = None,
     ) -> dict[str, object]:
         try:
             self.prompt = prompt
             self.image_path = image_path
+            self.source = source
             return self.result
         finally:
             await self.model.close()
@@ -159,7 +162,7 @@ def test_texture_flag_is_postprocessing_after_tui_generation(monkeypatch) -> Non
     calls: list[tuple[str, object]] = []
     generated = {"status": "success", "run": "/tmp/run"}
 
-    def run_generation(_settings, _prompt, _image, *, use_tui):
+    def run_generation(_settings, _prompt, _image, _source=None, *, use_tui):
         calls.append(("generate", use_tui))
         return generated
 
