@@ -169,13 +169,8 @@ target one feature.
 
 These describe the world the object is simulated in and how each part starts moving. They change
 no geometry. Mini Articraft's own viewer and `simulate_usdz` ignore them entirely: local runs
-always use Earth gravity with every part free and at rest.
-
-An export is an asset, not a simulation stage, so these settings stay deliberately light. Gravity
-is recorded in the manifest and never written into the USD layer, because the stage that
-references the asset owns its own scene. Body state is written into the USD layer only where it
-differs from the default, so a part nobody configured carries no opinion for a scenario to
-override.
+always use Earth gravity with every part free and at rest. They are written into the USDZ for a
+downstream simulator to read.
 
 ### `PhysicsScene`
 

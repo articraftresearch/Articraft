@@ -33,7 +33,7 @@ from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimi
 from mini_articraft.sdk.mass import ResolvedMass, resolve_mass
 from mini_articraft.sdk.materials import Material, is_library_material
 from mini_articraft.sdk.object import ArticulatedObject, Geometry, Part
-from mini_articraft.sdk.physics import BodyState
+from mini_articraft.sdk.physics import BodyState, PhysicsScene
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
 __all__ = ["ExportAudit", "ExportResult", "TextureExportReport", "export_object"]
@@ -157,6 +157,8 @@ def _write_usdz(
         world = UsdGeom.Xform.Define(stage, "/World")
         stage.SetDefaultPrim(world.GetPrim())
 
+        _write_scene(stage, "/World/physicsScene", obj.scene)
+
         object_path = f"/World/{_safe_name(obj.name)}"
         object_prim = UsdGeom.Xform.Define(stage, object_path).GetPrim()
         UsdPhysics.ArticulationRootAPI.Apply(object_prim)
@@ -190,32 +192,32 @@ def _write_usdz(
     return texture_report, masses
 
 
+def _write_scene(stage: Usd.Stage, path: str, scene: PhysicsScene) -> None:
+    """Author the one physics scene the whole stage is simulated in.
+
+    There is exactly one, so no body needs a simulation owner relationship: a
+    simulator that finds a single scene uses it for everything.
+    """
+
+    usd_scene = UsdPhysics.Scene.Define(stage, path)
+    usd_scene.CreateGravityDirectionAttr(Gf.Vec3f(*scene.direction))
+    usd_scene.CreateGravityMagnitudeAttr(scene.magnitude)
+
+
 def _write_body_state(rigid_body, state: BodyState) -> None:
     """Author how the part starts, on the RigidBodyAPI already applied to it.
-
-    Only what the author actually set is written. An unauthored attribute falls
-    back to the schema default, which is what a scenario layer expects to find:
-    an opinion in the asset is an opinion the scenario has to override. The
-    ``BodyState`` defaults match the USD fallbacks exactly, so a part nobody
-    configured adds nothing to the layer.
 
     USD measures angular velocity in degrees per second; the SDK uses radians
     everywhere, as it does for revolute joint limits.
     """
 
-    default = BodyState()
-    if state.enabled != default.enabled:
-        rigid_body.CreateRigidBodyEnabledAttr(state.enabled)
-    if state.kinematic != default.kinematic:
-        rigid_body.CreateKinematicEnabledAttr(state.kinematic)
-    if state.starts_asleep != default.starts_asleep:
-        rigid_body.CreateStartsAsleepAttr(state.starts_asleep)
-    if state.linear_velocity != default.linear_velocity:
-        rigid_body.CreateVelocityAttr(Gf.Vec3f(*state.linear_velocity))
-    if state.angular_velocity != default.angular_velocity:
-        rigid_body.CreateAngularVelocityAttr(
-            Gf.Vec3f(*(math.degrees(value) for value in state.angular_velocity))
-        )
+    rigid_body.CreateRigidBodyEnabledAttr(state.enabled)
+    rigid_body.CreateKinematicEnabledAttr(state.kinematic)
+    rigid_body.CreateStartsAsleepAttr(state.starts_asleep)
+    rigid_body.CreateVelocityAttr(Gf.Vec3f(*state.linear_velocity))
+    rigid_body.CreateAngularVelocityAttr(
+        Gf.Vec3f(*(math.degrees(value) for value in state.angular_velocity))
+    )
 
 
 def _write_parts(
@@ -1057,11 +1059,10 @@ def _audit_usdz(
         if source.is_watertight and source_sign != exported_sign:
             raise RuntimeError(f"USDZ audit winding changed for {selector!r}")
 
-    # The package is an asset, not a simulation stage. A scene prim here would
-    # collide with the one belonging to whatever stage references the asset,
-    # and bodies carry no simulation owner to break the tie.
-    if physics_scenes:
-        raise RuntimeError(f"USDZ audit found {physics_scenes} physics scenes in an asset package")
+    # Bodies carry no simulation owner, so a second scene would leave which one
+    # governs them up to the reader.
+    if physics_scenes != 1:
+        raise RuntimeError(f"USDZ audit expected exactly one physics scene, found {physics_scenes}")
     if found_parts != expected_parts:
         raise RuntimeError(
             f"USDZ audit part mismatch: expected={sorted(expected_parts)!r} "

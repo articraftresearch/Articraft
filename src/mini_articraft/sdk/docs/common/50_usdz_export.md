@@ -45,6 +45,7 @@ valid USD identifiers:
 
 ```text
 /World
+  /physicsScene
   /<object>
     /parts
       /<part>
@@ -60,8 +61,8 @@ The exact path for a named shape is:
 /World/<object>/parts/<part>/shapes/<shape>
 ```
 
-The package is an asset, not a simulation stage. It contains no `UsdPhysics.Scene`: gravity belongs
-to whatever stage references the asset, and a scene here would collide with that one.
+`/World/physicsScene` is the single `UsdPhysics.Scene` the stage is simulated in. There is always
+exactly one, so no body carries a simulation owner relationship.
 
 `/World/<object>` is an `Xform` with `UsdPhysics.ArticulationRootAPI`. The `parts` and `shapes`
 containers are `Scope` prims. Each part is an `Xform` with `UsdPhysics.RigidBodyAPI`. Each named
@@ -181,13 +182,9 @@ The manifest is plain JSON with this shape:
 ```
 
 Each articulation entry includes its name, type, parent, child, origin, axis, and motion limits.
-`geometry_type` is the Python class name of the authored build123d shape or mesh value.
-
-The manifest records the authored `scene` and `body_state` in full, including the defaults. The
-USD layer is sparser: gravity is not written at all, and a body attribute is written only when it
-differs from the default, so an unconfigured part leaves the layer untouched. Manifest angular
-velocities stay in radians per second; the USD attribute holds the same value in degrees per
-second. See [articulated objects](30_articulated_object.md) for what these settings mean.
+`geometry_type` is the Python class name of the authored build123d shape or mesh value. Manifest
+angular velocities stay in radians per second; the USD attribute holds the same value in degrees
+per second. See [articulated objects](30_articulated_object.md) for what these settings mean.
 
 ## Validation and safe publication
 
