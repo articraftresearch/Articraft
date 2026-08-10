@@ -30,12 +30,12 @@ class LocalWorkspaceConfig(BaseModel):
 
 DEFAULT_MAIN_PY = """from build123d import Box
 
-from mini_articraft.sdk import ArticulatedObject, Material, TestContext, TestReport
+from mini_articraft.sdk import Material, RigidBodyAssembly, TestContext, TestReport
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("object")
-    base = model.part("base")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("object")
+    base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.1), name="body", material=Material.ABS_PLASTIC)
     return model
 

@@ -13,7 +13,6 @@ from mini_articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
 from mini_articraft.sdk.assembly import RigidBodyAssembly
 from mini_articraft.sdk.bodies import Geometry
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.joints import Articulation, ArticulationType, Origin
 
 Vec3: TypeAlias = tuple[float, float, float]
 Bounds: TypeAlias = tuple[Vec3, Vec3]
@@ -594,23 +593,6 @@ def _mesh_to_bvh(mesh: trimesh.Trimesh) -> object:
 
 def _identity() -> Mat4:
     return np.identity(4, dtype=np.float64)
-
-
-def _origin_matrix(origin: Origin) -> Mat4:
-    matrix = _rpy_matrix(origin.rpy)
-    matrix[:3, 3] = np.asarray(origin.xyz, dtype=np.float64)
-    return matrix
-
-
-def _motion_matrix(articulation: Articulation, value: float) -> Mat4:
-    if articulation.articulation_type == ArticulationType.FIXED:
-        return _identity()
-    axis = _normalize(articulation.axis)
-    if articulation.articulation_type == ArticulationType.PRISMATIC:
-        matrix = _identity()
-        matrix[:3, 3] = axis * value
-        return matrix
-    return _axis_angle_matrix(axis, value)
 
 
 def _rpy_matrix(rpy: Vec3) -> Mat4:

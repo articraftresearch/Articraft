@@ -57,16 +57,20 @@ from mini_articraft.sdk._mesh.sweeps import (
     SweepGeometry,
     WirePolylineGeometry,
 )
-from mini_articraft.sdk.errors import SDKError, ValidationError
-from mini_articraft.sdk.joints import (
+from mini_articraft.sdk.assembly import (
+    WORLD,
     Articulation,
-    ArticulationType,
-    MotionLimits,
-    Origin,
+    Joint,
+    JointAxis,
+    JointDOF,
+    JointFrame,
+    PhysicsState,
+    RigidBodyAssembly,
 )
+from mini_articraft.sdk.bodies import RigidBody
+from mini_articraft.sdk.errors import SDKError, ValidationError
 from mini_articraft.sdk.mass import MassProperties
 from mini_articraft.sdk.materials import Material
-from mini_articraft.sdk.object import ArticulatedObject, Part
 from mini_articraft.sdk.physics import EARTH_GRAVITY, BodyState, PhysicsScene
 from mini_articraft.sdk.testing import (
     AllowedMeshIssues,
@@ -96,12 +100,11 @@ from mini_articraft.sdk.visual import (
 
 __all__ = [
     "EARTH_GRAVITY",
+    "WORLD",
     "AllowedMeshIssues",
     "AllowedOverlap",
     "ArcPipeGeometry",
-    "ArticulatedObject",
     "Articulation",
-    "ArticulationType",
     "BodyState",
     "BoxGeometry",
     "CapsuleGeometry",
@@ -114,6 +117,10 @@ __all__ = [
     "FailureKind",
     "GeometryMetrics",
     "ImagePoint",
+    "Joint",
+    "JointAxis",
+    "JointDOF",
+    "JointFrame",
     "LatheGeometry",
     "LineOverlay",
     "LoftGeometry",
@@ -125,15 +132,15 @@ __all__ = [
     "MeshHealthIssue",
     "MeshHealthReport",
     "ModelView",
-    "MotionLimits",
     "MotionStripView",
-    "Origin",
-    "Part",
     "PhysicsScene",
+    "PhysicsState",
     "PipeGeometry",
     "PointOverlay",
     "PoseSample",
     "Reticle",
+    "RigidBody",
+    "RigidBodyAssembly",
     "RoundedBoxGeometry",
     "SDKError",
     "SectionView",

@@ -17,8 +17,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk._values import Vec3, _as_vec3, _finite
+from mini_articraft.sdk.errors import ValidationError
 
 EARTH_GRAVITY = 9.81
 

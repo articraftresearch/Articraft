@@ -10,11 +10,16 @@ import numpy as np
 import trimesh
 from PIL import Image, ImageDraw
 
-from mini_articraft.sdk._collision import MeshCollisionKernel, _origin_matrix
+from mini_articraft.sdk._collision import MeshCollisionKernel
 from mini_articraft.sdk._mesh.core import geometry_to_trimesh
+from mini_articraft.sdk.assembly import (
+    WORLD,
+    Joint,
+    JointAxis,
+    RigidBodyAssembly,
+    _frame_matrix,
+)
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.joints import Articulation
-from mini_articraft.sdk.object import ArticulatedObject
 from mini_articraft.sdk.testing import DEFAULT_MESH_TOLERANCE, PoseSample
 
 Vec3: TypeAlias = tuple[float, float, float]
@@ -150,7 +155,7 @@ class MeridionalSectionView:
 
 @dataclass(frozen=True)
 class MotionStripView:
-    articulation: str | Articulation
+    articulation: str | Joint
     positions: tuple[float, ...] = ()
     samples: int = 5
     view: ModelView = field(
@@ -195,7 +200,7 @@ def annotate_image(
 
 
 def render_view(
-    model: ArticulatedObject,
+    model: RigidBodyAssembly,
     view: VisualSpec,
     output: str | Path,
     *,
@@ -223,7 +228,7 @@ def render_view(
 
 
 def _render_model(
-    model: ArticulatedObject,
+    model: RigidBodyAssembly,
     view: ModelView,
     pose: dict[str, float],
     mesh_tolerance: float,
@@ -326,7 +331,7 @@ def _render_model(
 
 
 def _render_section(
-    model: ArticulatedObject,
+    model: RigidBodyAssembly,
     view: SectionView,
     pose: dict[str, float],
     mesh_tolerance: float,
@@ -390,7 +395,7 @@ def _render_section(
 
 
 def _render_motion_strip(
-    model: ArticulatedObject,
+    model: RigidBodyAssembly,
     view: MotionStripView,
     base_pose: dict[str, float],
     mesh_tolerance: float,
@@ -443,7 +448,7 @@ def _render_motion_strip(
 
 
 def _world_meshes(
-    model: ArticulatedObject,
+    model: RigidBodyAssembly,
     pose: dict[str, float],
     mesh_tolerance: float,
     *,
@@ -456,7 +461,7 @@ def _world_meshes(
     selected_shape_set = set(selected_shapes)
     transforms = MeshCollisionKernel(model, mesh_tolerance=mesh_tolerance).world_transforms(pose)
     rendered: list[_RenderMesh] = []
-    for part in model.parts:
+    for part in model.resolve().rigid_bodies:
         if selected and part.name not in selected:
             continue
         for shape in part._iter_shapes():
@@ -601,7 +606,7 @@ def _draw_bounds(draw: ImageDraw.ImageDraw, corners: np.ndarray) -> None:
 
 def _draw_joints(
     draw: ImageDraw.ImageDraw,
-    model: ArticulatedObject,
+    model: RigidBodyAssembly,
     pose: dict[str, float],
     center: np.ndarray,
     right: np.ndarray,
@@ -615,13 +620,21 @@ def _draw_joints(
     transforms = MeshCollisionKernel(model, mesh_tolerance=DEFAULT_MESH_TOLERANCE).world_transforms(
         pose
     )
-    for joint in model.articulations:
-        parent = transforms.get(joint.parent)
+    for item in model.resolve().joints:
+        joint = item.joint
+        if joint.body0 is WORLD:
+            continue
+        parent = transforms.get(joint.body0.name)
         if parent is None:
             continue
-        frame = parent @ _origin_matrix(joint.origin)
+        frame = parent @ _frame_matrix(joint.frame0)
         point = frame[:3, 3]
-        axis = frame[:3, :3] @ _normalize(joint.axis, "joint axis")
+        rotational = [dof for dof in joint.dofs if cast(JointAxis, dof.axis).is_rotational]
+        if not rotational:
+            continue
+        unit = [0.0, 0.0, 0.0]
+        unit[cast(JointAxis, rotational[0].axis).component] = 1.0
+        axis = frame[:3, :3] @ np.asarray(unit, dtype=np.float64)
         length = max(0.02, 16.0 / max(scale, 1e-9))
         world = np.asarray([point - axis * length, point + axis * length])
         screen = _project_points(

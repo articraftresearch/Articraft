@@ -21,8 +21,8 @@ from dataclasses import dataclass
 import numpy as np
 import trimesh
 
-from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk._values import Vec3, _as_vec3
+from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.materials import Material
 
 
