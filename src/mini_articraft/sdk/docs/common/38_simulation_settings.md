@@ -30,7 +30,8 @@ moon = ArticulatedObject("rover", scene=PhysicsScene(magnitude=1.62))
 ```
 
 `direction` is a world-space direction and is stored normalized, so its length is ignored. It must
-be nonzero. `magnitude` is in m/s^2 and must not be negative; `0.0` is a valid free-fall world.
+be nonzero. `magnitude` is in m/s^2 and must not be negative; `0.0` is a valid free-fall world. The
+default is available as `EARTH_GRAVITY` when a scene needs to say so explicitly.
 
 ## `BodyState`
 
