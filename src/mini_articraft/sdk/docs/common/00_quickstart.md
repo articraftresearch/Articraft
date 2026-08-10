@@ -63,9 +63,19 @@ model.articulation("main", root=body, joints=["lid_hinge"])
 Each frame is where the joint sits *in that body's own coordinates*, so the two frames coincide
 at rest. Limits are in radians and must contain zero, because zero is the pose you authored.
 
-A ring of joints is allowed -- a four-bar linkage closes, and the joint left out of the
-articulation is exported as a loop-closing constraint. Use named shape arguments in exact checks
-when a body contains several shapes.
+**Count the pivots on every body before you write the joints.** A body pinned in two places
+needs two joints, and two joints into the same body means the mechanism is a ring, not a chain.
+Linkages, four-bars, parallel grippers, scissor lifts, and folding braces are all rings.
+
+Author every joint the mechanism physically has. Then name the spanning tree in
+`model.articulation(...)` and leave the ring-closing joint out of that list -- it still exports,
+as a constraint the simulator solves. See `docs/sdk/examples/closed_loop_linkage.py`.
+
+The failure to avoid is authoring a ring as a chain: drop the closing joint and the parts still
+export, then flap loose the moment the object is simulated. If a body's motion is supposed to be
+driven by two other bodies at once, it needs a joint to each of them.
+
+Use named shape arguments in exact checks when a body contains several shapes.
 
 Read only the reference that applies to the next piece of geometry:
 
@@ -111,6 +121,8 @@ Read only the executable example closest to the current task:
   `docs/sdk/examples/molded_mug.py`.
 - Mass properties from materials and geometry:
   `docs/sdk/examples/mass_properties.py`.
+- A closed-loop linkage, and which joint to leave out of the articulation:
+  `docs/sdk/examples/closed_loop_linkage.py`.
 - Variable profile sweep and smooth section loft:
   `docs/sdk/examples/variable_sweep_and_loft.py`.
 

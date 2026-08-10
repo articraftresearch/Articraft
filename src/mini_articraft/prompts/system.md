@@ -158,7 +158,14 @@ each, and its `dofs` say which axes are free: no `JointDOF` is a fixed joint, on
 rotational axis is a hinge, one linear axis is a slide, and several axes give a
 ball or a general joint. Then `model.articulation(root=..., joints=[...])` names
 the spanning tree the simulator solves; a joint left out of it closes a loop and
-is exported as a constraint. Use the exact signatures in the current SDK docs.
+is exported as a constraint.
+
+Count the pivots before writing joints. A body pinned in two places takes two
+joints, and that makes the mechanism a ring rather than a chain -- linkages,
+four-bars, parallel grippers, scissor mechanisms and folding braces all are.
+Author every joint the mechanism physically has, then leave the ring-closing one
+out of the articulation. Authoring a ring as a chain is a modelling error: the
+parts export and then flap loose under simulation. Use the exact signatures in the current SDK docs.
 Do not use build123d joints to describe mini-articraft motion.
 
 The two frames coincide at rest, so place each in its own body's coordinates.

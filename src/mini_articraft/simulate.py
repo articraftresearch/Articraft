@@ -463,7 +463,9 @@ def _read_scene(stage: Usd.Stage) -> _Scene:
         raise ValueError("expected one articulated object on the stage")
     obj = objects[0]
 
-    scene = _Scene(parts={prim.GetName(): prim for prim in obj.GetChild("rigid_bodies").GetChildren()})
+    scene = _Scene(
+        parts={prim.GetName(): prim for prim in obj.GetChild("rigid_bodies").GetChildren()}
+    )
     joints_scope = obj.GetChild("joints")
     for prim in joints_scope.GetChildren() if joints_scope else []:
         kind = _JOINT_TYPES.get(str(prim.GetTypeName()))
