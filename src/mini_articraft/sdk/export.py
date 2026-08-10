@@ -38,6 +38,7 @@ from mini_articraft.sdk.assembly import (
     ResolvedRigidBodyAssembly,
     RigidBodyAssembly,
 )
+from mini_articraft.sdk.bodies import RigidBody
 from mini_articraft.sdk.joints import Articulation, ArticulationType, MotionLimits
 from mini_articraft.sdk.mass import ResolvedMass, resolve_mass
 from mini_articraft.sdk.materials import Material, is_library_material
@@ -321,6 +322,7 @@ def _write_assembly_usdz(
 
         world = UsdGeom.Xform.Define(stage, "/World")
         stage.SetDefaultPrim(world.GetPrim())
+        _write_scene(stage, "/World/physicsScene", resolved.scene)
         assembly_path = f"/World/{_safe_name(resolved.name)}"
         assembly_prim = UsdGeom.Xform.Define(stage, assembly_path).GetPrim()
         Usd.ModelAPI(assembly_prim).SetKind(Kind.Tokens.assembly)
@@ -1118,10 +1120,10 @@ def _object_to_payload(
     }
 
 
-def _body_state_payload(part: Part) -> dict[str, object]:
-    """The manifest view of how a part starts. Angles stay in radians here."""
+def _body_state_payload(body: Part | RigidBody) -> dict[str, object]:
+    """The manifest view of how a body starts. Angles stay in radians here."""
 
-    state = part.body_state
+    state = body.body_state
     return {
         "enabled": state.enabled,
         "kinematic": state.kinematic,
@@ -1142,10 +1144,15 @@ def _assembly_to_payload(
         "units": "meters",
         "meters_per_unit": 1.0,
         "up_axis": "Z",
+        "scene": {
+            "gravity_direction": list(resolved.scene.direction),
+            "gravity_magnitude": resolved.scene.magnitude,
+        },
         "rigid_bodies": [
             {
                 "name": body.name,
                 "mass": masses.get(body.name),
+                "body_state": _body_state_payload(body),
                 "shapes": [
                     {
                         "name": shape.name,
@@ -1504,12 +1511,15 @@ def _audit_assembly_usdz(
         raise RuntimeError("USDZ audit expected exactly one rigid-body assembly")
     if Usd.ModelAPI(assembly_prims[0]).GetKind() != Kind.Tokens.assembly:
         raise RuntimeError("USDZ audit assembly prim is not kind=assembly")
+    # Bodies carry no simulation owner, so a second scene would leave which one
+    # governs them up to the reader.
+    scenes = [prim for prim in stage.Traverse() if prim.IsA(UsdPhysics.Scene)]
+    if len(scenes) != 1:
+        raise RuntimeError(f"USDZ audit expected exactly one physics scene, found {len(scenes)}")
 
     expected_bodies = {body.name for body in resolved.rigid_bodies}
     expected_shapes = {
-        (body.name, shape.name)
-        for body in resolved.rigid_bodies
-        for shape in body._iter_shapes()
+        (body.name, shape.name) for body in resolved.rigid_bodies for shape in body._iter_shapes()
     }
     expected_joints = {item.joint.name: item for item in resolved.joints}
     body_prims: dict[str, Usd.Prim] = {}
@@ -1624,9 +1634,7 @@ def _audit_assembly_usdz(
         if not prim.IsA(expected_schema):
             raise RuntimeError(f"USDZ audit native schema mismatch for joint {name!r}")
 
-    expected_roots = {
-        item.articulation.root.name for item in resolved.articulations
-    }
+    expected_roots = {item.articulation.root.name for item in resolved.articulations}
     found_roots = {
         _custom_string(prim, "name")
         for prim in stage.Traverse()

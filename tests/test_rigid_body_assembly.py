@@ -32,9 +32,7 @@ def four_bar(*, second_closure: bool = False) -> RigidBodyAssembly:
     coupler = add_body(assembly, "coupler")
     rocker = add_body(assembly, "rocker")
     revolute = (JointDOF(JointAxis.ROT_Z),)
-    ground_crank = assembly.joint(
-        "ground_crank", body0=ground, body1=crank, dofs=revolute
-    )
+    ground_crank = assembly.joint("ground_crank", body0=ground, body1=crank, dofs=revolute)
     crank_coupler = assembly.joint(
         "crank_coupler",
         body0=crank,
@@ -205,9 +203,7 @@ def test_world_joint_is_the_fixed_articulation_root() -> None:
         frame0=JointFrame(xyz=(1.0, 2.0, 3.0)),
         body1=base,
     )
-    hinge = assembly.joint(
-        "hinge", body0=base, body1=link, dofs=(JointDOF(JointAxis.ROT_Y),)
-    )
+    hinge = assembly.joint("hinge", body0=base, body1=link, dofs=(JointDOF(JointAxis.ROT_Y),))
     assembly.articulation("fixed", root=mount, joints=(mount, hinge))
 
     resolved = assembly.resolve()

@@ -14,6 +14,7 @@ from mini_articraft.sdk.bodies import RigidBody, RigidBodyRef
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import _as_name
 from mini_articraft.sdk.mass import MassProperties
+from mini_articraft.sdk.physics import BodyState, PhysicsScene
 
 Vec3: TypeAlias = tuple[float, float, float]
 Mat4: TypeAlias = np.ndarray
@@ -233,6 +234,7 @@ class ResolvedRigidBodyAssembly:
     articulations: tuple[ResolvedArticulation, ...]
     reference_state: PhysicsState
     has_closed_loops: bool
+    scene: PhysicsScene
 
     def get_rigid_body(self, body: RigidBodyRef) -> RigidBody:
         name = _body_name(body, field_name="rigid body")
@@ -250,7 +252,10 @@ class ResolvedRigidBodyAssembly:
 
     def world_transforms(self, state: PhysicsState | None = None) -> dict[str, Mat4]:
         checked = self.validate_state(state or self.reference_state)
-        return {name: np.asarray(matrix, dtype=np.float64) for name, matrix in checked.body_poses.items()}
+        return {
+            name: np.asarray(matrix, dtype=np.float64)
+            for name, matrix in checked.body_poses.items()
+        }
 
     def validate_state(
         self,
@@ -360,21 +365,32 @@ class RigidBodyAssembly:
     """A connected graph of USD rigid bodies, joints, and solver articulations."""
 
     name: str
+    scene: PhysicsScene = field(default=PhysicsScene(), kw_only=True)
     rigid_bodies: list[RigidBody] = field(default_factory=list, init=False)
     joints: list[Joint] = field(default_factory=list, init=False)
     articulations: list[Articulation] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         self.name = _as_name(self.name, field_name="assembly name")
+        if not isinstance(self.scene, PhysicsScene):
+            raise ValidationError(f"assembly {self.name!r} scene must be a PhysicsScene")
 
     @property
     def meters_per_unit(self) -> float:
         return 1.0
 
     def rigid_body(
-        self, name: str, *, mass_properties: MassProperties | None = None
+        self,
+        name: str,
+        *,
+        mass_properties: MassProperties | None = None,
+        body_state: BodyState | None = None,
     ) -> RigidBody:
-        body = RigidBody(name, mass_properties=mass_properties)
+        body = RigidBody(
+            name,
+            mass_properties=mass_properties,
+            body_state=BodyState() if body_state is None else body_state,
+        )
         if any(existing.name == body.name for existing in self.rigid_bodies):
             raise ValidationError(f"duplicate rigid body name: {body.name!r}")
         self.rigid_bodies.append(body)
@@ -448,10 +464,10 @@ class RigidBodyAssembly:
 
     def resolve(self) -> ResolvedRigidBodyAssembly:
         self.name = _as_name(self.name, field_name="assembly name")
+        if not isinstance(self.scene, PhysicsScene):
+            raise ValidationError(f"assembly {self.name!r} scene must be a PhysicsScene")
         _validate_members(self)
-        resolved_articulations, selected_by_joint, articulated_bodies = _resolve_articulations(
-            self
-        )
+        resolved_articulations, selected_by_joint, articulated_bodies = _resolve_articulations(self)
         resolved_joints = tuple(
             ResolvedJoint(
                 joint=joint,
@@ -481,6 +497,7 @@ class RigidBodyAssembly:
             articulations=resolved_articulations,
             reference_state=PhysicsState(transforms),
             has_closed_loops=has_closed_loops,
+            scene=self.scene,
         )
         reference = unresolved.validate_state(unresolved.reference_state)
         return ResolvedRigidBodyAssembly(
@@ -490,6 +507,7 @@ class RigidBodyAssembly:
             articulations=unresolved.articulations,
             reference_state=reference,
             has_closed_loops=unresolved.has_closed_loops,
+            scene=unresolved.scene,
         )
 
     def physics_state(
@@ -498,9 +516,7 @@ class RigidBodyAssembly:
         *,
         dof_positions: Mapping[str, float] | None = None,
     ) -> PhysicsState:
-        return self.resolve().validate_state(
-            PhysicsState(body_poses, dof_positions=dof_positions)
-        )
+        return self.resolve().validate_state(PhysicsState(body_poses, dof_positions=dof_positions))
 
     def _endpoint(self, endpoint: JointEndpointRef, *, field_name: str) -> JointEndpoint:
         if endpoint is WORLD:
@@ -702,10 +718,7 @@ def _propagate_transforms(
                 )
             elif known1 and not known0:
                 transforms[joint.body0] = (
-                    transforms[joint.body1]
-                    @ frame1
-                    @ np.linalg.inv(motion)
-                    @ np.linalg.inv(frame0)
+                    transforms[joint.body1] @ frame1 @ np.linalg.inv(motion) @ np.linalg.inv(frame0)
                 )
             remaining.remove(joint)
             progressed = True
@@ -716,14 +729,10 @@ def _propagate_transforms(
 
 def _joint_values(joint: Joint, transforms: Mapping[str, Mat4]) -> dict[JointAxis, float]:
     body0 = (
-        np.identity(4, dtype=np.float64)
-        if joint.body0 is WORLD
-        else transforms[joint.body0.name]
+        np.identity(4, dtype=np.float64) if joint.body0 is WORLD else transforms[joint.body0.name]
     )
     body1 = (
-        np.identity(4, dtype=np.float64)
-        if joint.body1 is WORLD
-        else transforms[joint.body1.name]
+        np.identity(4, dtype=np.float64) if joint.body1 is WORLD else transforms[joint.body1.name]
     )
     relative = np.linalg.inv(body0 @ _frame_matrix(joint.frame0)) @ (
         body1 @ _frame_matrix(joint.frame1)
