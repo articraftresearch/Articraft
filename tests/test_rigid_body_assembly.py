@@ -14,6 +14,7 @@ from articraft.sdk.assembly import (
     JointFrame,
     Mat4,
     PhysicsState,
+    ResolvedRigidBodyAssembly,
     RigidBodyAssembly,
 )
 from articraft.sdk.bodies import RigidBody
@@ -287,3 +288,37 @@ def test_articulation_root_must_belong_to_the_assembly() -> None:
 
     with pytest.raises(ValidationError, match="outside this assembly"):
         assembly.resolve()
+
+
+def _ball(*axes: JointAxis) -> ResolvedRigidBodyAssembly:
+    assembly = RigidBodyAssembly("ball")
+    base = add_body(assembly, "base")
+    head = add_body(assembly, "head")
+    assembly.joint(
+        "socket",
+        body0=base,
+        frame0=JointFrame(),
+        body1=head,
+        frame1=JointFrame(),
+        dofs=tuple(JointDOF(axis, limits=(-math.pi, math.pi)) for axis in axes),
+    )
+    assembly.articulation("main", root=base, joints=["socket"])
+    return assembly.resolve()
+
+
+def test_multi_axis_joints_pose_through_gimbal_lock() -> None:
+    """Euler angles are ambiguous at pitch +-90; the pose is not."""
+
+    resolved = _ball(JointAxis.ROT_X, JointAxis.ROT_Y, JointAxis.ROT_Z)
+    for pitch in (math.pi / 2.0, -math.pi / 2.0):
+        state = resolved.forward_kinematics(
+            {"socket.rotX": 0.3, "socket.rotY": pitch, "socket.rotZ": 0.4}
+        )
+        resolved.world_transforms(state)
+
+
+def test_gimbal_lock_does_not_charge_a_locked_axis() -> None:
+    resolved = _ball(JointAxis.ROT_Y, JointAxis.ROT_Z)
+    state = resolved.forward_kinematics({"socket.rotY": math.pi / 2.0, "socket.rotZ": 0.4})
+
+    resolved.world_transforms(state)

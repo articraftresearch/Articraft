@@ -294,6 +294,23 @@ class ResolvedRigidBodyAssembly:
             joint = resolved_joint.joint
             values = _joint_values(joint, matrices)
             authored = {cast(JointAxis, dof.axis): dof for dof in joint.dofs}
+            # Euler angles are ambiguous at gimbal lock: with pitch at +-90 the
+            # roll and yaw terms describe the same rotation, so a decomposition
+            # can hand roll's share to yaw, or to a locked axis that never
+            # moved. When the joint's own values rebuild the pose exactly, they
+            # are the honest reading and the decomposition is just one of the
+            # several that happen to fit.
+            supplied_free = {
+                joint.dof_id(dof): state.dof_positions[joint.dof_id(dof)]
+                for dof in joint.dofs
+                if joint.dof_id(dof) in state.dof_positions
+            }
+            if supplied_free:
+                candidate = _values_from(joint, supplied_free)
+                if _reproduces_pose(
+                    joint, candidate, matrices, angular_tolerance, linear_tolerance
+                ):
+                    values = candidate
             for axis, value in values.items():
                 dof = authored.get(axis)
                 tolerance = angular_tolerance if axis.is_rotational else linear_tolerance
@@ -708,6 +725,43 @@ def _propagate_transforms(
         if not progressed:
             raise ValidationError("assembly graph could not be placed from its root")
     return {body.name: transforms[body] for body in bodies}
+
+
+def _values_from(joint: Joint, positions: Mapping[str, float]) -> dict[JointAxis, float]:
+    """The six axis values implied by the joint values a caller supplied."""
+
+    values = dict.fromkeys(JointAxis, 0.0)
+    for dof in joint.dofs:
+        values[cast(JointAxis, dof.axis)] = positions.get(joint.dof_id(dof), 0.0)
+    return values
+
+
+def _reproduces_pose(
+    joint: Joint,
+    values: Mapping[JointAxis, float],
+    transforms: Mapping[str, Mat4],
+    angular_tolerance: float,
+    linear_tolerance: float,
+) -> bool:
+    """Whether these axis values rebuild the joint's actual relative transform."""
+
+    positions = {joint.dof_id(dof): values[cast(JointAxis, dof.axis)] for dof in joint.dofs}
+    body0 = (
+        np.identity(4, dtype=np.float64)
+        if joint.body0 is WORLD
+        else transforms[cast(RigidBody, joint.body0).name]
+    )
+    body1 = (
+        np.identity(4, dtype=np.float64)
+        if joint.body1 is WORLD
+        else transforms[cast(RigidBody, joint.body1).name]
+    )
+    actual = np.linalg.inv(body0 @ _frame_matrix(joint.frame0)) @ (
+        body1 @ _frame_matrix(joint.frame1)
+    )
+    rebuilt = _motion_matrix(joint, positions)
+    tolerance = max(angular_tolerance, linear_tolerance)
+    return bool(np.allclose(actual, rebuilt, rtol=0.0, atol=tolerance * 10.0))
 
 
 def _joint_values(joint: Joint, transforms: Mapping[str, Mat4]) -> dict[JointAxis, float]:
