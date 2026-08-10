@@ -11,7 +11,7 @@ from mini_articraft.sdk import BodyState, PhysicsScene
 
 `PhysicsScene` belongs to the model, because there is one world. `BodyState` belongs to a part,
 because each part is one rigid body. See [articulated objects and
-parts](30_articulated_object.md) for the structure these attach to.
+parts](30_assembly.md) for the structure these attach to.
 
 ## `PhysicsScene`
 
@@ -23,10 +23,10 @@ One scene belongs to the whole model. The default is Earth gravity down the stag
 most models never pass it.
 
 ```python
-from mini_articraft.sdk import ArticulatedObject, PhysicsScene
+from mini_articraft.sdk import RigidBodyAssembly, PhysicsScene
 
 
-moon = ArticulatedObject("rover", scene=PhysicsScene(magnitude=1.62))
+moon = RigidBodyAssembly("rover", scene=PhysicsScene(magnitude=1.62))
 ```
 
 `direction` is a world-space direction and is stored normalized, so its length is ignored. It must
@@ -51,8 +51,8 @@ Each part is one rigid body, so each part carries one of these. The default is a
 from mini_articraft.sdk import BodyState
 
 
-base = model.part("base", body_state=BodyState(kinematic=True))
-flywheel = model.part("flywheel", body_state=BodyState(angular_velocity=(0.0, 0.0, 12.0)))
+base = model.rigid_body("base", body_state=BodyState(kinematic=True))
+flywheel = model.rigid_body("flywheel", body_state=BodyState(angular_velocity=(0.0, 0.0, 12.0)))
 ```
 
 - `enabled=False` leaves the part in the scene as a static collider. Other bodies still hit it, but

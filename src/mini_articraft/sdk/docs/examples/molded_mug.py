@@ -15,8 +15,8 @@ The handle's own end reaches into the body and the weld generates the final surf
 from __future__ import annotations
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
     LatheGeometry,
+    RigidBodyAssembly,
     TestContext,
     TestReport,
 )
@@ -27,9 +27,9 @@ from mini_articraft.sdk.mesh import (
 )
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("ceramic_mug")
-    mug = model.part("mug")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("ceramic_mug")
+    mug = model.rigid_body("mug")
 
     # Ceramic body: a lathe silhouette (radius, z) as one closed solid.
     body = LatheGeometry(

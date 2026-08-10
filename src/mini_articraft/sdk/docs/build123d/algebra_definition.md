@@ -11,7 +11,7 @@ Use this page for the formal object and placement algebra behind build123d algeb
 
 **Set definitions:**
 
-`C^3` is the set of all `Part` objects `p` with `p._dim = 3`
+`C^3` is the set of all `RigidBody` objects `p` with `p._dim = 3`
 
 `C^2` is the set of all `Sketch` objects `s` with `s._dim = 2`
 
@@ -19,7 +19,7 @@ Use this page for the formal object and placement algebra behind build123d algeb
 
 **Neutral elements:**
 
-`c^3_0` is the empty `Part` object `p0 = Part()` with `p0._dim = 3` and `p0.wrapped = None`
+`c^3_0` is the empty `RigidBody` object `p0 = Part()` with `p0._dim = 3` and `p0.wrapped = None`
 
 `c^2_0` is the empty `Sketch` object `s0 = Sketch()` with `s0._dim = 2` and `s0.wrapped = None`
 
@@ -27,7 +27,7 @@ Use this page for the formal object and placement algebra behind build123d algeb
 
 **Sets of predefined basic shapes:**
 
-`B^3 := \lbrace` `Part`, `Box`, `Cylinder`, `Cone`, `Sphere`, `Torus`, `Wedge`, `Hole`, `CounterBoreHole`, `CounterSinkHole` `\rbrace`
+`B^3 := \lbrace` `RigidBody`, `Box`, `Cylinder`, `Cone`, `Sphere`, `Torus`, `Wedge`, `Hole`, `CounterBoreHole`, `CounterSinkHole` `\rbrace`
 
 `B^2 := \lbrace` `Sketch`, `Rectangle`, `Circle`, `Ellipse`, `Rectangle`, `Polygon`, `RegularPolygon`, `Text`, `Trapezoid`, `SlotArc`, `SlotCenterPoint`, `SlotCenterToCenter`, `SlotOverall` `\rbrace`
 

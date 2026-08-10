@@ -32,7 +32,7 @@ Examples include these cases:
 
 The SDK validates data at several points.
 
-`ArticulatedObject(...)`, `Part(...)`, `Origin(...)`, and `MotionLimits(...)`
+`RigidBodyAssembly(...)`, `Part(...)`, `Origin(...)`, and `MotionLimits(...)`
 validate their own values when you create them. `Part.add(...)` validates the
 shape name, geometry, and color before it stores the shape.
 `model.articulation(...)` validates the articulation and checks that both parts
@@ -43,11 +43,11 @@ again, so an invalid direct edit to a mutable `MeshGeometry` is caught before
 export. It also checks the full articulation tree.
 
 ```python
-from mini_articraft.sdk import ArticulatedObject, ValidationError
+from mini_articraft.sdk import RigidBodyAssembly, ValidationError
 
 
-model = ArticulatedObject("example")
-body = model.part("body")
+model = RigidBodyAssembly("example")
+body = model.rigid_body("body")
 
 try:
     model.validate()
@@ -81,7 +81,7 @@ to continue with geometry that did not build correctly.
 Lookup helpers raise `ValidationError` when a name cannot be resolved.
 
 ```python
-part = model.get_part("body")
+part = model.get_rigid_body("body")
 shape = part.get_shape("housing")
 joint = model.get_articulation("body_to_lid")
 ```
@@ -95,7 +95,7 @@ specific part.
 Import public SDK types from `mini_articraft.sdk`.
 
 ```python
-from mini_articraft.sdk import ArticulatedObject, MotionLimits, Origin
+from mini_articraft.sdk import RigidBodyAssembly, MotionLimits, Origin
 ```
 
 Paths such as `docs/sdk/common/20_core_types.md` are documentation paths. They

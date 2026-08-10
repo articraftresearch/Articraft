@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
+    RigidBodyAssembly,
     TestContext,
     TestReport,
 )
@@ -19,7 +19,7 @@ def rectangle_section(width: float, depth: float, z: float) -> LoftSection:
     return LoftSection(((-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)))
 
 
-def build_object_model() -> ArticulatedObject:
+def build_object_model() -> RigidBodyAssembly:
     housing = section_loft(
         SectionLoftSpec(
             sections=(
@@ -35,8 +35,8 @@ def build_object_model() -> ArticulatedObject:
         samples_per_segment=8,
     )
 
-    model = ArticulatedObject("loft_with_wire")
-    body = model.part("body")
+    model = RigidBodyAssembly("loft_with_wire")
+    body = model.rigid_body("body")
     body.add(housing, name="housing", color=(0.35, 0.38, 0.42))
     body.add(wire, name="routed_wire", color=(0.06, 0.06, 0.07))
     return model

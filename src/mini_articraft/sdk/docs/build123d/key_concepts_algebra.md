@@ -10,7 +10,7 @@ algebra mode is useful for compact shape composition and placement.
 
 ## Core Ideas
 
-Algebra mode works with objects such as `Shape`, `Part`, `Sketch`, and `Curve`.
+Algebra mode works with objects such as `Shape`, `RigidBody`, `Sketch`, and `Curve`.
 It has two main concepts:
 
 - Object arithmetic: combine shapes with boolean-style operators.

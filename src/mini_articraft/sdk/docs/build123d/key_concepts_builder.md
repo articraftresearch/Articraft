@@ -56,7 +56,7 @@ with BuildPart() as example_part:
 result_part = example_part.part
 ```
 
-In mini-articraft, pass `builder.part` to `model.part(...)`, not the builder
+In mini-articraft, pass `builder.part` to `model.rigid_body(...)`, not the builder
 object itself.
 
 ## Placement Must Happen Before Creation

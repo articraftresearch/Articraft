@@ -8,7 +8,7 @@ one curved path.
 from __future__ import annotations
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
+    RigidBodyAssembly,
     TestContext,
     TestReport,
 )
@@ -29,7 +29,7 @@ def vessel_section(width: float, depth: float, z: float, exponent: float) -> Lof
     )
 
 
-def build_object_model() -> ArticulatedObject:
+def build_object_model() -> RigidBodyAssembly:
     body_geometry = section_loft(
         SectionLoftSpec(
             sections=(
@@ -70,8 +70,8 @@ def build_object_model() -> ArticulatedObject:
         section_tension=0.15,
     )
 
-    model = ArticulatedObject("variable_sweep_and_loft")
-    body = model.part("body")
+    model = RigidBodyAssembly("variable_sweep_and_loft")
+    body = model.rigid_body("body")
     body.add(body_geometry, name="smooth_body", color=(0.27, 0.55, 0.62))
     body.add(handle_geometry, name="shaped_handle", color=(0.18, 0.38, 0.43))
     return model

@@ -51,9 +51,9 @@ class _CompileTracker:
 
     def set_model(self, obj: RigidBodyAssembly) -> None:
         self.model = {
-            "parts": len(obj.parts),
-            "shapes": sum(1 for part in obj.parts for _shape in part._iter_shapes()),
-            "articulations": len(obj.articulations),
+            "parts": len(obj.rigid_bodies),
+            "shapes": sum(1 for body in obj.rigid_bodies for _shape in body._iter_shapes()),
+            "articulations": len(obj.joints),
         }
         self._write()
 
@@ -216,11 +216,11 @@ def _compile_workspace(
             result.usdz = str(export_result.usdz)
             audit = export_result.audit
             audit_metrics = (
-                TestMetric("export part count", float(audit.part_count), unit="count"),
+                TestMetric("export body count", float(audit.rigid_body_count), unit="count"),
                 TestMetric("export shape count", float(audit.shape_count), unit="count"),
                 TestMetric(
                     "export articulation count",
-                    float(audit.articulation_count),
+                    float(audit.joint_count),
                     unit="count",
                 ),
                 TestMetric("export triangle count", float(audit.triangle_count), unit="triangles"),

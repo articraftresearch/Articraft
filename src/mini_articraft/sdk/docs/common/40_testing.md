@@ -1,6 +1,6 @@
 # Testing geometry and assemblies
 
-`TestContext` records checks against an `ArticulatedObject`. The checks use the same named
+`TestContext` records checks against an `RigidBodyAssembly`. The checks use the same named
 shapes, part transforms, and meter scale that the USDZ exporter uses.
 
 Every `main.py` must define `run_tests()` and return a `TestReport`.
@@ -46,9 +46,9 @@ curved surface between those bounds.
 ctx = TestContext(object_model, mesh_tolerance=0.001)
 ```
 
-`model` must be an `ArticulatedObject`. `mesh_tolerance` must be positive and finite.
+`model` must be an `RigidBodyAssembly`. `mesh_tolerance` must be positive and finite.
 
-Part arguments accept a `Part` or its name. Shape arguments use the unique shape name within the
+Part arguments accept a `RigidBody` or its name. Shape arguments use the unique shape name within the
 given part. A missing part or shape raises `ValidationError`.
 
 ## Reports

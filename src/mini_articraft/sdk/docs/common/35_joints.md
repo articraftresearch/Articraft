@@ -133,11 +133,11 @@ model.articulation(
 ) -> Articulation
 ```
 
-`origin=None` becomes `Origin()`. The method accepts part names or the `Part`
-objects returned by `model.part(...)`. Both parts must already exist.
+`origin=None` becomes `Origin()`. The method accepts part names or the `RigidBody`
+objects returned by `model.rigid_body(...)`. Both parts must already exist.
 
 The returned `Articulation` is the same object stored in
-`model.articulations`.
+`model.joints`.
 
 ## Fixed articulation
 
