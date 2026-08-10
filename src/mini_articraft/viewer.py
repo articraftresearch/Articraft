@@ -75,7 +75,7 @@ def _read_version(path: Path) -> dict[str, object]:
         raise ValueError(f"could not open USDZ file: {path}")
 
     world = stage.GetDefaultPrim()
-    object_prims = [prim for prim in world.GetChildren() if prim.GetChild("parts")]
+    object_prims = [prim for prim in world.GetChildren() if prim.GetChild("rigid_bodies")]
     if len(object_prims) != 1:
         raise ValueError(f"expected one articulated object in {path}")
     object_prim = object_prims[0]
@@ -87,7 +87,7 @@ def _read_version(path: Path) -> dict[str, object]:
             "shapes": _read_shapes(part),
             "mass": _read_mass(part),
         }
-        for part in object_prim.GetChild("parts").GetChildren()
+        for part in object_prim.GetChild("rigid_bodies").GetChildren()
     ]
 
     articulations = []
