@@ -12,6 +12,7 @@ from articraft.sdk.assembly import (
     JointAxis,
     JointDOF,
     JointFrame,
+    Mat4,
     PhysicsState,
     RigidBodyAssembly,
 )
@@ -183,10 +184,12 @@ def test_reference_state_rejects_a_geometrically_open_closure() -> None:
 def test_state_body_poses_are_authoritative_and_checked_against_every_joint() -> None:
     resolved = four_bar().resolve()
     valid = resolved.validate_state(PhysicsState(resolved.reference_state.body_poses))
-    invalid = dict(valid.body_poses)
-    shifted = np.asarray(invalid["rocker"], dtype=float)
+    shifted = np.asarray(valid.body_poses["rocker"], dtype=float)
     shifted[1, 3] = 0.1
-    invalid["rocker"] = tuple(tuple(float(value) for value in row) for row in shifted)
+    invalid: dict[str, Mat4] = {
+        name: np.asarray(matrix, dtype=float) for name, matrix in valid.body_poses.items()
+    }
+    invalid["rocker"] = shifted
 
     assert set(valid.body_poses) == {"ground", "crank", "coupler", "rocker"}
     with pytest.raises(ValidationError, match="violates locked axis"):

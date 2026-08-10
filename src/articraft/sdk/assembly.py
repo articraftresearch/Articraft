@@ -182,7 +182,8 @@ class PhysicsState:
 
     def __init__(
         self,
-        body_poses: Mapping[RigidBodyRef, JointFrame | Sequence[Sequence[float]]],
+        body_poses: Mapping[str, JointFrame | Sequence[Sequence[float]] | Mat4]
+        | Mapping[RigidBodyRef, JointFrame | Sequence[Sequence[float]] | Mat4],
         *,
         dof_positions: Mapping[str, float] | None = None,
     ) -> None:
@@ -493,7 +494,8 @@ class RigidBodyAssembly:
 
     def physics_state(
         self,
-        body_poses: Mapping[RigidBodyRef, JointFrame | Sequence[Sequence[float]]],
+        body_poses: Mapping[str, JointFrame | Sequence[Sequence[float]] | Mat4]
+        | Mapping[RigidBodyRef, JointFrame | Sequence[Sequence[float]] | Mat4],
         *,
         dof_positions: Mapping[str, float] | None = None,
     ) -> PhysicsState:
@@ -503,7 +505,7 @@ class RigidBodyAssembly:
         if endpoint is WORLD:
             return WORLD
         try:
-            return self.get_rigid_body(endpoint)
+            return self.get_rigid_body(cast(RigidBodyRef, endpoint))
         except ValidationError as exc:
             raise ValidationError(f"unknown {field_name} rigid body: {endpoint!r}") from exc
 
@@ -710,10 +712,14 @@ def _propagate_transforms(
 
 def _joint_values(joint: Joint, transforms: Mapping[str, Mat4]) -> dict[JointAxis, float]:
     body0 = (
-        np.identity(4, dtype=np.float64) if joint.body0 is WORLD else transforms[joint.body0.name]
+        np.identity(4, dtype=np.float64)
+        if joint.body0 is WORLD
+        else transforms[cast(RigidBody, joint.body0).name]
     )
     body1 = (
-        np.identity(4, dtype=np.float64) if joint.body1 is WORLD else transforms[joint.body1.name]
+        np.identity(4, dtype=np.float64)
+        if joint.body1 is WORLD
+        else transforms[cast(RigidBody, joint.body1).name]
     )
     relative = np.linalg.inv(body0 @ _frame_matrix(joint.frame0)) @ (
         body1 @ _frame_matrix(joint.frame1)
@@ -777,7 +783,7 @@ def _nodes_connected(nodes: set[JointEndpoint], joints: Iterable[Joint]) -> bool
         if node in visited:
             continue
         visited.add(node)
-        stack.extend(adjacency.get(node, ()) - visited)
+        stack.extend(adjacency.get(node, set()) - visited)
     return nodes <= visited
 
 
