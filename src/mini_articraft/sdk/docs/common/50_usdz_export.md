@@ -184,7 +184,7 @@ The manifest is plain JSON with this shape:
 Each articulation entry includes its name, type, parent, child, origin, axis, and motion limits.
 `geometry_type` is the Python class name of the authored build123d shape or mesh value. Manifest
 angular velocities stay in radians per second; the USD attribute holds the same value in degrees
-per second. See [articulated objects](30_articulated_object.md) for what these settings mean.
+per second. See [simulation settings](38_simulation_settings.md) for what these mean.
 
 ## Validation and safe publication
 
