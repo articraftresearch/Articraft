@@ -681,7 +681,11 @@ def _propagate_transforms(
                 root = authored_root
         transforms[root or bodies[0]] = np.identity(4, dtype=np.float64)
 
-    remaining = set(joints)
+    # Authored order, not a set: Joint hashes by identity, so set iteration
+    # follows memory addresses. In a tree that only changes how many passes this
+    # takes, but a closed loop offers two paths to the same body, and the winner
+    # decides the low bits of its transform. That reached the manifest.
+    remaining = list(joints)
     while remaining:
         progressed = False
         for joint in tuple(remaining):
