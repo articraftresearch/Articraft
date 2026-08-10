@@ -80,8 +80,8 @@ def _handler(bootstrap: bytes, models: dict[str, Path], captured: dict[tuple[int
     class Handler(BaseHTTPRequestHandler):
         finished_event = finished
 
-        def log_message(self, *args) -> None:  # keep the console quiet
-            pass
+        def log_message(self, format: str, *args: object) -> None:  # keep the console quiet
+            del format, args
 
         def _send(self, body: bytes, content_type: str) -> None:
             self.send_response(200)
@@ -113,6 +113,12 @@ def _handler(bootstrap: bytes, models: dict[str, Path], captured: dict[tuple[int
     return Handler, finished
 
 
+def _above_noise(value: int) -> int:
+    """Anything more than a hair off the background counts as content."""
+
+    return 255 if value > 6 else 0
+
+
 def _trim(shots: list[Image.Image], size: int) -> list[Image.Image]:
     """Crop a panel to what it actually draws, so thin objects keep no dead air.
 
@@ -122,7 +128,8 @@ def _trim(shots: list[Image.Image], size: int) -> list[Image.Image]:
     canvas = Image.new("RGB", shots[0].size, BACKGROUND)
     box = None
     for shot in shots:
-        found = ImageChops.difference(shot, canvas).convert("L").point(lambda v: v > 6 and 255)
+        mask = ImageChops.difference(shot, canvas).convert("L")
+        found = mask.point(_above_noise)
         bounds = found.getbbox()
         if bounds is None:
             continue
@@ -147,7 +154,7 @@ def _trim(shots: list[Image.Image], size: int) -> list[Image.Image]:
     )
     height = box[3] - box[1]
     width = round((box[2] - box[0]) * size / height)
-    return [shot.crop(box).resize((width, size), Image.LANCZOS) for shot in shots]
+    return [shot.crop(box).resize((width, size), Image.Resampling.LANCZOS) for shot in shots]
 
 
 def _chrome() -> str:
