@@ -45,10 +45,11 @@ Read only the reference that applies to the next piece of geometry:
 
 - Errors and validation: `docs/sdk/common/10_errors.md`.
 - Shared units and types: `docs/sdk/common/20_core_types.md`.
-- Named shapes, parts, and simulation settings such as gravity and how a part
-  starts moving: `docs/sdk/common/30_articulated_object.md`.
+- Named shapes and parts: `docs/sdk/common/30_articulated_object.md`.
 - Articulations: `docs/sdk/common/35_joints.md`.
 - Materials and mass: `docs/sdk/common/37_materials.md`.
+- Simulation settings, gravity and initial motion:
+  `docs/sdk/common/30_articulated_object.md`.
 - Checks and geometry inspection: `docs/sdk/common/40_testing.md`.
 - Visual views and report artifacts: `docs/sdk/common/45_visual_evidence.md`.
 - USDZ output: `docs/sdk/common/50_usdz_export.md`.
