@@ -85,8 +85,8 @@ jobs:
           example = runpy.run_path("examples/hinged_box/main.py")
           assert example["run_tests"]().passed
 
-          from mini_articraft.sdk.export import export_object
-          result = export_object(example["object_model"], Path("/tmp/release-output"))
+          from mini_articraft.sdk.export import export_assembly
+          result = export_assembly(example["object_model"], Path("/tmp/release-output"))
           assert result.manifest.is_file()
           assert result.usdz.is_file()
           '

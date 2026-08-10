@@ -113,7 +113,7 @@ jobs:
           /tmp/smoke/bin/python -c "
           import mini_articraft
           from mini_articraft import package_dir
-          from mini_articraft.sdk import ArticulatedObject, TestContext
+          from mini_articraft.sdk import RigidBodyAssembly, TestContext
           assert (package_dir / 'prompts' / 'system.md').is_file()
           assert (package_dir / 'viewer.html').is_file()
           assert (package_dir / 'sdk' / 'docs' / 'common' / '00_quickstart.md').is_file()
@@ -125,10 +125,10 @@ jobs:
           from pathlib import Path
           sys.path.insert(0, '/tmp/sdk-smoke')
           from main import object_model, run_tests
-          from mini_articraft.sdk.export import export_object
+          from mini_articraft.sdk.export import export_assembly
           object_model.validate()
           assert run_tests().passed
-          result = export_object(object_model, Path('/tmp/sdk-smoke/output'))
+          result = export_assembly(object_model, Path('/tmp/sdk-smoke/output'))
           assert result.manifest.is_file()
           assert result.usdz.is_file()
           "

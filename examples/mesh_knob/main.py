@@ -10,7 +10,7 @@ Compile it:  python -m mini_articraft.compiler.worker <run_dir>
 from __future__ import annotations
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
+    RigidBodyAssembly,
     LatheGeometry,
     TestContext,
     TestReport,
@@ -35,9 +35,9 @@ RIDGE_PROFILE = [
 ]
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("knob")
-    knob = model.part("knob")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("knob")
+    knob = model.rigid_body("knob")
 
     body = LatheGeometry(PROFILE)
     ridge = LatheGeometry(RIDGE_PROFILE)

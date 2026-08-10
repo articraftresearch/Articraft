@@ -67,6 +67,36 @@ uv run python -m mini_articraft.compiler.worker <run_dir>
 Prefer calling the compile worker through `LocalWorkspace` unless you are
 debugging the worker itself.
 
+## Viewing models in the browser
+
+When showing what geometry looks like, **open it in the 3D viewer and share the
+URL** — do not rely only on a prose description or a static matplotlib render.
+The viewer lets the user rotate, zoom, and actuate joints, which is what they
+actually want to see.
+
+For a completed run:
+
+```bash
+uv run mini-articraft view <run-dir-or-id>
+```
+
+For an ad-hoc model (a prototype `ArticulatedObject` you built in a script),
+export it to a run directory, then serve that directory:
+
+```python
+from pathlib import Path
+from mini_articraft.environments.export import export_object
+from mini_articraft.viewer import serve_viewer
+
+run_dir = Path("/tmp/preview")
+export_object(obj, run_dir / "result")          # writes result/usdz/0000.usdz
+serve_viewer(run_dir, open_browser=False)        # blocks; prints "Viewer URL: http://127.0.0.1:<port>/"
+```
+
+`serve_viewer` binds a random port and blocks. When you run it in the background
+and stdout is buffered, find the port with
+`lsof -nP -iTCP -sTCP:LISTEN -a -p <python-pid>`.
+
 ## Coding style
 
 Target Python 3.11 and keep the current style.
