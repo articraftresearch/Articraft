@@ -98,10 +98,10 @@ def test_failed_checks_save_a_usdz_without_publishing_it(tmp_path) -> None:
     write_main(
         run_dir,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
-object_model = ArticulatedObject("failure")
-base = object_model.part("base")
+object_model = RigidBodyAssembly("failure")
+base = object_model.rigid_body("base")
 base.add(Box(1, 1, 1), name="body")
 
 def run_tests() -> TestReport:
@@ -150,11 +150,11 @@ def test_compile_path_supports_workspace_modules(tmp_path) -> None:
     parts.mkdir()
     parts.joinpath("body.py").write_text(
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject
+from mini_articraft.sdk import RigidBodyAssembly
 
 def build():
-    model = ArticulatedObject("module")
-    base = model.part("base")
+    model = RigidBodyAssembly("module")
+    base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.2), name="body")
     return model
 """,
@@ -187,7 +187,7 @@ def test_compile_worker_runs_from_run_dir_without_api_credentials(monkeypatch, t
 import os
 from pathlib import Path
 from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
 Path("worker-boundary.json").write_text(json.dumps({
     "cwd": str(Path.cwd()),
@@ -195,8 +195,8 @@ Path("worker-boundary.json").write_text(json.dumps({
     "example": os.environ.get("EXAMPLE_API_KEY"),
     "visible": os.environ.get("VISIBLE_SETTING"),
 }), encoding="utf-8")
-object_model = ArticulatedObject("boundary")
-object_model.part("body").add(Box(0.1, 0.1, 0.1), name="shell")
+object_model = RigidBodyAssembly("boundary")
+object_model.rigid_body("body").add(Box(0.1, 0.1, 0.1), name="shell")
 
 def run_tests() -> TestReport:
     return TestContext(object_model).report()
@@ -260,9 +260,9 @@ def test_compile_path_reports_missing_required_entrypoint_values(tmp_path) -> No
     write_main(
         missing_tests,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject
-object_model = ArticulatedObject("box")
-base = object_model.part("base")
+from mini_articraft.sdk import RigidBodyAssembly
+object_model = RigidBodyAssembly("box")
+base = object_model.rigid_body("base")
 base.add(Box(1, 1, 1), name="body")
 """,
     )
@@ -272,9 +272,9 @@ base.add(Box(1, 1, 1), name="body")
     write_main(
         bad_report,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject
-object_model = ArticulatedObject("box")
-base = object_model.part("base")
+from mini_articraft.sdk import RigidBodyAssembly
+object_model = RigidBodyAssembly("box")
+base = object_model.rigid_body("base")
 base.add(Box(1, 1, 1), name="body")
 def run_tests():
     return None
@@ -289,12 +289,19 @@ def test_baseline_overlap_is_a_nonblocking_compiler_diagnostic(tmp_path) -> None
     write_main(
         run_dir,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, ArticulationType, Origin, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, Origin, TestContext, TestReport
 
-object_model = ArticulatedObject("overlap")
-base = object_model.part("base"); base.add(Box(1, 1, 1), name="body")
-child = object_model.part("child"); child.add(Box(1, 1, 1), name="body")
-object_model.articulation("mount", ArticulationType.FIXED, base, child, origin=Origin())
+object_model = RigidBodyAssembly("overlap")
+base = object_model.rigid_body("base"); base.add(Box(1, 1, 1), name="body")
+child = object_model.rigid_body("child"); child.add(Box(1, 1, 1), name="body")
+object_model.joint(
+    "mount",
+    body0=base,
+    frame0=JointFrame(),
+    body1=child,
+    frame1=JointFrame(),
+    dofs=(),
+)
 
 def run_tests() -> TestReport:
     return TestContext(object_model).report()
@@ -319,10 +326,10 @@ def test_compile_reports_custom_visual_artifacts_without_copying_files(tmp_path)
         """import json
 from pathlib import Path
 from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
-object_model = ArticulatedObject("evidence")
-object_model.part("body").add(Box(1, 1, 1), name="box")
+object_model = RigidBodyAssembly("evidence")
+object_model.rigid_body("body").add(Box(1, 1, 1), name="box")
 
 def run_tests() -> TestReport:
     ctx = TestContext(object_model)
@@ -360,10 +367,10 @@ def test_disconnected_geometry_is_a_compiler_warning(tmp_path) -> None:
     write_main(
         run_dir,
         """from build123d import Box, Pos
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
-object_model = ArticulatedObject("disconnected")
-base = object_model.part("base")
+object_model = RigidBodyAssembly("disconnected")
+base = object_model.rigid_body("base")
 base.add(Pos(X=-1) * Box(0.5, 0.5, 0.5), name="left")
 base.add(Pos(X=1) * Box(0.5, 0.5, 0.5), name="right")
 
@@ -385,12 +392,19 @@ def test_compile_honors_an_exact_shape_overlap_allowance(tmp_path) -> None:
     write_main(
         run_dir,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, ArticulationType, Origin, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, Origin, TestContext, TestReport
 
-object_model = ArticulatedObject("allowance")
-shaft = object_model.part("shaft"); shaft.add(Box(1, 1, 1), name="steel")
-hub = object_model.part("hub"); hub.add(Box(1, 1, 1), name="liner")
-object_model.articulation("mount", ArticulationType.FIXED, shaft, hub, origin=Origin())
+object_model = RigidBodyAssembly("allowance")
+shaft = object_model.rigid_body("shaft"); shaft.add(Box(1, 1, 1), name="steel")
+hub = object_model.rigid_body("hub"); hub.add(Box(1, 1, 1), name="liner")
+object_model.joint(
+    "mount",
+    body0=shaft,
+    frame0=JointFrame(),
+    body1=hub,
+    frame1=JointFrame(),
+    dofs=(),
+)
 
 def run_tests() -> TestReport:
     ctx = TestContext(object_model)
@@ -412,7 +426,7 @@ def test_compile_blocks_unhealthy_mesh_and_honors_exact_issue_allowance(tmp_path
     env = LocalWorkspace(output_dir=tmp_path)
     blocked_run = env.create_run("unhealthy-mesh")
     source = """from mini_articraft.sdk import (
-    ArticulatedObject,
+    RigidBodyAssembly,
     BoxGeometry,
     MeshGeometry,
     MeshHealthIssue,
@@ -420,8 +434,8 @@ def test_compile_blocks_unhealthy_mesh_and_honors_exact_issue_allowance(tmp_path
     TestReport,
 )
 
-object_model = ArticulatedObject("unhealthy-mesh")
-base = object_model.part("base")
+object_model = RigidBodyAssembly("unhealthy-mesh")
+base = object_model.rigid_body("base")
 box = BoxGeometry((1, 1, 1))
 base.add(MeshGeometry(box.vertices, box.faces[:-1]), name="open-sheet")
 

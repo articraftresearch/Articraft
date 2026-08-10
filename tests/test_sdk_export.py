@@ -9,17 +9,17 @@ from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdValidation
 
 import mini_articraft.sdk.export as export_module
 from mini_articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
+    RigidBodyAssembly,
+    JointAxis,
+    JointDOF,
+    JointFrame,
     BoxGeometry,
-    MotionLimits,
-    Origin,
 )
-from mini_articraft.sdk.export import export_object
+from mini_articraft.sdk.export import export_assembly
 
 
 def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> None:
-    result = export_object(_hinge(), tmp_path)
+    result = export_assembly(_hinge(), tmp_path)
     manifest = json.loads(result.manifest.read_text())
     stage = Usd.Stage.Open(str(result.usdz))
 
@@ -65,8 +65,8 @@ def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> Non
 
 
 def test_export_preserves_numbered_usdz_outputs(tmp_path) -> None:
-    first = export_object(_hinge(), tmp_path)
-    second = export_object(_hinge(), tmp_path)
+    first = export_assembly(_hinge(), tmp_path)
+    second = export_assembly(_hinge(), tmp_path)
 
     assert first.usdz.name == "0000.usdz"
     assert second.usdz.name == "0001.usdz"
@@ -77,7 +77,7 @@ def test_export_preserves_numbered_usdz_outputs(tmp_path) -> None:
 def test_export_failure_cleans_temporary_package_and_preserves_prior_result(
     monkeypatch, tmp_path
 ) -> None:
-    first = export_object(_hinge(), tmp_path)
+    first = export_assembly(_hinge(), tmp_path)
     manifest_before = first.manifest.read_bytes()
     validate_usdz = export_module._validate_usdz
 
@@ -86,7 +86,7 @@ def test_export_failure_cleans_temporary_package_and_preserves_prior_result(
 
     monkeypatch.setattr(export_module, "_validate_usdz", fail_validation)
     with pytest.raises(RuntimeError, match="injected"):
-        export_object(_hinge(), tmp_path)
+        export_assembly(_hinge(), tmp_path)
 
     assert first.manifest.read_bytes() == manifest_before
     assert sorted(path.name for path in first.usdz.parent.glob("*.usdz")) == ["0000.usdz"]
@@ -94,11 +94,11 @@ def test_export_failure_cleans_temporary_package_and_preserves_prior_result(
     assert not list(tmp_path.rglob("*.tmp.usdz"))
 
     monkeypatch.setattr(export_module, "_validate_usdz", validate_usdz)
-    assert export_object(_hinge(), tmp_path).usdz.name == "0001.usdz"
+    assert export_assembly(_hinge(), tmp_path).usdz.name == "0001.usdz"
 
 
 def test_exported_package_passes_openusd_validators(tmp_path) -> None:
-    stage = Usd.Stage.Open(str(export_object(_hinge(), tmp_path).usdz))
+    stage = Usd.Stage.Open(str(export_assembly(_hinge(), tmp_path).usdz))
     validators = UsdValidation.ValidationRegistry().GetOrLoadValidatorsByName(
         [
             "usdUtilsValidators:UsdzPackageValidator",
@@ -113,45 +113,44 @@ def test_exported_package_passes_openusd_validators(tmp_path) -> None:
 
 
 def test_export_supports_every_articulation_type_and_matching_joint_frames(tmp_path) -> None:
-    model = ArticulatedObject("motions")
-    root = model.part("root")
+    model = RigidBodyAssembly("motions")
+    root = model.rigid_body("root")
     root.add(Box(0.1, 0.1, 0.1), name="body")
-    fixed_part = model.part("fixed")
+    fixed_part = model.rigid_body("fixed")
     fixed_part.add(Box(0.1, 0.1, 0.1), name="body")
-    hinge = model.part("hinge")
+    hinge = model.rigid_body("hinge")
     hinge.add(Box(0.1, 0.1, 0.1), name="body")
-    rotor = model.part("rotor")
+    rotor = model.rigid_body("rotor")
     rotor.add(Box(0.1, 0.1, 0.1), name="body")
-    slider = model.part("slider")
+    slider = model.rigid_body("slider")
     slider.add(Box(0.1, 0.1, 0.1), name="body")
-    model.articulation(
+    model.joint(
         "fixed_mount",
-        ArticulationType.FIXED,
-        root,
-        fixed_part,
-        origin=Origin(xyz=(0.2, 0.0, 0.0), rpy=(0.1, 0.2, 0.3)),
+        body0=root,
+        frame0=JointFrame(),
+        body1=fixed_part,
+        frame1=JointFrame(),
+        dofs=(),
     )
-    model.articulation(
+    model.joint(
         "hinge_joint",
-        ArticulationType.REVOLUTE,
-        fixed_part,
-        hinge,
-        origin=Origin(xyz=(0.0, 0.3, 0.0), rpy=(0.2, 0.0, 0.1)),
-        axis=(0.0, 0.0, 1.0),
-        motion_limits=MotionLimits(lower=-0.5, upper=0.75),
+        body0=fixed_part,
+        frame0=JointFrame(),
+        body1=hinge,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_Z, limits=(-0.5, 0.75)),),
     )
-    model.articulation(
+    model.joint(
         "rotor_joint",
-        ArticulationType.CONTINUOUS,
-        hinge,
-        rotor,
-        origin=Origin(xyz=(0.0, 0.0, 0.4)),
-        axis=(0.0, 1.0, 0.0),
-        motion_limits=MotionLimits(),
+        body0=hinge,
+        frame0=JointFrame(),
+        body1=rotor,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_Y),),
     )
     model.articulation(
         "slider_joint",
-        ArticulationType.PRISMATIC,
+        .PRISMATIC,
         rotor,
         slider,
         origin=Origin(xyz=(0.1, 0.2, 0.3), rpy=(0.0, 0.1, 0.0)),
@@ -159,7 +158,7 @@ def test_export_supports_every_articulation_type_and_matching_joint_frames(tmp_p
         motion_limits=MotionLimits(lower=-0.1, upper=0.2),
     )
 
-    stage = Usd.Stage.Open(str(export_object(model, tmp_path).usdz))
+    stage = Usd.Stage.Open(str(export_assembly(model, tmp_path).usdz))
     joints = {
         "fixed_mount": UsdPhysics.FixedJoint.Get(stage, "/World/motions/joints/fixed_mount"),
         "hinge_joint": UsdPhysics.RevoluteJoint.Get(stage, "/World/motions/joints/hinge_joint"),
@@ -183,39 +182,39 @@ def test_export_supports_every_articulation_type_and_matching_joint_frames(tmp_p
 
 @pytest.mark.parametrize("axis", [(1e-320, 0.0, 0.0), (1e308, 1e308, 0.0)])
 def test_export_robustly_normalizes_finite_nonzero_axes(tmp_path, axis) -> None:
-    model = ArticulatedObject("axis")
-    root = model.part("root")
+    model = RigidBodyAssembly("axis")
+    root = model.rigid_body("root")
     root.add(Box(0.1, 0.1, 0.1), name="body")
-    child = model.part("child")
+    child = model.rigid_body("child")
     child.add(Box(0.1, 0.1, 0.1), name="body")
-    model.articulation(
+    model.joint(
         "spin",
-        ArticulationType.CONTINUOUS,
-        root,
-        child,
-        axis=axis,
-        motion_limits=MotionLimits(),
+        body0=root,
+        frame0=JointFrame(),
+        body1=child,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_Z),),
     )
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
 
     assert result.usdz.is_file()
 
 
-def _hinge() -> ArticulatedObject:
-    model = ArticulatedObject("hinge")
-    base = model.part("base")
+def _hinge() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("hinge")
+    base = model.rigid_body("base")
     base.add(Box(1.0, 1.0, 0.2), name="shell", color=(0.6, 0.1, 0.12))
     base.add(
         BoxGeometry((0.2, 0.2, 0.04)).translate(0.0, 0.0, 0.12),
         name="trim",
         color=(0.8, 0.8, 0.82, 0.7),
     )
-    door = model.part("door")
+    door = model.rigid_body("door")
     door.add(Pos(Z=0.5) * Box(0.8, 0.1, 1.0), name="panel", color=(0.2, 0.35, 0.8))
     model.articulation(
         "base_to_door",
-        ArticulationType.REVOLUTE,
+        .REVOLUTE,
         base,
         door,
         origin=Origin(xyz=(0.0, 0.0, 0.2), rpy=(0.0, 0.2, 0.3)),

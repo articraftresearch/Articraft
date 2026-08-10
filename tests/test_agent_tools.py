@@ -402,26 +402,25 @@ def test_exec_command_renders_public_sdk_previews_before_compile(tmp_path) -> No
     ctx = context(tmp_path)
     ctx.workspace.joinpath("main.py").write_text(
         """from mini_articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
+    RigidBodyAssembly,
+    JointAxis,
+    JointDOF,
+    JointFrame,
     BoxGeometry,
-    MotionLimits,
-    Origin,
     TestContext,
     TestReport,
 )
 
-object_model = ArticulatedObject("slider")
-object_model.part("base").add(BoxGeometry((0.5, 0.5, 0.5)), name="base")
-object_model.part("slider").add(BoxGeometry((0.2, 0.2, 0.2)), name="block")
-object_model.articulation(
+object_model = RigidBodyAssembly("slider")
+object_model.rigid_body("base").add(BoxGeometry((0.5, 0.5, 0.5)), name="base")
+object_model.rigid_body("slider").add(BoxGeometry((0.2, 0.2, 0.2)), name="block")
+object_model.joint(
     "slide",
-    ArticulationType.PRISMATIC,
-    "base",
-    "slider",
-    origin=Origin(xyz=(1.0, 0.0, 0.0)),
-    axis=(1.0, 0.0, 0.0),
-    motion_limits=MotionLimits(lower=0.0, upper=1.0),
+    body0="base",
+    frame0=JointFrame(),
+    body1="slider",
+    frame1=JointFrame(),
+    dofs=(JointDOF(JointAxis.TRANS_X, limits=(0.0, 1.0)),),
 )
 
 def run_tests() -> TestReport:
@@ -658,12 +657,12 @@ def test_compile_tool_compiles_workspace(tmp_path) -> None:
         """
 from build123d import *
 
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("box")
-    base = model.part("base")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("box")
+    base = model.rigid_body("base")
     base.add(Box(1, 1, 1), name="body")
     return model
 

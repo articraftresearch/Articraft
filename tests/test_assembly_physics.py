@@ -1,6 +1,6 @@
 """Gravity and initial body state on the rigid-body graph model.
 
-The same settings #63 gave `ArticulatedObject`, carried onto the assembly so the
+The same settings #63 gave `RigidBodyAssembly`, carried onto the assembly so the
 cut-over does not silently drop them.
 """
 

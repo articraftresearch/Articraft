@@ -10,7 +10,7 @@ import mini_articraft.sdk as sdk
 import mini_articraft.sdk.mesh as sdk_mesh
 from mini_articraft import package_dir
 from mini_articraft.errors import MiniArticraftError
-from mini_articraft.sdk import ArticulatedObject, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, TestReport
 from mini_articraft.sdk.errors import SDKError, ValidationError
 
 
@@ -100,9 +100,9 @@ def test_key_apis_are_documented_by_their_owner_pages() -> None:
     sdk_docs = package_dir / "sdk" / "docs"
     expected = {
         "common/30_articulated_object.md": (
-            "`ArticulatedObject`",
+            "`RigidBodyAssembly`",
             "`Material`",
-            "`Part`",
+            "`RigidBody`",
             "`Material`",
             "`part.add(...)`",
         ),
@@ -229,7 +229,7 @@ def test_all_new_sdk_examples_execute() -> None:
         values = runpy.run_path(str(path))
         model = values["object_model"]
         report = values["run_tests"]()
-        assert isinstance(model, ArticulatedObject), path.name
+        assert isinstance(model, RigidBodyAssembly), path.name
         model.validate()
         assert isinstance(report, TestReport), path.name
         assert report.passed, (path.name, report.failures)

@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
+    RigidBodyAssembly,
+    JointAxis,
+    JointDOF,
+    JointFrame,
     BoxGeometry,
     Material,
-    MotionLimits,
-    Origin,
 )
-from mini_articraft.sdk.export import export_object
+from mini_articraft.sdk.export import export_assembly
 from mini_articraft.viewer import load_viewer_run
 
 pytest.importorskip("mujoco", reason="recording motion needs the sim dependency group")
@@ -25,32 +25,31 @@ from mini_articraft.simulate import simulate_usdz
 
 def _run_dir(tmp_path: Path) -> tuple[Path, Path]:
     """A run directory laid out the way the viewer expects."""
-    model = ArticulatedObject("crate")
-    base = model.part("base")
+    model = RigidBodyAssembly("crate")
+    base = model.rigid_body("base")
     base.add(
         BoxGeometry((0.30, 0.20, 0.10)).translate(0.0, 0.0, 0.05),
         name="body",
         material=Material.HARDWOOD,
     )
-    lid = model.part("lid")
+    lid = model.rigid_body("lid")
     lid.add(
         BoxGeometry((0.30, 0.20, 0.01)).translate(0.0, 0.10, 0.0),
         name="panel",
         material=Material.STEEL,
     )
-    model.articulation(
+    model.joint(
         "lid_hinge",
-        ArticulationType.REVOLUTE,
-        base,
-        lid,
-        origin=Origin(xyz=(0.0, -0.10, 0.10)),
-        axis=(1.0, 0.0, 0.0),
-        motion_limits=MotionLimits(effort=5.0, velocity=2.0, lower=0.0, upper=1.5),
+        body0=base,
+        frame0=JointFrame(),
+        body1=lid,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.5)),),
     )
 
     run_dir = tmp_path / "run"
     result_dir = run_dir / "result"
-    export_object(model, result_dir)
+    export_assembly(model, result_dir)
     usdz = next((result_dir / "usdz").glob("*.usdz"))
     return run_dir, usdz
 

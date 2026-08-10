@@ -265,14 +265,14 @@ import helper
 
 from build123d import Box
 
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from mini_articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
 print(f"helper says {helper.VALUE}")
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("box")
-    base = model.part("base")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("box")
+    base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.1), name="body")
     return model
 

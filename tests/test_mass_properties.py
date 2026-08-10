@@ -8,7 +8,7 @@ import trimesh
 from pxr import Usd, UsdPhysics
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
+    RigidBodyAssembly,
     BoxGeometry,
     CylinderGeometry,
     MassProperties,
@@ -16,7 +16,7 @@ from mini_articraft.sdk import (
     TestContext,
 )
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import _resolve_part_mass, export_object
+from mini_articraft.sdk.export import _resolve_part_mass, export_assembly
 from mini_articraft.sdk.mass import resolve_mass
 
 
@@ -131,11 +131,11 @@ def test_union_failure_does_not_silently_double_count_mass(
 
 
 def test_export_writes_mass_api_attributes(tmp_path) -> None:
-    model = ArticulatedObject("massed")
-    part = model.part("body")
+    model = RigidBodyAssembly("massed")
+    part = model.rigid_body("body")
     part.add(BoxGeometry((0.2, 0.2, 0.05)), name="slab", material=Material.HARDWOOD)
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
     mass_api = UsdPhysics.MassAPI  # pyright: ignore[reportAttributeAccessIssue]
     prims = [prim for prim in stage.Traverse() if prim.HasAPI(mass_api)]
@@ -156,20 +156,20 @@ def test_export_writes_mass_api_attributes(tmp_path) -> None:
 
 
 def test_export_omits_mass_api_when_the_part_has_no_properties(tmp_path) -> None:
-    model = ArticulatedObject("plain")
-    model.part("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube")
+    model = RigidBodyAssembly("plain")
+    model.rigid_body("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube")
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
     mass_api = UsdPhysics.MassAPI  # pyright: ignore[reportAttributeAccessIssue]
     assert not [prim for prim in stage.Traverse() if prim.HasAPI(mass_api)]
 
 
 def test_missing_mass_check_reports_every_part_without_properties() -> None:
-    model = ArticulatedObject("mixed")
-    heavy = model.part("heavy")
+    model = RigidBodyAssembly("mixed")
+    heavy = model.rigid_body("heavy")
     heavy.add(BoxGeometry((0.1, 0.1, 0.1)), name="block", material=Material.STEEL)
-    light = model.part("light")
+    light = model.rigid_body("light")
     light.add(CylinderGeometry(0.05, 0.02).translate(0.0, 0.0, 0.06), name="disc")
 
     ctx = TestContext(model)
@@ -181,8 +181,8 @@ def test_missing_mass_check_reports_every_part_without_properties() -> None:
 
 
 def test_missing_mass_check_passes_when_every_part_has_properties() -> None:
-    model = ArticulatedObject("complete")
-    part = model.part("body", mass_properties=MassProperties(density=900.0))
+    model = RigidBodyAssembly("complete")
+    part = model.rigid_body("body", mass_properties=MassProperties(density=900.0))
     part.add(BoxGeometry((0.1, 0.1, 0.1)), name="block")
 
     ctx = TestContext(model)
@@ -229,11 +229,11 @@ def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -
     from mini_articraft.agent.workspace.local import LocalWorkspace
 
     source = (
-        "from mini_articraft.sdk import ArticulatedObject, BoxGeometry, TestContext, TestReport\n"
+        "from mini_articraft.sdk import RigidBodyAssembly, BoxGeometry, TestContext, TestReport\n"
         "\n"
-        "def build_object_model() -> ArticulatedObject:\n"
-        "    model = ArticulatedObject('plain')\n"
-        "    model.part('body').add(BoxGeometry((0.1, 0.1, 0.1)), name='cube')\n"
+        "def build_object_model() -> RigidBodyAssembly:\n"
+        "    model = RigidBodyAssembly('plain')\n"
+        "    model.rigid_body('body').add(BoxGeometry((0.1, 0.1, 0.1)), name='cube')\n"
         "    return model\n"
         "\n"
         "object_model = build_object_model()\n"
@@ -255,8 +255,8 @@ def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -
 
 def test_one_part_may_be_made_of_several_materials() -> None:
     """The whole point of material living on the shape rather than the part."""
-    model = ArticulatedObject("mixed")
-    part = model.part("body")
+    model = RigidBodyAssembly("mixed")
+    part = model.rigid_body("body")
     part.add(
         BoxGeometry((0.1, 0.1, 0.1)).translate(-0.2, 0.0, 0.0),
         name="steel_block",
@@ -279,8 +279,8 @@ def test_one_part_may_be_made_of_several_materials() -> None:
 
 
 def test_an_explicit_mass_overrides_the_materials() -> None:
-    model = ArticulatedObject("stand_in")
-    part = model.part("motor", mass_properties=MassProperties(mass=0.85))
+    model = RigidBodyAssembly("stand_in")
+    part = model.rigid_body("motor", mass_properties=MassProperties(mass=0.85))
     part.add(CylinderGeometry(0.03, 0.05), name="can", material=Material.STEEL)
 
     resolved = _resolve_part_mass(part, 0.0005)

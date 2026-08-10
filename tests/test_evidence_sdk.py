@@ -10,17 +10,17 @@ from PIL import Image
 from pxr import Usd, UsdGeom  # pyright: ignore[reportAttributeAccessIssue]
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
+    RigidBodyAssembly,
+    JointAxis,
+    JointDOF,
+    JointFrame,
     BoxGeometry,
     ImagePoint,
     LatheGeometry,
     LineOverlay,
     MeridionalSectionView,
     ModelView,
-    MotionLimits,
     MotionStripView,
-    Origin,
     PointOverlay,
     Reticle,
     SectionView,
@@ -29,7 +29,7 @@ from mini_articraft.sdk import (
     annotate_image,
     render_view,
 )
-from mini_articraft.sdk.export import export_object
+from mini_articraft.sdk.export import export_assembly
 
 
 def test_partial_lathe_is_capped_watertight_and_axis_aware() -> None:
@@ -47,15 +47,15 @@ def test_partial_lathe_is_capped_watertight_and_axis_aware() -> None:
 
 
 def test_mesh_normal_controls_are_exported_for_every_mesh(tmp_path: Path) -> None:
-    model = ArticulatedObject("normals")
-    part = model.part("body")
+    model = RigidBodyAssembly("normals")
+    part = model.rigid_body("body")
     part.add(BoxGeometry((1.0, 1.0, 1.0)).use_hard_normals(), name="hard")
     part.add(
         BoxGeometry((0.5, 0.5, 0.5)).translate(1.5, 0.0, 0.0).use_smooth_normals(),
         name="smooth",
     )
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
     assert stage is not None
     meshes = [
@@ -76,8 +76,8 @@ def test_mesh_normal_controls_are_exported_for_every_mesh(tmp_path: Path) -> Non
 
 
 def test_geometry_metrics_cover_components_orientation_and_symmetry() -> None:
-    model = ArticulatedObject("metrics")
-    part = model.part("body")
+    model = RigidBodyAssembly("metrics")
+    part = model.rigid_body("body")
     joined = BoxGeometry((1.0, 2.0, 3.0))
     joined.merge(BoxGeometry((0.2, 0.2, 0.2)).translate(2.0, 0.0, 0.0))
     part.add(joined, name="joined")
@@ -93,14 +93,14 @@ def test_geometry_metrics_cover_components_orientation_and_symmetry() -> None:
     assert ctx.expect_component_count(2, "body", shape="joined")
     assert ctx.expect_positive_volume("body", shape="joined")
 
-    symmetric = ArticulatedObject("symmetric")
-    symmetric.part("body").add(BoxGeometry((2.0, 1.0, 1.0)), name="box")
+    symmetric = RigidBodyAssembly("symmetric")
+    symmetric.rigid_body("body").add(BoxGeometry((2.0, 1.0, 1.0)), name="box")
     assert TestContext(symmetric).expect_symmetry(tolerance=1e-9)
 
-    reversed_model = ArticulatedObject("reversed")
+    reversed_model = RigidBodyAssembly("reversed")
     reversed_mesh = BoxGeometry((1.0, 1.0, 1.0))
     reversed_mesh.faces = [(a, c, b) for a, b, c in reversed_mesh.faces]
-    reversed_model.part("body").add(reversed_mesh, name="inside_out")
+    reversed_model.rigid_body("body").add(reversed_mesh, name="inside_out")
     reversed_metrics = TestContext(reversed_model).measure_geometry()
     assert reversed_metrics.orientation == "inward"
     assert reversed_metrics.signed_volume < 0.0
@@ -108,8 +108,8 @@ def test_geometry_metrics_cover_components_orientation_and_symmetry() -> None:
 
 def test_metrics_and_artifacts_are_recorded(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
-    model = ArticulatedObject("evidence")
-    model.part("body").add(BoxGeometry((1.0, 1.0, 1.0)), name="box")
+    model = RigidBodyAssembly("evidence")
+    model.rigid_body("body").add(BoxGeometry((1.0, 1.0, 1.0)), name="box")
     ctx = TestContext(model)
     Path("qa").mkdir()
     Path("qa/data.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
@@ -129,18 +129,17 @@ def test_metrics_and_artifacts_are_recorded(monkeypatch, tmp_path: Path) -> None
         ctx.attach_artifact("qa/missing.json")
 
 
-def _slider_model() -> ArticulatedObject:
-    model = ArticulatedObject("slider")
-    model.part("base").add(BoxGeometry((0.5, 0.5, 0.5)), name="base")
-    model.part("slider").add(BoxGeometry((0.2, 0.2, 0.2)), name="block")
-    model.articulation(
+def _slider_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("slider")
+    model.rigid_body("base").add(BoxGeometry((0.5, 0.5, 0.5)), name="base")
+    model.rigid_body("slider").add(BoxGeometry((0.2, 0.2, 0.2)), name="block")
+    model.joint(
         "slide",
-        ArticulationType.PRISMATIC,
-        "base",
-        "slider",
-        origin=Origin(xyz=(1.0, 0.0, 0.0)),
-        axis=(1.0, 0.0, 0.0),
-        motion_limits=MotionLimits(lower=0.0, upper=1.0),
+        body0="base",
+        frame0=JointFrame(),
+        body1="slider",
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.TRANS_X, limits=(0.0, 1.0)),),
     )
     return model
 

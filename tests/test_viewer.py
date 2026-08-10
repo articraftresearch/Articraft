@@ -11,16 +11,16 @@ import pytest
 from build123d import Box
 
 from mini_articraft import package_dir
-from mini_articraft.sdk import ArticulatedObject, ArticulationType, MotionLimits, Origin
-from mini_articraft.sdk.export import export_object
+from mini_articraft.sdk import RigidBodyAssembly, MotionLimits, Origin
+from mini_articraft.sdk.export import export_assembly
 from mini_articraft.viewer import _handler, load_viewer_run
 
 
 def test_load_viewer_run_reads_each_usdz_version(tmp_path) -> None:
     run_dir = tmp_path / "run-demo"
     result_dir = run_dir / "result"
-    export_object(_revolute_model(), result_dir)
-    export_object(_prismatic_model(), result_dir)
+    export_assembly(_revolute_model(), result_dir)
+    export_assembly(_prismatic_model(), result_dir)
 
     viewer_run = load_viewer_run(run_dir)
 
@@ -80,7 +80,7 @@ def test_load_viewer_run_rejects_empty_and_invalid_runs(tmp_path) -> None:
 
 def test_viewer_handler_serves_only_known_routes(tmp_path) -> None:
     run_dir = tmp_path / "run-demo"
-    export_object(_revolute_model(), run_dir / "result")
+    export_assembly(_revolute_model(), run_dir / "result")
     viewer_run = load_viewer_run(run_dir)
     bootstrap = json.dumps(viewer_run.bootstrap()).encode()
     server = ThreadingHTTPServer(
@@ -122,32 +122,32 @@ def test_viewer_page_exposes_only_the_minimal_view_options() -> None:
     assert "index%palette.length" not in page
 
 
-def _revolute_model() -> ArticulatedObject:
-    model = ArticulatedObject("hinge")
-    base = model.part("base")
+def _revolute_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("hinge")
+    base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.1), name="body")
-    door = model.part("door")
+    door = model.rigid_body("door")
     door.add(Box(0.1, 0.02, 0.2), name="panel")
-    model.articulation(
+    model.joint(
         "hinge joint",
-        ArticulationType.REVOLUTE,
-        base,
-        door,
-        axis=(0.0, 1.0, 0.0),
-        motion_limits=MotionLimits(lower=-0.5, upper=0.75),
+        body0=base,
+        frame0=JointFrame(),
+        body1=door,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=(-0.5, 0.75)),),
     )
     return model
 
 
-def _prismatic_model() -> ArticulatedObject:
-    model = ArticulatedObject("slider")
-    base = model.part("base plate")
+def _prismatic_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("slider")
+    base = model.rigid_body("base plate")
     base.add(Box(0.3, 0.2, 0.05), name="base shape")
-    carriage = model.part("carriage")
+    carriage = model.rigid_body("carriage")
     carriage.add(Box(0.05, 0.05, 0.05), name="payload")
     model.articulation(
         "linear travel",
-        ArticulationType.PRISMATIC,
+        .PRISMATIC,
         base,
         carriage,
         origin=Origin(xyz=(0.1, 0.2, 0.3), rpy=(0.0, 0.1, 0.0)),

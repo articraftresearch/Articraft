@@ -7,14 +7,13 @@ import pytest
 from pxr import Usd, UsdGeom, UsdShade  # pyright: ignore[reportAttributeAccessIssue]
 
 from mini_articraft.sdk import (
-    ArticulatedObject,
+    RigidBodyAssembly,
     BoxGeometry,
     Material,
-    MotionLimits,
     ambientcg,
 )
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import export_object
+from mini_articraft.sdk.export import export_assembly
 from mini_articraft.sdk.materials import is_library_material
 from mini_articraft.viewer import _read_version
 
@@ -22,15 +21,15 @@ from mini_articraft.viewer import _read_version
 BRONZE = Material.STEEL.but(name="bronze", color=(0.8, 0.5, 0.2, 1.0), roughness=0.3)
 
 
-def _model() -> ArticulatedObject:
-    model = ArticulatedObject("materialed")
-    base = model.part("base")
+def _model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("materialed")
+    base = model.rigid_body("base")
     base.add(
         BoxGeometry([0.2, 0.2, 0.1]),
         name="body",
         material=BRONZE,
     )
-    lid = model.part("lid")
+    lid = model.rigid_body("lid")
     lid.add(BoxGeometry([0.2, 0.2, 0.02]), name="cap", color=(0.2, 0.3, 0.8))
     model.articulation(
         "hinge",
@@ -98,7 +97,7 @@ def test_an_invented_material_authors_no_friction_it_does_not_have() -> None:
 
 
 def test_color_alone_tints_a_shape_with_no_material() -> None:
-    part = ArticulatedObject("o").part("p")
+    part = RigidBodyAssembly("o").rigid_body("p")
     part.add(BoxGeometry([0.1, 0.1, 0.1]), name="s", color=(0.2, 0.3, 0.8))
     shape = next(part._iter_shapes())
 
@@ -107,7 +106,7 @@ def test_color_alone_tints_a_shape_with_no_material() -> None:
 
 
 def test_a_material_supplies_its_own_look() -> None:
-    part = ArticulatedObject("o").part("p")
+    part = RigidBodyAssembly("o").rigid_body("p")
     part.add(BoxGeometry([0.1, 0.1, 0.1]), name="s", material=Material.RUBBER)
     shape = next(part._iter_shapes())
     assert shape.tint is None
@@ -115,7 +114,7 @@ def test_a_material_supplies_its_own_look() -> None:
 
 
 def test_color_recolors_a_material_without_changing_what_it_is() -> None:
-    part = ArticulatedObject("o").part("p")
+    part = RigidBodyAssembly("o").rigid_body("p")
     part.add(BoxGeometry([0.1, 0.1, 0.1]), name="s", material=Material.STEEL, color=(0.2, 0.3, 0.8))
     shape = next(part._iter_shapes())
 
@@ -129,7 +128,7 @@ def test_color_recolors_a_material_without_changing_what_it_is() -> None:
 
 
 def test_a_coating_looks_and_grips_like_itself_but_weighs_like_the_bulk() -> None:
-    part = ArticulatedObject("o").part("p")
+    part = RigidBodyAssembly("o").rigid_body("p")
     part.add(
         BoxGeometry([0.1, 0.1, 0.1]),
         name="s",
@@ -147,7 +146,7 @@ def test_a_coating_looks_and_grips_like_itself_but_weighs_like_the_bulk() -> Non
 
 
 def test_export_binds_usd_preview_surface(tmp_path) -> None:
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
 
     mesh = stage.GetPrimAtPath("/World/materialed/parts/base/shapes/body")
@@ -168,11 +167,11 @@ def test_export_binds_usd_preview_surface(tmp_path) -> None:
 
 
 def test_export_payload_carries_material_and_appearance(tmp_path) -> None:
-    model = ArticulatedObject("materialed")
-    part = model.part("base")
+    model = RigidBodyAssembly("materialed")
+    part = model.rigid_body("base")
     part.add(BoxGeometry([0.2, 0.2, 0.1]), name="body", material=Material.STEEL)
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
     manifest = json.loads(result.manifest.read_text())
     body = manifest["parts"][0]["shapes"][0]
 
@@ -183,8 +182,8 @@ def test_export_payload_carries_material_and_appearance(tmp_path) -> None:
 
 
 def test_textured_export_resolves_each_explicit_kind_once(monkeypatch, tmp_path) -> None:
-    model = ArticulatedObject("textures")
-    part = model.part("part")
+    model = RigidBodyAssembly("textures")
+    part = model.rigid_body("part")
     # The material is the texture key, so two steel shapes share one fetch and a
     # shape with only a color asks for nothing.
     part.add(BoxGeometry([0.1, 0.1, 0.1]), name="warm_light", material=Material.STEEL)
@@ -198,7 +197,7 @@ def test_textured_export_resolves_each_explicit_kind_once(monkeypatch, tmp_path)
         raise RuntimeError("offline")
 
     monkeypatch.setattr("mini_articraft.sdk.ambientcg.fetch_material", fail_fetch)
-    result = export_object(model, tmp_path, textured=True)
+    result = export_assembly(model, tmp_path, textured=True)
 
     assert attempts == 1
     assert result.textures.requested_shapes == 2
@@ -220,14 +219,14 @@ def test_textured_export_applies_explicit_texture(monkeypatch, tmp_path) -> None
         "fetch_material",
         lambda kind: (texture_set, spec),
     )
-    model = ArticulatedObject("textured")
-    model.part("part").add(
+    model = RigidBodyAssembly("textured")
+    model.rigid_body("part").add(
         BoxGeometry([0.1, 0.1, 0.1]),
         name="name_has_no_material_semantics",
         material=Material.STEEL,
     )
 
-    result = export_object(model, tmp_path / "result", textured=True)
+    result = export_assembly(model, tmp_path / "result", textured=True)
     stage = Usd.Stage.Open(str(result.usdz))
     mesh = stage.GetPrimAtPath("/World/textured/parts/part/shapes/name_has_no_material_semantics")
 
@@ -257,7 +256,7 @@ def test_textured_export_applies_explicit_texture(monkeypatch, tmp_path) -> None
 
 
 def test_viewer_readback_exposes_shape_materials(tmp_path) -> None:
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     version = _read_version(result.usdz)
     model = cast(dict[str, Any], version["model"])
     parts = {part["name"]: part for part in cast(list[dict[str, Any]], model["parts"])}
@@ -274,8 +273,8 @@ def test_viewer_readback_exposes_shape_materials(tmp_path) -> None:
 
 def test_viewer_receives_the_mass_it_displays(tmp_path) -> None:
     """The parts panel was added in #68 but the viewer was never given the data."""
-    model = ArticulatedObject("weighed")
-    part = model.part("body")
+    model = RigidBodyAssembly("weighed")
+    part = model.rigid_body("body")
     part.add(BoxGeometry([0.1, 0.1, 0.1]), name="shell", material=Material.STEEL)
     part.add(
         BoxGeometry([0.05, 0.02, 0.01]).translate(0.06, 0.0, 0.0),
@@ -283,7 +282,7 @@ def test_viewer_receives_the_mass_it_displays(tmp_path) -> None:
         material=Material.RUBBER,
     )
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
     version = _read_version(result.usdz)
     mass = cast(dict[str, Any], version["model"])["parts"][0]["mass"]
 
