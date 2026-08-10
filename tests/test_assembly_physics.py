@@ -19,9 +19,7 @@ from mini_articraft.sdk.export import export_assembly
 
 
 def _assembly(scene: PhysicsScene | None = None, **body_kwargs) -> RigidBodyAssembly:
-    assembly = (
-        RigidBodyAssembly("rig") if scene is None else RigidBodyAssembly("rig", scene=scene)
-    )
+    assembly = RigidBodyAssembly("rig") if scene is None else RigidBodyAssembly("rig", scene=scene)
     base = assembly.rigid_body("base")
     base.add(BoxGeometry((0.2, 0.2, 0.05)), name="plate")
     arm = assembly.rigid_body("arm", **body_kwargs)
