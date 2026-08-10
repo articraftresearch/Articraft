@@ -250,7 +250,10 @@ class ResolvedRigidBodyAssembly:
 
     def world_transforms(self, state: PhysicsState | None = None) -> dict[str, Mat4]:
         checked = self.validate_state(state or self.reference_state)
-        return {name: np.asarray(matrix, dtype=np.float64) for name, matrix in checked.body_poses.items()}
+        return {
+            name: np.asarray(matrix, dtype=np.float64)
+            for name, matrix in checked.body_poses.items()
+        }
 
     def validate_state(
         self,
@@ -371,9 +374,7 @@ class RigidBodyAssembly:
     def meters_per_unit(self) -> float:
         return 1.0
 
-    def rigid_body(
-        self, name: str, *, mass_properties: MassProperties | None = None
-    ) -> RigidBody:
+    def rigid_body(self, name: str, *, mass_properties: MassProperties | None = None) -> RigidBody:
         body = RigidBody(name, mass_properties=mass_properties)
         if any(existing.name == body.name for existing in self.rigid_bodies):
             raise ValidationError(f"duplicate rigid body name: {body.name!r}")
@@ -449,9 +450,7 @@ class RigidBodyAssembly:
     def resolve(self) -> ResolvedRigidBodyAssembly:
         self.name = _as_name(self.name, field_name="assembly name")
         _validate_members(self)
-        resolved_articulations, selected_by_joint, articulated_bodies = _resolve_articulations(
-            self
-        )
+        resolved_articulations, selected_by_joint, articulated_bodies = _resolve_articulations(self)
         resolved_joints = tuple(
             ResolvedJoint(
                 joint=joint,
@@ -498,9 +497,7 @@ class RigidBodyAssembly:
         *,
         dof_positions: Mapping[str, float] | None = None,
     ) -> PhysicsState:
-        return self.resolve().validate_state(
-            PhysicsState(body_poses, dof_positions=dof_positions)
-        )
+        return self.resolve().validate_state(PhysicsState(body_poses, dof_positions=dof_positions))
 
     def _endpoint(self, endpoint: JointEndpointRef, *, field_name: str) -> JointEndpoint:
         if endpoint is WORLD:
@@ -698,10 +695,7 @@ def _propagate_transforms(
                 )
             elif known1 and not known0:
                 transforms[joint.body0] = (
-                    transforms[joint.body1]
-                    @ frame1
-                    @ np.linalg.inv(motion)
-                    @ np.linalg.inv(frame0)
+                    transforms[joint.body1] @ frame1 @ np.linalg.inv(motion) @ np.linalg.inv(frame0)
                 )
             remaining.remove(joint)
             progressed = True
@@ -712,14 +706,10 @@ def _propagate_transforms(
 
 def _joint_values(joint: Joint, transforms: Mapping[str, Mat4]) -> dict[JointAxis, float]:
     body0 = (
-        np.identity(4, dtype=np.float64)
-        if joint.body0 is WORLD
-        else transforms[joint.body0.name]
+        np.identity(4, dtype=np.float64) if joint.body0 is WORLD else transforms[joint.body0.name]
     )
     body1 = (
-        np.identity(4, dtype=np.float64)
-        if joint.body1 is WORLD
-        else transforms[joint.body1.name]
+        np.identity(4, dtype=np.float64) if joint.body1 is WORLD else transforms[joint.body1.name]
     )
     relative = np.linalg.inv(body0 @ _frame_matrix(joint.frame0)) @ (
         body1 @ _frame_matrix(joint.frame1)
