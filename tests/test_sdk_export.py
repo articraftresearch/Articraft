@@ -7,15 +7,15 @@ import pytest
 from build123d import Box, Pos
 from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdValidation
 
-import mini_articraft.sdk.export as export_module
-from mini_articraft.sdk import (
+import articraft.sdk.export as export_module
+from articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,
     MotionLimits,
     Origin,
 )
-from mini_articraft.sdk.export import export_object
+from articraft.sdk.export import export_object
 
 
 def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> None:
@@ -56,7 +56,7 @@ def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> Non
 
     joint_prim = stage.GetPrimAtPath("/World/hinge/joints/base_to_door")
     joint = UsdPhysics.RevoluteJoint.Get(stage, joint_prim.GetPath())
-    assert joint_prim.GetAttribute("mini_articraft:articulationType").Get() == "revolute"
+    assert joint_prim.GetAttribute("articraft:articulationType").Get() == "revolute"
     assert joint.GetBody0Rel().GetTargets()[0].pathString == "/World/hinge/parts/base"
     assert joint.GetBody1Rel().GetTargets()[0].pathString == "/World/hinge/parts/door"
     assert joint.GetAxisAttr().Get() == "X"

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from mini_articraft.simulate import _tracked_body_separations
+from articraft.simulate import _tracked_body_separations
 
 
 def test_prismatic_motion_is_not_counted_as_part_separation() -> None:

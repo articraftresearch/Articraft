@@ -9,8 +9,8 @@ from typing import Protocol
 import pytest
 from harness import TAPE_ROOT, ReplayHarness
 
-from mini_articraft.agent import Model
-from mini_articraft.settings import Settings, get_settings
+from articraft.agent import Model
+from articraft.settings import Settings, get_settings
 
 
 @pytest.fixture(scope="session")
@@ -139,7 +139,7 @@ def tape_model(request: pytest.FixtureRequest) -> TapeModelOpener:
 
 def _live_model() -> Model:
     try:
-        from mini_articraft.agent.provider.openai import OpenAIModel
+        from articraft.agent.provider.openai import OpenAIModel
 
         return OpenAIModel()
     except Exception as exc:

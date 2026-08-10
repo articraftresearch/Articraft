@@ -6,14 +6,14 @@ import math
 import pytest
 from pxr import Usd, UsdPhysics
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     BodyState,
     BoxGeometry,
     PhysicsScene,
 )
-from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import export_object
+from articraft.sdk.errors import ValidationError
+from articraft.sdk.export import export_object
 
 
 def _model(scene: PhysicsScene | None = None, **part_kwargs) -> ArticulatedObject:

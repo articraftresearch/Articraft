@@ -1,1 +1,1 @@
-"""Benchmark helpers for mini-articraft."""
+"""Benchmark helpers for articraft."""

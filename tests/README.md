@@ -36,7 +36,7 @@ repeat-failure guidance, allowances).
 
 Both lanes run every compile in a worker subprocess with the same timeout,
 cleanup, and result-assembly contract (shared in
-`src/mini_articraft/compiler/runner.py`). They differ only in the worker
+`src/articraft/compiler/runner.py`). They differ only in the worker
 lifecycle:
 
 - `LocalWorkspace` (cold) spawns a fresh interpreter per compile (~3s).

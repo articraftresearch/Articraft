@@ -9,9 +9,9 @@ import pytest
 from google.genai import interactions
 from pydantic import TypeAdapter
 
-from mini_articraft.agent.provider.gemini import GeminiModel, context_window_tokens_for
-from mini_articraft.errors import ModelError
-from mini_articraft.settings import DEFAULT_GEMINI_MODEL, Settings, get_settings
+from articraft.agent.provider.gemini import GeminiModel, context_window_tokens_for
+from articraft.errors import ModelError
+from articraft.settings import DEFAULT_GEMINI_MODEL, Settings, get_settings
 
 
 def run(awaitable):
@@ -475,9 +475,9 @@ def test_gemini_model_loads_dotenv_key(tmp_path, monkeypatch) -> None:
     tmp_path.joinpath(".env").write_text(
         "\n".join(
             [
-                "MINI_ARTICRAFT_PROVIDER=gemini",
+                "ARTICRAFT_PROVIDER=gemini",
                 "GEMINI_API_KEY=gemini-test",
-                "MINI_ARTICRAFT_GEMINI_MODEL=gemini-3.1-pro-preview",
+                "ARTICRAFT_GEMINI_MODEL=gemini-3.1-pro-preview",
             ]
         )
     )

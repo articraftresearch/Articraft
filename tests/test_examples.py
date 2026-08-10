@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from harness import WarmEnvironment
 
-from mini_articraft.compiler.result import CompilePayload
+from articraft.compiler.result import CompilePayload
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
 EXAMPLES = ("hinged_box", "mesh_knob")

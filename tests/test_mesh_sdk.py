@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from build123d import Box, Pos
 
-from mini_articraft.errors import ValidationError
-from mini_articraft.sdk import (
+from articraft.errors import ValidationError
+from articraft.sdk import (
     ArcPipeGeometry,
     BoxGeometry,
     CapsuleGeometry,
@@ -29,7 +29,7 @@ from mini_articraft.sdk import (
     WirePolylineGeometry,
     analyze_mesh_health,
 )
-from mini_articraft.sdk.mesh import (
+from articraft.sdk.mesh import (
     LoftSection,
     SectionLoftSpec,
     ShellPartitionRegion,

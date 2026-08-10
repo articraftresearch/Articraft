@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,

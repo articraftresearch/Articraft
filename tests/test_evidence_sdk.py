@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 from pxr import Usd, UsdGeom  # pyright: ignore[reportAttributeAccessIssue]
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,
@@ -29,7 +29,7 @@ from mini_articraft.sdk import (
     annotate_image,
     render_view,
 )
-from mini_articraft.sdk.export import export_object
+from articraft.sdk.export import export_object
 
 
 def test_partial_lathe_is_capped_watertight_and_axis_aware() -> None:
@@ -65,9 +65,7 @@ def test_mesh_normal_controls_are_exported_for_every_mesh(tmp_path: Path) -> Non
     ]
 
     assert len(meshes) == 2
-    by_name = {
-        str(mesh.GetPrim().GetAttribute("mini_articraft:name").Get()): mesh for mesh in meshes
-    }
+    by_name = {str(mesh.GetPrim().GetAttribute("articraft:name").Get()): mesh for mesh in meshes}
     assert by_name["hard"].GetNormalsInterpolation() == UsdGeom.Tokens.faceVarying
     assert by_name["smooth"].GetNormalsInterpolation() == UsdGeom.Tokens.vertex
     assert len(by_name["hard"].GetNormalsAttr().Get()) == 36

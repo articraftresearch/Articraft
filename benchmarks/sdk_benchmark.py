@@ -18,7 +18,7 @@ import numpy as np
 import trimesh
 from build123d import Axis, Box, Cylinder, Pos
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,
@@ -32,9 +32,9 @@ from mini_articraft.sdk import (
     SweepGeometry,
     TestContext,
 )
-from mini_articraft.sdk._collision import MeshCollisionKernel
-from mini_articraft.sdk._mesh.boolean import _boolean_union_many
-from mini_articraft.sdk.mesh import (
+from articraft.sdk._collision import MeshCollisionKernel
+from articraft.sdk._mesh.boolean import _boolean_union_many
+from articraft.sdk.mesh import (
     LoftSection,
     SectionLoftSpec,
     ShellPartitionRegion,
@@ -640,7 +640,7 @@ def _selected_cases(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Benchmark mini-articraft SDK operations.")
+    parser = argparse.ArgumentParser(description="Benchmark articraft SDK operations.")
     parser.add_argument("--suite", choices=("quick", "standard", "extended"), default="standard")
     parser.add_argument("--case", action="append", default=[], help="Run names containing text.")
     parser.add_argument("--rounds", type=int, help="Measured rounds per case.")

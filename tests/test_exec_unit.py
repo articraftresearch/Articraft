@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import cast
 
-from mini_articraft.agent.tools._exec import (
+from articraft.agent.tools._exec import (
     MAX_OUTPUT_BYTES,
     ExecSession,
     OutputBuffer,

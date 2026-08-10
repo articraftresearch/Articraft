@@ -52,19 +52,19 @@ OPENAI_API_KEY=your_key_here
 Generate an object:
 
 ```shell
-uv run mini-articraft "a jet engine"
+uv run articraft "a jet engine"
 ```
 
 Add one local reference image when you want to reconstruct an object:
 
 ```shell
-uv run mini-articraft --image reference.png "reconstruct this desk lamp"
+uv run articraft --image reference.png "reconstruct this desk lamp"
 ```
 
 Each run is in the `runs/` directory. Open a completed run in the browser viewer:
 
 ```shell
-uv run mini-articraft view runs/<run-id>
+uv run articraft view runs/<run-id>
 ```
 
 Use the viewer to examine each generated version and move its joints.
@@ -76,7 +76,7 @@ stands up. Drop a run on a floor and see what happens:
 
 ```shell
 uv sync --group sim
-uv run mini-articraft simulate runs/<run-id>
+uv run articraft simulate runs/<run-id>
 ```
 
 ```
@@ -93,7 +93,7 @@ Tilt the floor until it slides, which measures the friction its materials
 declared instead of taking it on faith:
 
 ```shell
-uv run mini-articraft simulate runs/<run-id> --scenario tilt --seconds 8
+uv run articraft simulate runs/<run-id> --scenario tilt --seconds 8
 ```
 
 ```
@@ -105,7 +105,7 @@ Let the joints fall from mid-travel, which is the motion an articulated object i
 actually for:
 
 ```shell
-uv run mini-articraft simulate runs/<run-id> --scenario release
+uv run articraft simulate runs/<run-id> --scenario release
 ```
 
 ```
@@ -113,7 +113,7 @@ uv run mini-articraft simulate runs/<run-id> --scenario release
   peak joint speed: 6.20 per second
 ```
 
-Every run records its motion, so `mini-articraft view` gains a **Play
+Every run records its motion, so `articraft view` gains a **Play
 simulation** switch that replays it in the same viewer used to pose joints.
 MuJoCo is optional, so the `sim` group is not installed by default.
 
@@ -127,9 +127,9 @@ that read them.
 Call the same generation loop directly from Python:
 
 ```python
-import mini_articraft
+import articraft
 
-result = mini_articraft.generate(
+result = articraft.generate(
     "reconstruct this desk lamp",
     image="reference.png",
     provider="anthropic",
@@ -147,7 +147,7 @@ Async applications use the native coroutine:
 
 ```python
 async def main():
-    result = await mini_articraft.generate_async(
+    result = await articraft.generate_async(
         "reconstruct this desk lamp",
         image="reference.png",
         on_event=print,
@@ -164,14 +164,14 @@ finishes before cancellation completes so it is not abandoned in the background.
 OpenAI is the default provider. To use Gemini, pass a Gemini API key and select the provider:
 
 ```shell
-GEMINI_API_KEY=your_key_here uv run mini-articraft \
+GEMINI_API_KEY=your_key_here uv run articraft \
   --provider gemini --model gemini-3.6-flash "make a folding chair"
 ```
 
 To use Anthropic, pass an Anthropic API key and select the provider:
 
 ```shell
-ANTHROPIC_API_KEY=your_key_here uv run mini-articraft \
+ANTHROPIC_API_KEY=your_key_here uv run articraft \
   --provider anthropic --model claude-sonnet-5 \
   --image reference.png "reconstruct this folding chair"
 ```
@@ -200,12 +200,12 @@ Each run keeps the complete Anthropic response blocks in `conversation.jsonl`.
 To use OpenRouter, provide an API key:
 
 ```shell
-OPENROUTER_API_KEY=your_key_here uv run mini-articraft \
+OPENROUTER_API_KEY=your_key_here uv run articraft \
   --provider openrouter "make a folding chair"
 ```
 
 OpenRouter defaults to `nvidia/nemotron-3-ultra-550b-a55b:free`. You can select another model
-with `--model` or `MINI_ARTICRAFT_OPENROUTER_MODEL`.
+with `--model` or `ARTICRAFT_OPENROUTER_MODEL`.
 The OpenRouter lane is text-only, so it omits image tools and related agent instructions.
 Optional `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` values enable OpenRouter app
 attribution. OpenRouter reports token usage and request cost when available. Because arbitrary
@@ -233,7 +233,7 @@ uv pip install https://github.com/articraftresearch/Articraft/releases/download/
 To record a preview as a project dependency instead, pin its release tag:
 
 ```shell
-uv add "mini-articraft @ git+https://github.com/articraftresearch/Articraft.git@<tag>"
+uv add "articraft @ git+https://github.com/articraftresearch/Articraft.git@<tag>"
 ```
 
 Maintainers create releases with a manual workflow. Read the [release guide](docs/releasing.md).

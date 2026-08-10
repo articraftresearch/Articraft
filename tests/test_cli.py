@@ -6,10 +6,10 @@ from typing import Any, ClassVar
 
 from typer.testing import CliRunner
 
-from mini_articraft import api, app
-from mini_articraft.agent.record import Record, append_conversation
-from mini_articraft.compiler.worker import TextureRunResult
-from mini_articraft.settings import Settings, get_settings
+from articraft import api, app
+from articraft.agent.record import Record, append_conversation
+from articraft.compiler.worker import TextureRunResult
+from articraft.settings import Settings, get_settings
 
 
 class FakeOpenAIModel:
@@ -452,7 +452,7 @@ def test_cli_uses_default_openrouter_model_and_warns_on_missing_key(
     get_settings.cache_clear()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("MINI_ARTICRAFT_OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("ARTICRAFT_OPENROUTER_MODEL", raising=False)
 
     result = CliRunner().invoke(
         app.cli,
@@ -461,7 +461,7 @@ def test_cli_uses_default_openrouter_model_and_warns_on_missing_key(
 
     assert result.exit_code == 1
     assert "OPENROUTER_API_KEY" in result.output
-    assert "MINI_ARTICRAFT_OPENROUTER_MODEL or --model" not in result.output
+    assert "ARTICRAFT_OPENROUTER_MODEL or --model" not in result.output
     assert "Traceback" not in result.output
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from mini_articraft.agent.compaction import (
+from articraft.agent.compaction import (
     KEEP_RECENT_TOKENS,
     RESERVE_TOKENS,
     prepare_compaction,

@@ -1,6 +1,6 @@
 # Release guide
 
-mini-articraft publishes preview releases on GitHub. Each release attaches the wheel, the sdist,
+articraft publishes preview releases on GitHub. Each release attaches the wheel, the sdist,
 and a `SHA256SUMS` file. The [release preview workflow](../.github/workflows/release-preview.yml)
 builds and verifies each artifact before it publishes anything.
 
@@ -15,7 +15,7 @@ The legacy `sdk-preview-2026-07-21.1` tag predates this scheme and stays as it i
 
 ## Create a preview release
 
-1. Bump `__version__` in [`src/mini_articraft/__init__.py`](../src/mini_articraft/__init__.py) to
+1. Bump `__version__` in [`src/articraft/__init__.py`](../src/articraft/__init__.py) to
    the next prerelease version, for example `0.1.1a1`. The package version is dynamic, so the
    lockfile does not change. Merge the bump to `main`.
 2. Run the manual workflow against that commit:
@@ -29,7 +29,7 @@ The legacy `sdk-preview-2026-07-21.1` tag predates this scheme and stays as it i
 
 The build job validates the tag, builds with `uv build --no-sources`, and runs
 `twine check` on both artifacts. It installs the wheel into a clean virtual environment and runs
-an isolated smoke test: the import must come from the environment, `mini_articraft.sdk` must not
+an isolated smoke test: the import must come from the environment, `articraft.sdk` must not
 load OpenUSD, and the [hinged box example](../examples/hinged_box/main.py) must pass its tests
 and export a USDZ file. It smoke-tests the sdist the same way and writes `SHA256SUMS`.
 

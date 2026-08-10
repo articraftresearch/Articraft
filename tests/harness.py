@@ -1,4 +1,4 @@
-"""Modular test environment for mini-articraft.
+"""Modular test environment for articraft.
 
 Verify the generation loop deeply without paying for model calls. Four
 lanes, cheapest first:
@@ -46,13 +46,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Generic, Literal, TypeVar, cast
 
-from mini_articraft.agent import Agent, Model, events
-from mini_articraft.agent.record import Record, read_conversation
-from mini_articraft.agent.tools import Tool, ToolContext
-from mini_articraft.agent.tools._core import schema as _tool_schema
-from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.agent.workspace.local import LocalWorkspace, _error_result, _finalize_payload
-from mini_articraft.compiler.result import CompilePayload, CompileResult
+from articraft.agent import Agent, Model, events
+from articraft.agent.record import Record, read_conversation
+from articraft.agent.tools import Tool, ToolContext
+from articraft.agent.tools._core import schema as _tool_schema
+from articraft.agent.tools._core import workspace_digest
+from articraft.agent.workspace.local import LocalWorkspace, _error_result, _finalize_payload
+from articraft.compiler.result import CompilePayload, CompileResult
 
 
 def fake_compile_payload(**overrides: Any) -> CompilePayload:
@@ -889,7 +889,7 @@ def run_scenario(
 
     The model is a fresh :class:`ScriptedModel` built from ``script`` unless
     ``model=`` plugs in something else -- e.g. one recording from a
-    :class:`ReplayHarness`, or a live :class:`~mini_articraft.Model`. Pass
+    :class:`ReplayHarness`, or a live :class:`~articraft.Model`. Pass
     ``env`` to choose the compile lane (:class:`WarmEnvironment` for speed)
     or ``tmp_path`` for a plain subprocess ``LocalWorkspace``. By default
     finite harness models must be consumed exactly; pass
@@ -963,7 +963,7 @@ def compile_success_tool() -> Tool:
 GOOD_MAIN_PY = """
 from build123d import Box
 
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 
 

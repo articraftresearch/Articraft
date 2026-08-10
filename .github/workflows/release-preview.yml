@@ -45,8 +45,8 @@ jobs:
           version=$(python -c '
           import sys
           sys.path.insert(0, "src")
-          import mini_articraft
-          print(mini_articraft.__version__)
+          import articraft
+          print(articraft.__version__)
           ')
           expected_tag="v${version}"
           if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
@@ -74,18 +74,18 @@ jobs:
           uv pip install --python /tmp/release-wheel/bin/python dist/*.whl
           /tmp/release-wheel/bin/python -I -c '
           from pathlib import Path
-          import mini_articraft
+          import articraft
           import runpy
           import sys
 
-          assert "/tmp/release-wheel/" in str(mini_articraft.__file__)
-          import mini_articraft.sdk
+          assert "/tmp/release-wheel/" in str(articraft.__file__)
+          import articraft.sdk
           assert "pxr" not in sys.modules
 
           example = runpy.run_path("examples/hinged_box/main.py")
           assert example["run_tests"]().passed
 
-          from mini_articraft.sdk.export import export_object
+          from articraft.sdk.export import export_object
           result = export_object(example["object_model"], Path("/tmp/release-output"))
           assert result.manifest.is_file()
           assert result.usdz.is_file()
@@ -96,8 +96,8 @@ jobs:
           uv venv /tmp/release-sdist
           uv pip install --no-deps --python /tmp/release-sdist/bin/python dist/*.tar.gz
           /tmp/release-sdist/bin/python -I -c '
-          import mini_articraft
-          assert "/tmp/release-sdist/" in str(mini_articraft.__file__)
+          import articraft
+          assert "/tmp/release-sdist/" in str(articraft.__file__)
           '
 
       - name: Create checksums
@@ -145,7 +145,7 @@ jobs:
             dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "mini-articraft $RELEASE_TAG (preview)" \
+            --title "articraft $RELEASE_TAG (preview)" \
             --generate-notes \
             --prerelease \
             --latest=false

@@ -14,8 +14,8 @@ What changed and why?
 
 - [ ] Ran `uv sync --group dev --frozen`
 - [ ] Ran `uv run --frozen python scripts/check_repo_hygiene.py`
-- [ ] Ran `uv run --frozen ruff format --check src/mini_articraft tests`
-- [ ] Ran `uv run --frozen ruff check src/mini_articraft tests`
+- [ ] Ran `uv run --frozen ruff format --check src/articraft tests`
+- [ ] Ran `uv run --frozen ruff check src/articraft tests`
 - [ ] Ran `uv run --frozen pytest -q`
 - [ ] Ran targeted command/test: `<command>`
 - [ ] Not run; reason:

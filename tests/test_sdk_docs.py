@@ -6,12 +6,12 @@ import runpy
 import tomllib
 from pathlib import Path
 
-import mini_articraft.sdk as sdk
-import mini_articraft.sdk.mesh as sdk_mesh
-from mini_articraft import package_dir
-from mini_articraft.errors import MiniArticraftError
-from mini_articraft.sdk import ArticulatedObject, TestReport
-from mini_articraft.sdk.errors import SDKError, ValidationError
+import articraft.sdk as sdk
+import articraft.sdk.mesh as sdk_mesh
+from articraft import package_dir
+from articraft.errors import MiniArticraftError
+from articraft.sdk import ArticulatedObject, TestReport
+from articraft.sdk.errors import SDKError, ValidationError
 
 
 def detailed_reference_paths(sdk_docs: Path) -> list[str]:
@@ -65,7 +65,7 @@ def test_every_public_sdk_symbol_is_documented() -> None:
 
 def test_root_and_mesh_export_disjoint_surfaces() -> None:
     """One canonical import path per category: geometry classes and the object
-    API at the root, mesh operations and recipes under ``mini_articraft.sdk.mesh``."""
+    API at the root, mesh operations and recipes under ``articraft.sdk.mesh``."""
     assert set(sdk.__all__).isdisjoint(sdk_mesh.__all__)
 
 
@@ -85,8 +85,7 @@ def test_sdk_is_a_leaf_package_with_compatible_errors() -> None:
             outside_imports.extend(
                 (path.name, module)
                 for module in modules
-                if module.startswith("mini_articraft.")
-                and not module.startswith("mini_articraft.sdk")
+                if module.startswith("articraft.") and not module.startswith("articraft.sdk")
             )
 
     assert not outside_imports
@@ -206,7 +205,7 @@ def test_relative_markdown_doc_links_resolve() -> None:
 def test_sdk_docs_and_examples_are_package_data() -> None:
     repo_root = package_dir.parents[1]
     pyproject = tomllib.loads(repo_root.joinpath("pyproject.toml").read_text())
-    package_data = pyproject["tool"]["setuptools"]["package-data"]["mini_articraft"]
+    package_data = pyproject["tool"]["setuptools"]["package-data"]["articraft"]
 
     for pattern in [
         "sdk/docs/common/*.md",
@@ -304,7 +303,7 @@ def test_prompt_requires_agent_driven_visual_review() -> None:
 
     for required in [
         "Write `previews.py`",
-        '"$MINI_ARTICRAFT_PYTHON" previews.py',
+        '"$ARTICRAFT_PYTHON" previews.py',
         "before the first compile",
         "Calling the renderer is not visual inspection",
         "silhouette, proportions, part transitions, repeated features",

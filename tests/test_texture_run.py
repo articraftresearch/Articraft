@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-import mini_articraft.compiler.worker as worker
-from mini_articraft.sdk import ArticulatedObject, BoxGeometry
-from mini_articraft.sdk.export import TextureExportReport, export_object
+import articraft.compiler.worker as worker
+from articraft.sdk import ArticulatedObject, BoxGeometry
+from articraft.sdk.export import TextureExportReport, export_object
 
 
 def _model() -> ArticulatedObject:

@@ -7,7 +7,7 @@ import pytest
 import trimesh
 from pxr import Usd, UsdPhysics
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     BoxGeometry,
     CylinderGeometry,
@@ -15,9 +15,9 @@ from mini_articraft.sdk import (
     Material,
     TestContext,
 )
-from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import _resolve_part_mass, export_object
-from mini_articraft.sdk.mass import resolve_mass
+from articraft.sdk.errors import ValidationError
+from articraft.sdk.export import _resolve_part_mass, export_object
+from articraft.sdk.mass import resolve_mass
 
 
 def _box(size=(0.2, 0.1, 0.05)) -> trimesh.Trimesh:
@@ -226,10 +226,10 @@ def test_open_shapes_fail_instead_of_being_dropped() -> None:
 def test_physics_lane_blocks_a_compile_when_a_part_has_no_mass(tmp_path: Path) -> None:
     # The gate is only useful if it stops the compile; most baseline checks report as
     # non-blocking diagnostics, so this guards that missing mass is not one of them.
-    from mini_articraft.agent.workspace.local import LocalWorkspace
+    from articraft.agent.workspace.local import LocalWorkspace
 
     source = (
-        "from mini_articraft.sdk import ArticulatedObject, BoxGeometry, TestContext, TestReport\n"
+        "from articraft.sdk import ArticulatedObject, BoxGeometry, TestContext, TestReport\n"
         "\n"
         "def build_object_model() -> ArticulatedObject:\n"
         "    model = ArticulatedObject('plain')\n"

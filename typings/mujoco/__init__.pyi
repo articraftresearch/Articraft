@@ -2,7 +2,7 @@
 
 MuJoCo ships no type information, and it is an optional dependency, so the type
 checker cannot see it on a machine that has not installed the ``sim`` group.
-This declares the handful of names ``mini_articraft.simulate`` uses.
+This declares the handful of names ``articraft.simulate`` uses.
 """
 
 from typing import Any

@@ -74,10 +74,10 @@ def record(
     max_turns: int = 100,
 ) -> None:
     """Run a live generation and record it as a tape (pays for model calls)."""
-    from mini_articraft.agent import Agent
-    from mini_articraft.agent.provider.openai import OpenAIModel
-    from mini_articraft.agent.workspace.local import LocalWorkspace
-    from mini_articraft.settings import get_settings
+    from articraft.agent import Agent
+    from articraft.agent.provider.openai import OpenAIModel
+    from articraft.agent.workspace.local import LocalWorkspace
+    from articraft.settings import get_settings
 
     settings = get_settings()
     library = ReplayHarness(root)

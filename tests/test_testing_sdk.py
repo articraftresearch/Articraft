@@ -5,8 +5,8 @@ import warnings
 import pytest
 from build123d import Box, Pos
 
-from mini_articraft.errors import ValidationError
-from mini_articraft.sdk import (
+from articraft.errors import ValidationError
+from articraft.sdk import (
     AllowedMeshIssues,
     AllowedOverlap,
     ArticulatedObject,

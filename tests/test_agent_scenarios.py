@@ -25,12 +25,12 @@ from harness import (
     tool_call,
 )
 
-from mini_articraft.agent.events import AssistantMessage, RunFinished, RunStarted, ToolStarted
+from articraft.agent.events import AssistantMessage, RunFinished, RunStarted, ToolStarted
 
 BROKEN_NO_RUN_TESTS = """
 from build123d import Box
 
-from mini_articraft.sdk import ArticulatedObject
+from articraft.sdk import ArticulatedObject
 
 
 def build_object_model() -> ArticulatedObject:
@@ -46,7 +46,7 @@ object_model = build_object_model()
 OVERLAP_MAIN = """
 from build123d import Box
 
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 
 def build_object_model() -> ArticulatedObject:
@@ -192,7 +192,7 @@ def body_shape():
     return Box(0.4, 0.3, 0.2)
 """
     main = """from geometry_helpers import body_shape
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 object_model = ArticulatedObject("local_extension")
 object_model.part("body").add(body_shape(), name="shell")
@@ -208,7 +208,7 @@ def run_tests() -> TestReport:
     return ctx.report()
 """
     previews = """from main import object_model
-from mini_articraft.sdk import SectionView, render_view
+from articraft.sdk import SectionView, render_view
 
 
 render_view(
@@ -236,7 +236,7 @@ render_view(
             calls(
                 tool_call(
                     "exec_command",
-                    {"command": '"$MINI_ARTICRAFT_PYTHON" previews.py'},
+                    {"command": '"$ARTICRAFT_PYTHON" previews.py'},
                 )
             ),
             inspect_working_preview,

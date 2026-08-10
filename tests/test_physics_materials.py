@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from pxr import Usd, UsdGeom, UsdPhysics, UsdShade  # pyright: ignore[reportAttributeAccessIssue]
 
-from mini_articraft.sdk import ArticulatedObject, BoxGeometry, Material
-from mini_articraft.sdk.export import export_object
+from articraft.sdk import ArticulatedObject, BoxGeometry, Material
+from articraft.sdk.export import export_object
 
 # The usd-core stubs omit these schemas; bind them once rather than at every use.
 _MaterialAPI = UsdPhysics.MaterialAPI  # pyright: ignore[reportAttributeAccessIssue]
@@ -117,7 +117,7 @@ def test_exported_stage_passes_openusd_physics_validation(tmp_path: Path) -> Non
 
 def test_a_coating_moves_friction_to_the_surface_without_moving_mass(tmp_path: Path) -> None:
     """A rubber grip on a steel bar is heavy like steel and grippy like rubber."""
-    from mini_articraft.sdk.export import _resolve_part_mass
+    from articraft.sdk.export import _resolve_part_mass
 
     model = ArticulatedObject("gripped")
     part = model.part("bar")
@@ -162,7 +162,7 @@ def test_a_coating_also_supplies_the_look(tmp_path: Path) -> None:
 
 def test_textured_shapes_keep_their_physics_material(monkeypatch, tmp_path: Path) -> None:
     """The textured export path returns early and once skipped friction entirely."""
-    from mini_articraft.sdk import ambientcg
+    from articraft.sdk import ambientcg
 
     maps = tmp_path / "maps"
     maps.mkdir()

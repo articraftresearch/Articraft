@@ -10,15 +10,15 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import mini_articraft.agent.workspace.local as local_module
-from mini_articraft.agent.record import Record, read_conversation
-from mini_articraft.agent.workspace.local import (
+import articraft.agent.workspace.local as local_module
+from articraft.agent.record import Record, read_conversation
+from articraft.agent.workspace.local import (
     DEFAULT_MAIN_PY,
     LocalWorkspace,
     _run_isolated_process,
 )
-from mini_articraft.compiler.worker import _merge_test_reports, _serialize_test_report
-from mini_articraft.sdk import TestFailure, TestReport
+from articraft.compiler.worker import _merge_test_reports, _serialize_test_report
+from articraft.sdk import TestFailure, TestReport
 
 
 def write_main(run_dir, code: str) -> None:
@@ -98,7 +98,7 @@ def test_failed_checks_save_a_usdz_without_publishing_it(tmp_path) -> None:
     write_main(
         run_dir,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 object_model = ArticulatedObject("failure")
 base = object_model.part("base")
@@ -150,7 +150,7 @@ def test_compile_path_supports_workspace_modules(tmp_path) -> None:
     parts.mkdir()
     parts.joinpath("body.py").write_text(
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject
+from articraft.sdk import ArticulatedObject
 
 def build():
     model = ArticulatedObject("module")
@@ -162,7 +162,7 @@ def build():
     )
     write_main(
         run_dir,
-        """from mini_articraft.sdk import TestContext, TestReport
+        """from articraft.sdk import TestContext, TestReport
 from parts.body import build
 
 object_model = build()
@@ -187,7 +187,7 @@ def test_compile_worker_runs_from_run_dir_without_api_credentials(monkeypatch, t
 import os
 from pathlib import Path
 from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 Path("worker-boundary.json").write_text(json.dumps({
     "cwd": str(Path.cwd()),
@@ -260,7 +260,7 @@ def test_compile_path_reports_missing_required_entrypoint_values(tmp_path) -> No
     write_main(
         missing_tests,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject
+from articraft.sdk import ArticulatedObject
 object_model = ArticulatedObject("box")
 base = object_model.part("base")
 base.add(Box(1, 1, 1), name="body")
@@ -272,7 +272,7 @@ base.add(Box(1, 1, 1), name="body")
     write_main(
         bad_report,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject
+from articraft.sdk import ArticulatedObject
 object_model = ArticulatedObject("box")
 base = object_model.part("base")
 base.add(Box(1, 1, 1), name="body")
@@ -289,7 +289,7 @@ def test_baseline_overlap_is_a_nonblocking_compiler_diagnostic(tmp_path) -> None
     write_main(
         run_dir,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, ArticulationType, Origin, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, ArticulationType, Origin, TestContext, TestReport
 
 object_model = ArticulatedObject("overlap")
 base = object_model.part("base"); base.add(Box(1, 1, 1), name="body")
@@ -319,7 +319,7 @@ def test_compile_reports_custom_visual_artifacts_without_copying_files(tmp_path)
         """import json
 from pathlib import Path
 from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 object_model = ArticulatedObject("evidence")
 object_model.part("body").add(Box(1, 1, 1), name="box")
@@ -360,7 +360,7 @@ def test_disconnected_geometry_is_a_compiler_warning(tmp_path) -> None:
     write_main(
         run_dir,
         """from build123d import Box, Pos
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 object_model = ArticulatedObject("disconnected")
 base = object_model.part("base")
@@ -385,7 +385,7 @@ def test_compile_honors_an_exact_shape_overlap_allowance(tmp_path) -> None:
     write_main(
         run_dir,
         """from build123d import Box
-from mini_articraft.sdk import ArticulatedObject, ArticulationType, Origin, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, ArticulationType, Origin, TestContext, TestReport
 
 object_model = ArticulatedObject("allowance")
 shaft = object_model.part("shaft"); shaft.add(Box(1, 1, 1), name="steel")
@@ -411,7 +411,7 @@ def run_tests() -> TestReport:
 def test_compile_blocks_unhealthy_mesh_and_honors_exact_issue_allowance(tmp_path) -> None:
     env = LocalWorkspace(output_dir=tmp_path)
     blocked_run = env.create_run("unhealthy-mesh")
-    source = """from mini_articraft.sdk import (
+    source = """from articraft.sdk import (
     ArticulatedObject,
     BoxGeometry,
     MeshGeometry,
@@ -472,7 +472,7 @@ def test_compile_path_reports_timeout(tmp_path) -> None:
     assert result["status"] == "error"
     assert "timed out after 0.2s" in result["error"].lower()
     assert result["compile_stats"]["current_phase"] in result["error"]
-    assert "MINI_ARTICRAFT_COMPILE_TIMEOUT_SECONDS" in result["error"]
+    assert "ARTICRAFT_COMPILE_TIMEOUT_SECONDS" in result["error"]
     assert result["compile_report"]["status"] == "failure"
     signal = result["compile_report"]["signal_bundle"]["signals"][0]
     assert signal["kind"] == "compile_timeout"

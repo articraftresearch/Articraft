@@ -1,0 +1,300 @@
+"""Public Python API for generating articulated objects.
+
+Use :func:`generate` from synchronous code and :func:`generate_async` from
+asyncio applications. Both functions run the same async agent core and return
+a typed :class:`GenerationResult`::
+
+    import articraft
+
+    result = articraft.generate("a desk fan", on_event=print)
+    print(result.status, result.artifact)
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal, cast, get_args
+
+from articraft.agent import Agent, events
+from articraft.agent.provider import create_model
+from articraft.agent.provider.anthropic import anthropic_api_key_value
+from articraft.agent.workspace import LocalWorkspace
+from articraft.settings import Settings, get_settings
+
+Provider = Literal["openai", "gemini", "anthropic", "openrouter"]
+GenerationStatus = Literal["success", "error"]
+Event = events.Event
+EventHandler = Callable[[Event], None]
+_PROVIDERS: tuple[str, ...] = get_args(Provider)
+
+
+@dataclass(slots=True)
+class GenerationResult:
+    """The completed run and its generated artifact, if successful.
+
+    ``run_dir`` is the run directory. ``artifact`` is the generated file
+    beneath that directory, or ``None`` when ``status`` is ``"error"``.
+    """
+
+    status: GenerationStatus
+    run_dir: Path
+    artifact: Path | None
+    run_id: str = ""
+    message: str = ""
+    error: str = ""
+    attempts: int = 0
+    cost: float = 0.0
+    token_usage: dict[str, int] = field(default_factory=dict)
+    compile_report: dict[str, Any] | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        """Whether the agent produced an artifact."""
+        return self.status == "success"
+
+
+def generate(
+    prompt: str,
+    *,
+    provider: Provider | None = None,
+    model: str | None = None,
+    image: Path | str | None = None,
+    output_dir: Path | str | None = None,
+    on_event: EventHandler | None = None,
+) -> GenerationResult:
+    """Generate an object and block until the run finishes.
+
+    ``on_event`` is called synchronously as the agent reports progress. Asyncio
+    applications must use :func:`generate_async` instead. A completed agent
+    failure is returned as a result with ``status == "error"``; invalid input
+    and failures before a run completes raise exceptions. Event-handler errors
+    are logged and do not interrupt generation.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            "generate() cannot run inside an active event loop; await generate_async() instead"
+        )
+
+    return asyncio.run(
+        generate_async(
+            prompt,
+            provider=provider,
+            model=model,
+            image=image,
+            output_dir=output_dir,
+            on_event=on_event,
+        )
+    )
+
+
+async def generate_async(
+    prompt: str,
+    *,
+    provider: Provider | None = None,
+    model: str | None = None,
+    image: Path | str | None = None,
+    output_dir: Path | str | None = None,
+    on_event: EventHandler | None = None,
+) -> GenerationResult:
+    """Generate an object on the current event loop.
+
+    The coroutine supports normal asyncio cancellation and timeout handling.
+    Cancellation takes effect at the next await point. An active compile is
+    allowed to finish before cancellation completes so it is not abandoned in a
+    background thread. ``on_event`` runs on the current event loop and must not
+    block it.
+    """
+    settings, image_path = _resolve_request(
+        prompt,
+        provider=provider,
+        model=model,
+        image=image,
+        output_dir=output_dir,
+    )
+    payload = await _run_generation(
+        settings,
+        prompt,
+        image_path=image_path,
+        on_event=on_event,
+    )
+    return _result_from_payload(payload)
+
+
+def _resolve_request(
+    prompt: str,
+    *,
+    provider: Provider | None,
+    model: str | None,
+    image: Path | str | None,
+    output_dir: Path | str | None,
+) -> tuple[Settings, Path | None]:
+    if not prompt.strip():
+        raise ValueError("prompt must not be empty")
+
+    settings = _resolved_settings(
+        get_settings(),
+        provider=provider,
+        model=model,
+        output_dir=Path(output_dir) if output_dir is not None else None,
+    )
+    if missing := _missing_provider_settings(settings):
+        raise ValueError(f"missing required environment variables: {', '.join(missing)}")
+
+    image_path = Path(image) if image is not None else None
+    if image_path is not None and not image_path.is_file():
+        raise FileNotFoundError(f"reference image not found: {image_path}")
+    return settings, image_path
+
+
+def _resolved_settings(
+    base: Settings,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    output_dir: Path | None = None,
+    effort: str | None = None,
+    compile_timeout: float | None = None,
+    physics: bool = False,
+) -> Settings:
+    """Apply validated CLI or API overrides to ``base``."""
+    if provider is not None and provider not in _PROVIDERS:
+        raise ValueError(
+            f"unsupported provider: {provider}. Supported providers: {', '.join(_PROVIDERS)}"
+        )
+
+    selected_provider = provider or base.provider
+    updates: dict[str, Any] = {
+        key: value
+        for key, value in (
+            ("provider", provider),
+            ("output_dir", output_dir),
+            ("openai_reasoning_effort", effort),
+            ("compile_timeout_seconds", compile_timeout),
+            # The CLI flag only turns the lane on; leaving it off preserves
+            # the environment or .env setting.
+            ("physics_enabled", True if physics else None),
+        )
+        if value is not None
+    }
+    if model is not None:
+        model_key = {
+            "anthropic": "anthropic_model",
+            "gemini": "gemini_model",
+            "openai": "openai_model",
+            "openrouter": "openrouter_model",
+        }[selected_provider]
+        updates[model_key] = model
+
+    values = base.model_dump()
+    values.update(updates)
+    return Settings.model_validate(values)
+
+
+def _missing_provider_settings(settings: Settings) -> list[str]:
+    if settings.provider == "openrouter":
+        missing = []
+        if not (settings.openrouter_api_key or "").strip():
+            missing.append("OPENROUTER_API_KEY")
+        if not settings.openrouter_model.strip():
+            missing.append("ARTICRAFT_OPENROUTER_MODEL or --model")
+        return missing
+    if settings.provider == "anthropic":
+        return [] if anthropic_api_key_value(settings) else ["ANTHROPIC_API_KEY"]
+    if settings.provider == "gemini":
+        return [] if (settings.gemini_api_key or "").strip() else ["GEMINI_API_KEY"]
+    return [] if (settings.openai_api_key or "").strip() else ["OPENAI_API_KEY"]
+
+
+async def _run_generation(
+    settings: Settings,
+    prompt: str,
+    *,
+    image_path: Path | None = None,
+    on_event: EventHandler | None = None,
+) -> dict[str, Any]:
+    """Run one agent generation against fully resolved settings."""
+    workspace = LocalWorkspace(
+        output_dir=settings.output_dir,
+        timeout_seconds=settings.compile_timeout_seconds,
+        physics_enabled=settings.physics_enabled,
+    )
+    model_client = create_model(settings)
+    agent_kwargs: dict[str, Any] = {"max_turns": settings.max_turns}
+    if on_event is not None:
+        agent_kwargs["on_event"] = on_event
+    return await Agent(model_client, workspace, **agent_kwargs).run(prompt, image_path=image_path)
+
+
+def _result_from_payload(payload: dict[str, Any]) -> GenerationResult:
+    status = str(payload.get("status") or "")
+    if status not in get_args(GenerationStatus):
+        raise ValueError(f"unexpected generation status: {status or '<empty>'}")
+
+    raw_run_dir = str(payload.get("run") or "")
+    raw_run_path = Path(raw_run_dir)
+    if not raw_run_dir.strip() or raw_run_path == Path():
+        raise ValueError("generation result is missing its run directory")
+    run_dir = raw_run_path.resolve()
+    if not run_dir.name:
+        raise ValueError("generation result has an invalid run directory")
+
+    result = str(payload.get("result") or "")
+    artifact = Path(result) if result else None
+    if artifact is not None and not artifact.is_absolute():
+        artifact = run_dir / artifact
+    if artifact is not None:
+        artifact = artifact.resolve()
+        if artifact == run_dir:
+            raise ValueError("generation artifact must be a file beneath its run directory")
+        try:
+            artifact.relative_to(run_dir)
+        except ValueError as exc:
+            raise ValueError("generation artifact must stay inside its run directory") from exc
+    if status == "success" and artifact is None:
+        raise ValueError("successful generation result is missing its artifact")
+    if status == "error" and artifact is not None:
+        raise ValueError("failed generation result unexpectedly contains an artifact")
+
+    run_id = str(payload.get("run_id") or run_dir.name)
+    if run_id != run_dir.name:
+        raise ValueError("generation result run id does not match its run directory")
+
+    raw_usage = payload.get("token_usage")
+    token_usage = (
+        {str(key): int(value) for key, value in raw_usage.items()}
+        if isinstance(raw_usage, dict)
+        else {}
+    )
+    raw_report = payload.get("compile_report")
+    compile_report = dict(raw_report) if isinstance(raw_report, dict) else None
+
+    return GenerationResult(
+        status=cast(GenerationStatus, status),
+        run_dir=run_dir,
+        artifact=artifact,
+        run_id=run_id,
+        message=str(payload.get("message") or ""),
+        error=str(payload.get("error") or ""),
+        attempts=int(payload.get("attempts") or 0),
+        cost=float(payload.get("cost") or 0.0),
+        token_usage=token_usage,
+        compile_report=compile_report,
+    )
+
+
+__all__ = [
+    "Event",
+    "EventHandler",
+    "GenerationResult",
+    "GenerationStatus",
+    "Provider",
+    "generate",
+    "generate_async",
+]

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import trimesh
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     BoxGeometry,
     MeshGeometry,
     MeshHealthIssue,
     analyze_mesh_health,
 )
-from mini_articraft.sdk.mesh import boolean_difference
+from articraft.sdk.mesh import boolean_difference
 
 
 def test_analyze_mesh_health_accepts_a_clean_solid() -> None:

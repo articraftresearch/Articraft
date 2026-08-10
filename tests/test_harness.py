@@ -31,11 +31,11 @@ from harness import (
     tool_call,
 )
 
-from mini_articraft.agent.events import TurnStarted
-from mini_articraft.agent.record import Record
-from mini_articraft.agent.tools import ToolContext
-from mini_articraft.agent.workspace.local import LocalWorkspace
-from mini_articraft.compiler.result import CompilePayload
+from articraft.agent.events import TurnStarted
+from articraft.agent.record import Record
+from articraft.agent.tools import ToolContext
+from articraft.agent.workspace.local import LocalWorkspace
+from articraft.compiler.result import CompilePayload
 
 
 def write_good_main() -> Response:
@@ -265,7 +265,7 @@ import helper
 
 from build123d import Box
 
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 print(f"helper says {helper.VALUE}")
 

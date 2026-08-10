@@ -4,18 +4,18 @@ One MeshGeometry, built from a closed (radius, z) silhouette, with an
 authored custom check that the result is watertight -- the property that
 makes it safe for booleans, export, and printing.
 
-Compile it:  python -m mini_articraft.compiler.worker <run_dir>
+Compile it:  python -m articraft.compiler.worker <run_dir>
 """
 
 from __future__ import annotations
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     LatheGeometry,
     TestContext,
     TestReport,
 )
-from mini_articraft.sdk.mesh import boolean_union
+from articraft.sdk.mesh import boolean_union
 
 PROFILE = [
     (0.000, 0.000),

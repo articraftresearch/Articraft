@@ -44,10 +44,10 @@ jobs:
         run: uv run --frozen python scripts/check_repo_hygiene.py
 
       - name: Check formatting
-        run: uv run --frozen ruff format --check src/mini_articraft tests
+        run: uv run --frozen ruff format --check src/articraft tests
 
       - name: Lint
-        run: uv run --frozen ruff check src/mini_articraft tests
+        run: uv run --frozen ruff check src/articraft tests
 
       - name: Type check
         run: uv run --frozen basedpyright
@@ -106,14 +106,14 @@ jobs:
         run: |
           uv venv /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
-          /tmp/smoke/bin/mini-articraft --help >/dev/null
+          /tmp/smoke/bin/articraft --help >/dev/null
           code=0
-          /tmp/smoke/bin/python -m mini_articraft.compiler.worker >/dev/null 2>&1 || code=$?
+          /tmp/smoke/bin/python -m articraft.compiler.worker >/dev/null 2>&1 || code=$?
           test "$code" -eq 2
           /tmp/smoke/bin/python -c "
-          import mini_articraft
-          from mini_articraft import package_dir
-          from mini_articraft.sdk import ArticulatedObject, TestContext
+          import articraft
+          from articraft import package_dir
+          from articraft.sdk import ArticulatedObject, TestContext
           assert (package_dir / 'prompts' / 'system.md').is_file()
           assert (package_dir / 'viewer.html').is_file()
           assert (package_dir / 'sdk' / 'docs' / 'common' / '00_quickstart.md').is_file()
@@ -125,7 +125,7 @@ jobs:
           from pathlib import Path
           sys.path.insert(0, '/tmp/sdk-smoke')
           from main import object_model, run_tests
-          from mini_articraft.sdk.export import export_object
+          from articraft.sdk.export import export_object
           object_model.validate()
           assert run_tests().passed
           result = export_object(object_model, Path('/tmp/sdk-smoke/output'))
@@ -135,7 +135,7 @@ jobs:
           /tmp/smoke/bin/python -c "
           import shutil
           from pathlib import Path
-          from mini_articraft.agent.workspace import LocalWorkspace
+          from articraft.agent.workspace import LocalWorkspace
           env = LocalWorkspace(output_dir=Path('/tmp'))
           run_dir = env.create_run('smoke-run')
           shutil.copyfile('examples/mesh_knob/main.py', run_dir / 'workspace' / 'main.py')

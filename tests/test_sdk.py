@@ -6,8 +6,8 @@ import pytest
 from build123d import Box, Pos
 from build123d.topology import Shape
 
-import mini_articraft.sdk as sdk
-from mini_articraft.sdk import (
+import articraft.sdk as sdk
+from articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     MeshGeometry,

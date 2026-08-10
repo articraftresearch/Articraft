@@ -20,18 +20,18 @@ from harness import (
 )
 from PIL import Image
 
-import mini_articraft.agent.tools as agent_tools
-from mini_articraft.agent import Agent, events
-from mini_articraft.agent.harness import (
+import articraft.agent.tools as agent_tools
+from articraft.agent import Agent, events
+from articraft.agent.harness import (
     PROMPT_SLUG_MAX_LENGTH,
     _prompt_slug,
     _read_sdk_quickstart,
     _run_id_for_prompt,
 )
-from mini_articraft.agent.record import Record, read_conversation
-from mini_articraft.agent.tools import Tool, ToolContext, ToolResult
-from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.agent.workspace.local import DEFAULT_MAIN_PY, LocalWorkspace
+from articraft.agent.record import Record, read_conversation
+from articraft.agent.tools import Tool, ToolContext, ToolResult
+from articraft.agent.tools._core import workspace_digest
+from articraft.agent.workspace.local import DEFAULT_MAIN_PY, LocalWorkspace
 
 
 class CompactingScriptedModel(ScriptedModel):
@@ -702,7 +702,7 @@ def test_agent_cancellation_terminates_a_live_exec_session(monkeypatch, tmp_path
         contexts.append(context)
         return context
 
-    monkeypatch.setattr("mini_articraft.agent.harness.ToolContext", spy_context)
+    monkeypatch.setattr("articraft.agent.harness.ToolContext", spy_context)
 
     async def block_forever(query: ModelQuery) -> Response:
         waiting.set()
@@ -826,7 +826,7 @@ def test_auto_run_id_atomically_retries_collisions(monkeypatch, tmp_path) -> Non
     model = ScriptedModel([text("")])
     env = LocalWorkspace(output_dir=tmp_path)
     env.create_run("fixed")
-    monkeypatch.setattr("mini_articraft.agent.harness._run_id_for_prompt", lambda prompt: "fixed")
+    monkeypatch.setattr("articraft.agent.harness._run_id_for_prompt", lambda prompt: "fixed")
 
     result = run(Agent(model, env, max_turns=1).run("box"))
 
@@ -841,7 +841,7 @@ def test_agent_terminalizes_setup_exceptions(monkeypatch, tmp_path) -> None:
     def fail_prompt_read(name: str, *, include_images: bool = True) -> str:
         raise RuntimeError("prompt unavailable")
 
-    monkeypatch.setattr("mini_articraft.agent.harness._read_prompt", fail_prompt_read)
+    monkeypatch.setattr("articraft.agent.harness._read_prompt", fail_prompt_read)
 
     with pytest.raises(RuntimeError, match="prompt unavailable"):
         run(
@@ -863,7 +863,7 @@ def test_agent_terminalizes_unexpected_loop_exceptions(monkeypatch, tmp_path) ->
     def fail_cost_save(run_dir, cost, token_usage) -> None:
         raise OSError("disk unavailable")
 
-    monkeypatch.setattr("mini_articraft.agent.harness._save_cost", fail_cost_save)
+    monkeypatch.setattr("articraft.agent.harness._save_cost", fail_cost_save)
 
     with pytest.raises(OSError, match="disk unavailable"):
         run(

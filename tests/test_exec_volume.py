@@ -18,8 +18,8 @@ import asyncio
 
 import pytest
 
-from mini_articraft.agent.tools import ToolContext, get
-from mini_articraft.agent.workspace.local import LocalWorkspace
+from articraft.agent.tools import ToolContext, get
+from articraft.agent.workspace.local import LocalWorkspace
 
 SEQUENTIAL_CALLS = 250
 CONCURRENT_BATCH = 60

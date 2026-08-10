@@ -11,12 +11,12 @@ import pytest
 from harness import GOOD_MAIN_PY, ScriptedModel, WarmEnvironment, calls, run, text, tool_call
 from pydantic import ValidationError
 
-import mini_articraft
-from mini_articraft import api
-from mini_articraft.agent import events
-from mini_articraft.agent.record import Record
-from mini_articraft.compiler.result import CompilePayload
-from mini_articraft.settings import Settings, get_settings
+import articraft
+from articraft import api
+from articraft.agent import events
+from articraft.agent.record import Record
+from articraft.compiler.result import CompilePayload
+from articraft.settings import Settings, get_settings
 
 
 @pytest.mark.parametrize(
@@ -69,7 +69,7 @@ def test_missing_provider_settings_treats_whitespace_as_missing() -> None:
 
 def test_generate_rejects_empty_prompt() -> None:
     with pytest.raises(ValueError, match="prompt must not be empty"):
-        mini_articraft.generate("  ")
+        articraft.generate("  ")
 
 
 def test_generate_requires_provider_api_key(monkeypatch, tmp_path: Path) -> None:
@@ -78,14 +78,14 @@ def test_generate_requires_provider_api_key(monkeypatch, tmp_path: Path) -> None
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        mini_articraft.generate("a box")
+        articraft.generate("a box")
 
 
 def test_generate_rejects_missing_reference_image(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     with pytest.raises(FileNotFoundError, match=r"missing\.png"):
-        mini_articraft.generate("a box", image=tmp_path / "missing.png")
+        articraft.generate("a box", image=tmp_path / "missing.png")
 
 
 def test_generate_routes_inputs_and_returns_typed_paths(monkeypatch, tmp_path: Path) -> None:
@@ -131,7 +131,7 @@ def test_generate_routes_inputs_and_returns_typed_paths(monkeypatch, tmp_path: P
     image.write_bytes(b"png")
     seen: list[events.Event] = []
 
-    result = mini_articraft.generate(
+    result = articraft.generate(
         "a fan",
         provider="anthropic",
         model="claude-opus-5",
@@ -140,7 +140,7 @@ def test_generate_routes_inputs_and_returns_typed_paths(monkeypatch, tmp_path: P
         on_event=seen.append,
     )
 
-    assert isinstance(result, mini_articraft.GenerationResult)
+    assert isinstance(result, articraft.GenerationResult)
     assert result.succeeded
     assert result.status == "success"
     assert result.run_id == "test-run"
@@ -177,7 +177,7 @@ def test_generate_end_to_end_with_scripted_model(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
     seen: list[events.Event] = []
 
-    result = mini_articraft.generate(
+    result = articraft.generate(
         "a box",
         output_dir=tmp_path / "runs",
         on_event=seen.append,
@@ -291,7 +291,7 @@ def test_generate_async_runs_on_the_ambient_loop(monkeypatch, tmp_path: Path) ->
     seen: list[events.Event] = []
 
     result = run(
-        mini_articraft.generate_async(
+        articraft.generate_async(
             "a box",
             output_dir=tmp_path / "runs",
             on_event=seen.append,
@@ -324,7 +324,7 @@ def test_generate_async_uses_native_task_cancellation(monkeypatch, tmp_path: Pat
                 started.set()
 
         task = asyncio.create_task(
-            mini_articraft.generate_async(
+            articraft.generate_async(
                 "a box",
                 output_dir=tmp_path / "runs",
                 on_event=on_event,
@@ -369,9 +369,7 @@ def test_generate_async_finishes_active_compile_before_cancelling(
     monkeypatch.setattr(api, "get_settings", lambda: Settings(openai_api_key="sk-test"))
 
     async def cancel_during_compile() -> None:
-        task = asyncio.create_task(
-            mini_articraft.generate_async("a box", output_dir=tmp_path / "runs")
-        )
+        task = asyncio.create_task(articraft.generate_async("a box", output_dir=tmp_path / "runs"))
         assert await asyncio.to_thread(compile_started.wait, 5)
         task.cancel()
         await asyncio.sleep(0)
@@ -403,8 +401,8 @@ def test_generate_async_supports_concurrent_identical_prompts(monkeypatch, tmp_p
     async def generate_twice() -> list[api.GenerationResult]:
         return list(
             await asyncio.gather(
-                mini_articraft.generate_async("a box", output_dir=tmp_path / "runs"),
-                mini_articraft.generate_async("a box", output_dir=tmp_path / "runs"),
+                articraft.generate_async("a box", output_dir=tmp_path / "runs"),
+                articraft.generate_async("a box", output_dir=tmp_path / "runs"),
             )
         )
 
@@ -418,7 +416,7 @@ def test_generate_async_supports_concurrent_identical_prompts(monkeypatch, tmp_p
 def test_generate_rejects_active_event_loop() -> None:
     async def call_sync_api() -> None:
         with pytest.raises(RuntimeError, match=r"await generate_async\(\) instead"):
-            mini_articraft.generate("a box")
+            articraft.generate("a box")
 
     run(call_sync_api())
 
@@ -427,21 +425,21 @@ def test_root_import_is_lazy_and_exports_python_api() -> None:
     code = "\n".join(
         [
             "import sys",
-            "import mini_articraft",
+            "import articraft",
             "heavy = [name for name in (",
-            "    'mini_articraft.api', 'mini_articraft.agent.provider', 'mini_articraft.agent',",
+            "    'articraft.api', 'articraft.agent.provider', 'articraft.agent',",
             "    'PIL', 'anthropic', 'websockets',",
             ") if name in sys.modules]",
             "assert not heavy, heavy",
             "public = {'Event', 'EventHandler', 'GenerationResult', 'GenerationStatus',",
             "          'Provider', 'generate', 'generate_async'}",
-            "assert public <= set(dir(mini_articraft))",
-            "assert 'mini_articraft.api' not in sys.modules",
-            "assert callable(mini_articraft.generate)",
-            "assert callable(mini_articraft.generate_async)",
-            "assert callable(mini_articraft.GenerationResult)",
-            "assert 'mini_articraft.api' in sys.modules",
-            "assert mini_articraft.generate is mini_articraft.__dict__['generate']",
+            "assert public <= set(dir(articraft))",
+            "assert 'articraft.api' not in sys.modules",
+            "assert callable(articraft.generate)",
+            "assert callable(articraft.generate_async)",
+            "assert callable(articraft.GenerationResult)",
+            "assert 'articraft.api' in sys.modules",
+            "assert articraft.generate is articraft.__dict__['generate']",
         ]
     )
 

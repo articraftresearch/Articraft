@@ -6,10 +6,10 @@ from typing import Any, cast
 
 import pytest
 
-from mini_articraft.agent import ContextSummarizer
-from mini_articraft.agent.provider.openai import OpenAIModel, context_window_tokens_for
-from mini_articraft.errors import ModelError
-from mini_articraft.settings import DEFAULT_MAX_TURNS, Settings, get_settings
+from articraft.agent import ContextSummarizer
+from articraft.agent.provider.openai import OpenAIModel, context_window_tokens_for
+from articraft.errors import ModelError
+from articraft.settings import DEFAULT_MAX_TURNS, Settings, get_settings
 
 
 def run(awaitable):
@@ -78,7 +78,7 @@ def patch_websocket(monkeypatch: pytest.MonkeyPatch, socket: FakeWebSocket) -> N
         assert max_size is None
         return socket
 
-    monkeypatch.setattr("mini_articraft.agent.provider.openai.websockets.connect", connect)
+    monkeypatch.setattr("articraft.agent.provider.openai.websockets.connect", connect)
 
 
 def openai_model(**kwargs: Any) -> OpenAIModel:
@@ -505,16 +505,16 @@ def test_openai_model_loads_dotenv(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     get_settings.cache_clear()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("MINI_ARTICRAFT_OUTPUT_DIR", raising=False)
-    monkeypatch.delenv("MINI_ARTICRAFT_MODEL", raising=False)
-    monkeypatch.delenv("MINI_ARTICRAFT_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("ARTICRAFT_OUTPUT_DIR", raising=False)
+    monkeypatch.delenv("ARTICRAFT_MODEL", raising=False)
+    monkeypatch.delenv("ARTICRAFT_REASONING_EFFORT", raising=False)
     tmp_path.joinpath(".env").write_text(
         "\n".join(
             [
                 "OPENAI_API_KEY=sk-test",
-                "MINI_ARTICRAFT_OUTPUT_DIR=custom-runs",
-                "MINI_ARTICRAFT_MODEL=gpt-test",
-                "MINI_ARTICRAFT_REASONING_EFFORT=low",
+                "ARTICRAFT_OUTPUT_DIR=custom-runs",
+                "ARTICRAFT_MODEL=gpt-test",
+                "ARTICRAFT_REASONING_EFFORT=low",
             ]
         )
     )
@@ -608,9 +608,9 @@ def test_openai_model_retries_transient_errors_on_a_new_socket(
     async def sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("mini_articraft.agent.provider.openai.websockets.connect", connect)
-    monkeypatch.setattr("mini_articraft.agent.provider.openai.asyncio.sleep", sleep)
-    monkeypatch.setattr("mini_articraft.agent.provider.openai.random.random", lambda: 0.5)
+    monkeypatch.setattr("articraft.agent.provider.openai.websockets.connect", connect)
+    monkeypatch.setattr("articraft.agent.provider.openai.asyncio.sleep", sleep)
+    monkeypatch.setattr("articraft.agent.provider.openai.random.random", lambda: 0.5)
 
     result = run(openai_model().query([{"role": "user", "content": "hello"}]))
 
@@ -660,7 +660,7 @@ def test_openai_model_resends_full_context_when_previous_response_is_lost(
     async def connect(*args: Any, **kwargs: Any) -> FakeWebSocket:
         return next(sockets)
 
-    monkeypatch.setattr("mini_articraft.agent.provider.openai.websockets.connect", connect)
+    monkeypatch.setattr("articraft.agent.provider.openai.websockets.connect", connect)
     model = openai_model()
     messages = [{"role": "user", "content": "first question"}]
 

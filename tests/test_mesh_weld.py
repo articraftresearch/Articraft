@@ -3,13 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     BoxGeometry,
     CylinderGeometry,
     SphereGeometry,
     analyze_mesh_health,
 )
-from mini_articraft.sdk.mesh import (
+from articraft.sdk.mesh import (
     SnapRefused,
     boolean_difference,
     smooth_difference,

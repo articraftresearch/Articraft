@@ -15,13 +15,13 @@ import pytest
 from harness import fake_compile_payload
 from PIL import Image
 
-from mini_articraft.agent.images import LIMITS, prepare_image
-from mini_articraft.agent.tools import ToolContext, get, schemas
-from mini_articraft.agent.tools._core import workspace_digest
-from mini_articraft.agent.tools._exec import ExecSessions
-from mini_articraft.agent.workspace.local import LocalWorkspace
-from mini_articraft.compiler.feedback import build_compile_report_from_payload
-from mini_articraft.compiler.result import CompilePayload
+from articraft.agent.images import LIMITS, prepare_image
+from articraft.agent.tools import ToolContext, get, schemas
+from articraft.agent.tools._core import workspace_digest
+from articraft.agent.tools._exec import ExecSessions
+from articraft.agent.workspace.local import LocalWorkspace
+from articraft.compiler.feedback import build_compile_report_from_payload
+from articraft.compiler.result import CompilePayload
 
 
 def run(awaitable):
@@ -41,7 +41,7 @@ def test_tool_schemas_include_prompting_guidance() -> None:
     edit_props = by_name["edit"]["parameters"]["properties"]
 
     assert "session ID for ongoing interaction" in by_name["exec_command"]["description"]
-    assert "$MINI_ARTICRAFT_PYTHON" in by_name["exec_command"]["description"]
+    assert "$ARTICRAFT_PYTHON" in by_name["exec_command"]["description"]
     assert "does not render, copy, or attach images" in by_name["compile"]["description"]
     assert exec_props["command"]["description"] == "Shell command to execute."
     assert (
@@ -239,7 +239,7 @@ def test_prepare_image_rejects_animated_and_oversized_files(monkeypatch, tmp_pat
 
     image_path = tmp_path / "image.png"
     Image.new("RGB", (1, 1), color="white").save(image_path)
-    monkeypatch.setattr("mini_articraft.agent.images.MAX_IMAGE_BYTES", 1)
+    monkeypatch.setattr("articraft.agent.images.MAX_IMAGE_BYTES", 1)
     with pytest.raises(ValueError, match="image exceeds"):
         prepare_image(image_path)
 
@@ -385,7 +385,7 @@ def test_exec_command_does_not_receive_api_credentials(monkeypatch, tmp_path) ->
         f"{shlex.quote(sys.executable)} -c "
         "'import json, os; print(json.dumps({key: os.environ.get(key) for key in "
         '["OPENAI_API_KEY", "EXAMPLE_API_KEY", "VISIBLE_SETTING", '
-        '"MINI_ARTICRAFT_PYTHON"]}))\''
+        '"ARTICRAFT_PYTHON"]}))\''
     )
 
     result = run(get("exec_command").run(ctx, {"command": command}))
@@ -394,14 +394,14 @@ def test_exec_command_does_not_receive_api_credentials(monkeypatch, tmp_path) ->
         "OPENAI_API_KEY": None,
         "EXAMPLE_API_KEY": None,
         "VISIBLE_SETTING": "visible",
-        "MINI_ARTICRAFT_PYTHON": sys.executable,
+        "ARTICRAFT_PYTHON": sys.executable,
     }
 
 
 def test_exec_command_renders_public_sdk_previews_before_compile(tmp_path) -> None:
     ctx = context(tmp_path)
     ctx.workspace.joinpath("main.py").write_text(
-        """from mini_articraft.sdk import (
+        """from articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,
@@ -431,7 +431,7 @@ def run_tests() -> TestReport:
     )
     ctx.workspace.joinpath("previews.py").write_text(
         """from main import object_model
-from mini_articraft.sdk import (
+from articraft.sdk import (
     MeridionalSectionView,
     ModelView,
     MotionStripView,
@@ -474,7 +474,7 @@ render_view(
     result = run(
         get("exec_command").run(
             ctx,
-            {"command": '"$MINI_ARTICRAFT_PYTHON" previews.py'},
+            {"command": '"$ARTICRAFT_PYTHON" previews.py'},
         )
     )
 
@@ -599,7 +599,7 @@ def test_exec_sessions_aclose_logs_cleanup_errors(caplog) -> None:
 
     sessions = ExecSessions()
     sessions._sessions[7] = BrokenSession()  # type: ignore[assignment]
-    caplog.set_level(logging.WARNING, logger="mini_articraft.agent.tools._exec")
+    caplog.set_level(logging.WARNING, logger="articraft.agent.tools._exec")
 
     run(sessions.aclose())
 
@@ -658,7 +658,7 @@ def test_compile_tool_compiles_workspace(tmp_path) -> None:
         """
 from build123d import *
 
-from mini_articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import ArticulatedObject, TestContext, TestReport
 
 
 def build_object_model() -> ArticulatedObject:

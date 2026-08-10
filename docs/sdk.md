@@ -1,9 +1,9 @@
 # Mesh authoring SDK
 
-The mini-articraft SDK is a small Python library for articulated 3D objects. It uses build123d
+The articraft SDK is a small Python library for articulated 3D objects. It uses build123d
 solids and procedural triangle meshes. You can use both geometry types in one object.
 
-The public package is `mini_articraft.sdk`. All lengths use meters. Articulation rotations and
+The public package is `articraft.sdk`. All lengths use meters. Articulation rotations and
 mesh rotations use radians. Build123d rotations use degrees.
 
 ## Create an object
@@ -14,8 +14,8 @@ shapes in the same part if they always move together.
 ```python
 from build123d import Box
 
-from mini_articraft.sdk import ArticulatedObject, TestContext
-from mini_articraft.sdk.export import export_object
+from articraft.sdk import ArticulatedObject, TestContext
+from articraft.sdk.export import export_object
 
 
 model = ArticulatedObject("box")
@@ -42,7 +42,7 @@ and mesh repair. The SDK has builders for common solids and curved forms. It als
 sweeps, section lofts, shells, booleans, welds, and smooth operations.
 
 ```python
-from mini_articraft.sdk import ArticulatedObject, RoundedBoxGeometry
+from articraft.sdk import ArticulatedObject, RoundedBoxGeometry
 
 
 model = ArticulatedObject("housing")
@@ -65,7 +65,7 @@ continuous, and prismatic articulations.
 ```python
 from build123d import Box
 
-from mini_articraft.sdk import ArticulationType, MotionLimits, Origin
+from articraft.sdk import ArticulationType, MotionLimits, Origin
 
 
 lid = model.part("lid")
@@ -99,19 +99,19 @@ The compiler also does these tests:
 - It finds unwanted overlap.
 - It finds joints that separate during motion.
 
-USDZ export is in `mini_articraft.sdk.export`. Thus, a normal SDK import does not load OpenUSD.
+USDZ export is in `articraft.sdk.export`. Thus, a normal SDK import does not load OpenUSD.
 Each part becomes one rigid body. Each named shape keeps its mesh and color.
 
 ## Reference
 
-- Start with the [SDK quickstart](../src/mini_articraft/sdk/docs/common/00_quickstart.md).
-- Read the [object and part API](../src/mini_articraft/sdk/docs/common/30_articulated_object.md).
-- Read the [articulation API](../src/mini_articraft/sdk/docs/common/35_joints.md).
-- Read the [test API](../src/mini_articraft/sdk/docs/common/40_testing.md).
-- Read the [USDZ export API](../src/mini_articraft/sdk/docs/common/50_usdz_export.md).
-- Read the [mesh API](../src/mini_articraft/sdk/docs/mesh/00_mesh_geometry.md).
-- Use the [complete SDK examples](../src/mini_articraft/sdk/docs/examples).
+- Start with the [SDK quickstart](../src/articraft/sdk/docs/common/00_quickstart.md).
+- Read the [object and part API](../src/articraft/sdk/docs/common/30_articulated_object.md).
+- Read the [articulation API](../src/articraft/sdk/docs/common/35_joints.md).
+- Read the [test API](../src/articraft/sdk/docs/common/40_testing.md).
+- Read the [USDZ export API](../src/articraft/sdk/docs/common/50_usdz_export.md).
+- Read the [mesh API](../src/articraft/sdk/docs/mesh/00_mesh_geometry.md).
+- Use the [complete SDK examples](../src/articraft/sdk/docs/examples).
 
 The mesh reference has separate pages for profiles, sweeps, and section lofts. It also has pages
 for booleans, shells, welds, and mesh refinement. The package includes a small set of
-[build123d documents](../src/mini_articraft/sdk/docs/build123d).
+[build123d documents](../src/articraft/sdk/docs/build123d).

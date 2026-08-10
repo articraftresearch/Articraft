@@ -10,10 +10,10 @@ from typing import Any, cast
 import pytest
 from build123d import Box
 
-from mini_articraft import package_dir
-from mini_articraft.sdk import ArticulatedObject, ArticulationType, MotionLimits, Origin
-from mini_articraft.sdk.export import export_object
-from mini_articraft.viewer import _handler, load_viewer_run
+from articraft import package_dir
+from articraft.sdk import ArticulatedObject, ArticulationType, MotionLimits, Origin
+from articraft.sdk.export import export_object
+from articraft.viewer import _handler, load_viewer_run
 
 
 def test_load_viewer_run_reads_each_usdz_version(tmp_path) -> None:
@@ -155,3 +155,31 @@ def _prismatic_model() -> ArticulatedObject:
         motion_limits=MotionLimits(lower=-0.1, upper=0.2),
     )
     return model
+
+
+def test_viewer_composes_joint_frames_in_sdk_order() -> None:
+    """The page must build ``origin.rpy`` the way the SDK does.
+
+    The SDK composes rpy as an extrinsic ``sxyz`` matrix, which is Rz*Ry*Rx and
+    therefore three.js Euler order ``ZYX``. Order only shows up once two
+    components are nonzero, so a tripod leg yawed 120 degrees off a pitched
+    frame silently swung around the wrong axis while single axis hinges looked
+    perfect.
+    """
+
+    page = (package_dir / "viewer.html").read_text(encoding="utf-8")
+    assert 'frame.rotation.set(...spec.origin.rpy,"ZYX")' in page
+
+
+def test_sdk_rpy_matrix_is_extrinsic_xyz() -> None:
+    """Pin the convention the viewer is matched against."""
+
+    import numpy as np
+
+    from articraft.sdk._collision import _rpy_matrix
+
+    rpy = (0.0, -0.35, 2.09)
+    hinge = _rpy_matrix(rpy)[:3, :3] @ np.array([0.0, 1.0, 0.0])
+    # A leg yawed off a pitched frame keeps a level hinge axis; the reversed
+    # order tilts it out of plane, which is the bug this guards.
+    assert abs(float(hinge[2])) < 1e-9

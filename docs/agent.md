@@ -1,6 +1,6 @@
 # Agent design
 
-mini-articraft has a small generation system. This is its core loop:
+articraft has a small generation system. This is its core loop:
 
 ```text
 prompt -> model -> workspace -> record
@@ -10,7 +10,7 @@ The model changes one Python workspace. The workspace compiles it in a separate 
 
 ## Run sequence
 
-The command line interface and the `mini_articraft.generate` functions create a model adapter and
+The command line interface and the `articraft.generate` functions create a model adapter and
 a local workspace. They give both items to `Agent`. This separation keeps the loop independent
 of one model or compiler.
 
@@ -90,17 +90,17 @@ contains the numbered export files.
 
 ## Main parts of the code
 
-- [`api.py`](../src/mini_articraft/api.py) contains the public synchronous and asynchronous
+- [`api.py`](../src/articraft/api.py) contains the public synchronous and asynchronous
   generation functions and the provider routing they share with the command line interface.
-- [`agent/`](../src/mini_articraft/agent) contains the turn loop and tools.
-- [`agent/provider/`](../src/mini_articraft/agent/provider) contains the model adapters.
-- [`agent/workspace/`](../src/mini_articraft/agent/workspace) creates runs and compiles them.
-- [`compiler/`](../src/mini_articraft/compiler) is the compile itself, its result, and the signals
+- [`agent/`](../src/articraft/agent) contains the turn loop and tools.
+- [`agent/provider/`](../src/articraft/agent/provider) contains the model adapters.
+- [`agent/workspace/`](../src/articraft/agent/workspace) creates runs and compiles them.
+- [`compiler/`](../src/articraft/compiler) is the compile itself, its result, and the signals
   the agent reads. It runs with or without an agent.
-- [`sdk/`](../src/mini_articraft/sdk) contains object authoring, tests, and export code.
-- [`agent/record.py`](../src/mini_articraft/agent/record.py) saves the run record and conversation
+- [`sdk/`](../src/articraft/sdk) contains object authoring, tests, and export code.
+- [`agent/record.py`](../src/articraft/agent/record.py) saves the run record and conversation
   log.
-- [`prompts/`](../src/mini_articraft/prompts) contains the model instructions.
+- [`prompts/`](../src/articraft/prompts) contains the model instructions.
 
 The `Model` and `Workspace` protocols are the two main extension points. A model adapter answers
 queries and closes its resources. A workspace creates a run and compiles it -- both halves vary

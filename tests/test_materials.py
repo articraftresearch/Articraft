@@ -6,17 +6,17 @@ from typing import Any, cast
 import pytest
 from pxr import Usd, UsdGeom, UsdShade  # pyright: ignore[reportAttributeAccessIssue]
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     BoxGeometry,
     Material,
     MotionLimits,
     ambientcg,
 )
-from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.export import export_object
-from mini_articraft.sdk.materials import is_library_material
-from mini_articraft.viewer import _read_version
+from articraft.sdk.errors import ValidationError
+from articraft.sdk.export import export_object
+from articraft.sdk.materials import is_library_material
+from articraft.viewer import _read_version
 
 # A derived material, defined once and reused -- the pattern the SDK expects.
 BRONZE = Material.STEEL.but(name="bronze", color=(0.8, 0.5, 0.2, 1.0), roughness=0.3)
@@ -197,7 +197,7 @@ def test_textured_export_resolves_each_explicit_kind_once(monkeypatch, tmp_path)
         attempts += 1
         raise RuntimeError("offline")
 
-    monkeypatch.setattr("mini_articraft.sdk.ambientcg.fetch_material", fail_fetch)
+    monkeypatch.setattr("articraft.sdk.ambientcg.fetch_material", fail_fetch)
     result = export_object(model, tmp_path, textured=True)
 
     assert attempts == 1
@@ -234,7 +234,7 @@ def test_textured_export_applies_explicit_texture(monkeypatch, tmp_path) -> None
     assert result.textures.requested_shapes == 1
     assert result.textures.textured_shapes == 1
     assert result.textures.errors == ()
-    assert mesh.GetAttribute("mini_articraft:material:textured").Get() == pytest.approx(1.0)
+    assert mesh.GetAttribute("articraft:material:textured").Get() == pytest.approx(1.0)
     points = mesh.GetAttribute("points").Get()
     uvs = UsdGeom.PrimvarsAPI(mesh).GetPrimvar("st").Get()  # pyright: ignore[reportAttributeAccessIssue]
     assert len(points) == len(uvs)

@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mini-articraft"
+name = "articraft"
 dynamic = ["version"]
 description = "A small reference agent for generating articulated build123d objects."
 readme = "README.md"
@@ -42,8 +42,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/mattzh72/mini-articraft"
-Issues = "https://github.com/mattzh72/mini-articraft/issues"
+Repository = "https://github.com/mattzh72/articraft"
+Issues = "https://github.com/mattzh72/articraft/issues"
 
 [dependency-groups]
 sim = [
@@ -57,7 +57,7 @@ dev = [
 ]
 
 [project.scripts]
-mini-articraft = "mini_articraft.app:main"
+articraft = "articraft.app:main"
 
 [tool.uv]
 required-version = ">=0.9.0"
@@ -67,14 +67,14 @@ package-dir = { "" = "src" }
 include-package-data = true
 
 [tool.setuptools.dynamic]
-version = { attr = "mini_articraft.__version__" }
+version = { attr = "articraft.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["mini_articraft*"]
+include = ["articraft*"]
 
 [tool.setuptools.package-data]
-mini_articraft = [
+articraft = [
     "py.typed",
     "viewer.html",
     "prompts/*.md",
@@ -92,7 +92,7 @@ mini_articraft = [
 [tool.basedpyright]
 include = ["src", "tests", "scripts", "benchmarks"]
 # The vendored build123d doc snippets are agent-facing content, not package code.
-exclude = ["src/mini_articraft/sdk/docs"]
+exclude = ["src/articraft/sdk/docs"]
 typeCheckingMode = "standard"
 # CompilePayload exists to catch mistyped keys, not to prove every optional key
 # is present at each read. The latter would need a guard at ~20 call sites that
@@ -119,9 +119,9 @@ markers = [
 line-length = 100
 target-version = "py311"
 extend-exclude = [
-    "src/mini_articraft/sdk/docs/build123d/assets",
-    "src/mini_articraft/sdk/docs/build123d/examples",
-    "src/mini_articraft/sdk/docs/build123d/snippets",
+    "src/articraft/sdk/docs/build123d/assets",
+    "src/articraft/sdk/docs/build123d/examples",
+    "src/articraft/sdk/docs/build123d/snippets",
 ]
 
 [tool.ruff.lint]
@@ -130,7 +130,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 # typer builds CLI options by calling typer.Option in parameter defaults.
-"src/mini_articraft/app.py" = ["B008"]
+"src/articraft/app.py" = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"

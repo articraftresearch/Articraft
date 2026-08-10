@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mini_articraft.sdk import (
+from articraft.sdk import (
     ArticulatedObject,
     ArticulationType,
     BoxGeometry,
@@ -15,12 +15,12 @@ from mini_articraft.sdk import (
     MotionLimits,
     Origin,
 )
-from mini_articraft.sdk.export import export_object
-from mini_articraft.viewer import load_viewer_run
+from articraft.sdk.export import export_object
+from articraft.viewer import load_viewer_run
 
 pytest.importorskip("mujoco", reason="recording motion needs the sim dependency group")
 
-from mini_articraft.simulate import simulate_usdz
+from articraft.simulate import simulate_usdz
 
 
 def _run_dir(tmp_path: Path) -> tuple[Path, Path]:

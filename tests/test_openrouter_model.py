@@ -9,12 +9,12 @@ import httpx
 import pytest
 from harness import GOOD_MAIN_PY
 
-from mini_articraft.agent import Agent
-from mini_articraft.agent.provider import create_model
-from mini_articraft.agent.provider.openrouter import OpenRouterModel
-from mini_articraft.agent.workspace import LocalWorkspace
-from mini_articraft.errors import ModelError
-from mini_articraft.settings import DEFAULT_OPENROUTER_MODEL, Settings, get_settings
+from articraft.agent import Agent
+from articraft.agent.provider import create_model
+from articraft.agent.provider.openrouter import OpenRouterModel
+from articraft.agent.workspace import LocalWorkspace
+from articraft.errors import ModelError
+from articraft.settings import DEFAULT_OPENROUTER_MODEL, Settings, get_settings
 
 
 def run(awaitable):
@@ -97,8 +97,8 @@ def test_openrouter_model_sends_messages_tools_and_returns_usage_and_cost() -> N
     }
     model, client, requests = model_with_responses(
         [response(text="done", usage=usage)],
-        openrouter_http_referer="https://mini-articraft.example",
-        openrouter_app_title="mini-articraft",
+        openrouter_http_referer="https://articraft.example",
+        openrouter_app_title="articraft",
         openrouter_request_timeout_seconds=45,
     )
     tool = {
@@ -137,8 +137,8 @@ def test_openrouter_model_sends_messages_tools_and_returns_usage_and_cost() -> N
     request = requests[0]
     assert request.url == "https://openrouter.ai/api/v1/chat/completions"
     assert request.headers["Authorization"] == "Bearer or-test"
-    assert request.headers["HTTP-Referer"] == "https://mini-articraft.example"
-    assert request.headers["X-OpenRouter-Title"] == "mini-articraft"
+    assert request.headers["HTTP-Referer"] == "https://articraft.example"
+    assert request.headers["X-OpenRouter-Title"] == "articraft"
     assert request.extensions["timeout"] == {
         "connect": 45,
         "read": 45,
@@ -333,15 +333,15 @@ def test_openrouter_settings_load_from_dotenv(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setitem(Settings.model_config, "env_file", ".env")
     get_settings.cache_clear()
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("MINI_ARTICRAFT_OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("ARTICRAFT_OPENROUTER_MODEL", raising=False)
     tmp_path.joinpath(".env").write_text(
         "\n".join(
             [
-                "MINI_ARTICRAFT_PROVIDER=openrouter",
+                "ARTICRAFT_PROVIDER=openrouter",
                 "OPENROUTER_API_KEY=or-test",
-                "MINI_ARTICRAFT_OPENROUTER_MODEL=vendor/new-model",
-                "OPENROUTER_HTTP_REFERER=https://mini-articraft.example",
-                "OPENROUTER_APP_TITLE=mini-articraft",
+                "ARTICRAFT_OPENROUTER_MODEL=vendor/new-model",
+                "OPENROUTER_HTTP_REFERER=https://articraft.example",
+                "OPENROUTER_APP_TITLE=articraft",
             ]
         )
     )
@@ -351,8 +351,8 @@ def test_openrouter_settings_load_from_dotenv(tmp_path: Path, monkeypatch) -> No
     assert settings.provider == "openrouter"
     assert settings.selected_model == "vendor/new-model"
     assert settings.openrouter_api_key == "or-test"
-    assert settings.openrouter_http_referer == "https://mini-articraft.example"
-    assert settings.openrouter_app_title == "mini-articraft"
+    assert settings.openrouter_http_referer == "https://articraft.example"
+    assert settings.openrouter_app_title == "articraft"
     get_settings.cache_clear()
 
 
@@ -365,7 +365,7 @@ def test_openrouter_settings_load_from_dotenv(tmp_path: Path, monkeypatch) -> No
         ),
         (
             {"openrouter_api_key": "or-test", "openrouter_model": ""},
-            "MINI_ARTICRAFT_OPENROUTER_MODEL",
+            "ARTICRAFT_OPENROUTER_MODEL",
         ),
     ],
 )
@@ -420,7 +420,7 @@ def test_openrouter_model_retries_rate_limit_and_honors_retry_after(monkeypatch)
     async def sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("mini_articraft.agent.provider.openrouter.asyncio.sleep", sleep)
+    monkeypatch.setattr("articraft.agent.provider.openrouter.asyncio.sleep", sleep)
     rate_limit = httpx.Response(
         429,
         headers={"Retry-After": "2"},
@@ -439,7 +439,7 @@ def test_openrouter_model_wraps_transport_error_after_retry(monkeypatch) -> None
     async def sleep(_delay: float) -> None:
         pass
 
-    monkeypatch.setattr("mini_articraft.agent.provider.openrouter.asyncio.sleep", sleep)
+    monkeypatch.setattr("articraft.agent.provider.openrouter.asyncio.sleep", sleep)
     request = httpx.Request("POST", "https://openrouter.ai")
     model, _, requests = model_with_responses(
         [
@@ -480,7 +480,7 @@ def test_openrouter_model_retries_embedded_provider_error(monkeypatch) -> None:
     async def sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("mini_articraft.agent.provider.openrouter.asyncio.sleep", sleep)
+    monkeypatch.setattr("articraft.agent.provider.openrouter.asyncio.sleep", sleep)
     payload = {
         "choices": [
             {

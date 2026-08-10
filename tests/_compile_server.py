@@ -2,13 +2,13 @@
 
 Reads ``{"run_dir": ...}`` requests as newline-delimited JSON on stdin and
 writes one compile payload line per request on stdout -- the same payload
-shape ``mini_articraft.compiler.worker`` prints for a one-shot compile.
+shape ``articraft.compiler.worker`` prints for a one-shot compile.
 Keeping one worker alive lets a test session pay the geometry import cost
 once instead of once per compile (~3s -> ~0.1s).
 
 This is the tests-only half of the worker contract. If a persistent worker
 ever becomes a product feature, promote this loop into
-``mini_articraft/compiler/worker.py``; the wire format is already shared.
+``articraft/compiler/worker.py``; the wire format is already shared.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from mini_articraft.compiler.result import CompileResult
-from mini_articraft.compiler.worker import compile_run
+from articraft.compiler.result import CompileResult
+from articraft.compiler.worker import compile_run
 
 
 def main() -> int:

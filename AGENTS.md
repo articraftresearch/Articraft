@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-mini-articraft is a small reference version of
+articraft is a small reference version of
 [articraft](https://github.com/mattzh72/articraft).
 
 Keep this repo simple. The goal is to preserve the useful core idea from
@@ -21,7 +21,7 @@ over copying a large module.
 
 ## Project shape
 
-The Python package lives in `src/mini_articraft/`.
+The Python package lives in `src/articraft/`.
 
 Use these areas as the main boundaries:
 
@@ -55,13 +55,13 @@ Use `OPENAI_API_KEY` in `.env` when testing the OpenAI model adapter.
 The CLI entry point is:
 
 ```bash
-uv run mini-articraft
+uv run articraft
 ```
 
 The compile worker entry point is:
 
 ```bash
-uv run python -m mini_articraft.compiler.worker <run_dir>
+uv run python -m articraft.compiler.worker <run_dir>
 ```
 
 Prefer calling the compile worker through `LocalWorkspace` unless you are
@@ -75,7 +75,7 @@ Use `from __future__ import annotations` in Python modules. Use explicit type
 hints for public functions and helpers. Keep dataclasses and Pydantic models
 small. Prefer plain functions and simple classes over new frameworks.
 
-Write code in the mini-articraft style: small, direct, and easy to fork. Favor
+Write code in the articraft style: small, direct, and easy to fork. Favor
 clear data shapes, compact helpers, and obvious control flow over defensive
 frameworks, plugin systems, policy objects, registries, and broad fallback
 machinery. Extensible should mean that a reader can understand the core idea and

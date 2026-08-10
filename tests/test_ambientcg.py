@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import zipfile
 
-from mini_articraft.sdk import ambientcg
+from articraft.sdk import ambientcg
 
 
 def _archive() -> bytes:
