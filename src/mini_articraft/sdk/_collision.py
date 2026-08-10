@@ -10,9 +10,10 @@ import numpy as np
 import trimesh
 
 from mini_articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
+from mini_articraft.sdk.assembly import RigidBodyAssembly
+from mini_articraft.sdk.bodies import Geometry
 from mini_articraft.sdk.errors import ValidationError
 from mini_articraft.sdk.joints import Articulation, ArticulationType, Origin
-from mini_articraft.sdk.object import ArticulatedObject, Geometry
 
 Vec3: TypeAlias = tuple[float, float, float]
 Bounds: TypeAlias = tuple[Vec3, Vec3]
@@ -94,12 +95,30 @@ class _GeometryComponent:
 
 
 class MeshCollisionKernel:
-    def __init__(self, model: ArticulatedObject, *, mesh_tolerance: float) -> None:
+    def __init__(self, model: RigidBodyAssembly, *, mesh_tolerance: float) -> None:
         if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
             raise ValidationError("mesh_tolerance must be a positive finite number")
         self.model = model
+        self.resolved = model.resolve()
         self.mesh_tolerance = float(mesh_tolerance)
         self._mesh_cache: dict[tuple[object, ...], _LocalMesh] = {}
+
+    def _dof_positions(self, pose: dict[str, float]) -> dict[str, float]:
+        """Accept ``{"hinge": 0.5}`` as well as ``{"hinge.rotZ": 0.5}``.
+
+        A joint with one degree of freedom is named unambiguously by the joint
+        alone, which is how every pose was written before joints could carry
+        six. The qualified form is required only where it is genuinely needed.
+        """
+
+        single: dict[str, str] = {}
+        for item in self.resolved.joints:
+            if len(item.joint.dofs) == 1:
+                single[item.joint.name] = item.joint.dof_id(item.joint.dofs[0])
+        positions: dict[str, float] = {}
+        for key, value in pose.items():
+            positions[single.get(key, key)] = float(value)
+        return positions
 
     def part_world_position(self, part_name: str, pose: dict[str, float]) -> Vec3:
         transform = self.world_transforms(pose).get(part_name)
@@ -127,30 +146,8 @@ class MeshCollisionKernel:
         return self._selector_entries(part_name, shape_name, pose)[0].bounds
 
     def world_transforms(self, pose: dict[str, float]) -> dict[str, Mat4]:
-        parts = {part.name: part for part in self.model.parts}
-        children: dict[str, list[Articulation]] = {name: [] for name in parts}
-        child_names: set[str] = set()
-        for articulation in self.model.articulations:
-            if articulation.parent in parts and articulation.child in parts:
-                children[articulation.parent].append(articulation)
-                child_names.add(articulation.child)
-
-        roots = [name for name in parts if name not in child_names]
-        transforms: dict[str, Mat4] = {}
-        stack = [(root, _identity()) for root in roots]
-        while stack:
-            part_name, transform = stack.pop()
-            if part_name in transforms:
-                continue
-            transforms[part_name] = transform
-            for articulation in children.get(part_name, []):
-                child_transform = (
-                    transform
-                    @ _origin_matrix(articulation.origin)
-                    @ _motion_matrix(articulation, float(pose.get(articulation.name, 0.0)))
-                )
-                stack.append((articulation.child, child_transform))
-        return transforms
+        state = self.resolved.forward_kinematics(self._dof_positions(pose))
+        return self.resolved.world_transforms(state)
 
     def collision_between(
         self,
@@ -203,7 +200,7 @@ class MeshCollisionKernel:
         *,
         max_contacts: int = 16,
     ) -> list[DistanceQuery]:
-        parts = [part.name for part in self.model.parts]
+        parts = [body.name for body in self.resolved.rigid_bodies]
         by_part: dict[str, list[_CollisionEntry]] = {part: [] for part in parts}
         for entry in self._all_entries(pose):
             by_part[entry.part_name].append(entry)
@@ -273,7 +270,7 @@ class MeshCollisionKernel:
         contact_tol: float,
     ) -> list[GeometryConnectivityFinding]:
         findings: list[GeometryConnectivityFinding] = []
-        for part in self.model.parts:
+        for part in self.resolved.rigid_bodies:
             components = self._geometry_components(part.name)
             if len(components) <= 1:
                 continue
@@ -309,7 +306,7 @@ class MeshCollisionKernel:
         transforms = self.world_transforms(pose)
         return [
             self._entry(part.name, shape.name, shape.geometry, transforms[part.name])
-            for part in self.model.parts
+            for part in self.resolved.rigid_bodies
             for shape in part._iter_shapes()
         ]
 
@@ -319,7 +316,7 @@ class MeshCollisionKernel:
         shape_name: str | None,
         pose: dict[str, float],
     ) -> list[_CollisionEntry]:
-        part = self.model.get_part(part_name)
+        part = self.resolved.get_rigid_body(part_name)
         transform = self.world_transforms(pose).get(part.name)
         if transform is None:
             raise ValidationError(f"unknown part: {part.name!r}")
@@ -382,7 +379,7 @@ class MeshCollisionKernel:
         return cached
 
     def _geometry_components(self, part_name: str) -> tuple[_GeometryComponent, ...]:
-        part = self.model.get_part(part_name)
+        part = self.resolved.get_rigid_body(part_name)
         components: list[_GeometryComponent] = []
         for shape in part._iter_shapes():
             mesh = self._local_mesh(shape.geometry).mesh

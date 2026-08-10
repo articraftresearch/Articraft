@@ -10,13 +10,12 @@ from typing import TypeAlias, cast
 import numpy as np
 import trimesh
 
+from mini_articraft.sdk._values import Vec3, _as_name, _as_vec3, _finite
 from mini_articraft.sdk.bodies import RigidBody, RigidBodyRef
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.joints import _as_name
 from mini_articraft.sdk.mass import MassProperties
 from mini_articraft.sdk.physics import BodyState, PhysicsScene
 
-Vec3: TypeAlias = tuple[float, float, float]
 Mat4: TypeAlias = np.ndarray
 Matrix4: TypeAlias = tuple[tuple[float, float, float, float], ...]
 
@@ -826,28 +825,6 @@ def _edge_graph_has_cycle(joints: Iterable[Joint]) -> bool:
 
 def _body_name(value: RigidBodyRef, *, field_name: str) -> str:
     return _as_name(value if isinstance(value, str) else value.name, field_name=field_name)
-
-
-def _as_vec3(value: Sequence[float], *, field_name: str) -> Vec3:
-    if isinstance(value, (str, bytes)):
-        raise ValidationError(f"{field_name} must have 3 numeric values")
-    try:
-        values = tuple(float(component) for component in value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValidationError(f"{field_name} must have 3 numeric values") from exc
-    if len(values) != 3 or any(not math.isfinite(component) for component in values):
-        raise ValidationError(f"{field_name} must have 3 finite numeric values")
-    return cast(Vec3, values)
-
-
-def _finite(value: object, *, field_name: str) -> float:
-    try:
-        result = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValidationError(f"{field_name} must be numeric") from exc
-    if not math.isfinite(result):
-        raise ValidationError(f"{field_name} must be finite")
-    return result
 
 
 def _positive_tolerance(value: object, field_name: str) -> float:

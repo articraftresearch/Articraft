@@ -8,7 +8,7 @@ from build123d.topology import Shape
 
 from mini_articraft.sdk._mesh.core import MeshGeometry
 from mini_articraft.sdk.errors import ValidationError
-from mini_articraft.sdk.joints import _as_name
+from mini_articraft.sdk._values import _as_name
 from mini_articraft.sdk.mass import MassProperties
 from mini_articraft.sdk.materials import Color, Material, _as_color, _as_material
 from mini_articraft.sdk.physics import BodyState
