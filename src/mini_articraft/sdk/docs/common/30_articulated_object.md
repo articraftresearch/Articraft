@@ -35,12 +35,7 @@ Parent and child parts must already exist when an articulation is added.
 ## `model.part(...)`
 
 ```python
-model.part(
-    name: str,
-    *,
-    mass_properties: MassProperties | None = None,
-    body_state: BodyState | None = None,
-) -> Part
+model.part(name: str, *, mass_properties: MassProperties | None = None, body_state: BodyState | None = None) -> Part
 ```
 
 This method creates a `Part`, appends it to `model.parts`, and returns it. Part
