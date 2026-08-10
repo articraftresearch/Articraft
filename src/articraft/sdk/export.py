@@ -38,6 +38,7 @@ from articraft.sdk.assembly import (
     ResolvedRigidBodyAssembly,
     RigidBodyAssembly,
 )
+from articraft.sdk.bodies import RigidBody
 from articraft.sdk.joints import (
     Articulation,
     ArticulationType,
@@ -714,6 +715,12 @@ def _collision_approximation(mesh: trimesh.Trimesh) -> str:
     return "convexHull" if mesh.is_convex else "convexDecomposition"
 
 
+def _body_name(endpoint) -> str:
+    """The name of an endpoint the caller has already checked is not WORLD."""
+
+    return cast(RigidBody, endpoint).name
+
+
 def _write_graph_joints(
     stage: Usd.Stage,
     scope_path: str,
@@ -729,17 +736,17 @@ def _write_graph_joints(
         paths[joint.name] = path
         schema = _graph_joint_schema(stage, path, joint)
         if joint.body0 is not WORLD:
-            schema.CreateBody0Rel().SetTargets([body_paths[joint.body0.name]])
+            schema.CreateBody0Rel().SetTargets([body_paths[_body_name(joint.body0)]])
         if joint.body1 is not WORLD:
-            schema.CreateBody1Rel().SetTargets([body_paths[joint.body1.name]])
+            schema.CreateBody1Rel().SetTargets([body_paths[_body_name(joint.body1)]])
         schema.CreateExcludeFromArticulationAttr(item.exclude_from_articulation)
         _attrs(
             schema.GetPrim(),
             {
                 "name": joint.name,
                 "jointType": _graph_joint_type(joint),
-                "body0": "WORLD" if joint.body0 is WORLD else joint.body0.name,
-                "body1": "WORLD" if joint.body1 is WORLD else joint.body1.name,
+                "body0": "WORLD" if joint.body0 is WORLD else _body_name(joint.body0),
+                "body1": "WORLD" if joint.body1 is WORLD else _body_name(joint.body1),
                 "frame0:xyz": Gf.Vec3d(*joint.frame0.xyz),
                 "frame0:rpy": Gf.Vec3d(*joint.frame0.rpy),
                 "frame1:xyz": Gf.Vec3d(*joint.frame1.xyz),
@@ -1091,8 +1098,8 @@ def _assembly_to_payload(
             {
                 "name": item.joint.name,
                 "type": _graph_joint_type(item.joint),
-                "body0": None if item.joint.body0 is WORLD else item.joint.body0.name,
-                "body1": None if item.joint.body1 is WORLD else item.joint.body1.name,
+                "body0": None if item.joint.body0 is WORLD else _body_name(item.joint.body0),
+                "body1": None if item.joint.body1 is WORLD else _body_name(item.joint.body1),
                 "frame0": {
                     "xyz": item.joint.frame0.xyz,
                     "rpy": item.joint.frame0.rpy,
@@ -1529,8 +1536,8 @@ def _audit_assembly_usdz(
         joint = item.joint
         prim = joint_prims[name]
         schema = UsdPhysics.Joint(prim)  # pyright: ignore[reportCallIssue]
-        expected0 = [] if joint.body0 is WORLD else [body_prims[joint.body0.name].GetPath()]
-        expected1 = [] if joint.body1 is WORLD else [body_prims[joint.body1.name].GetPath()]
+        expected0 = [] if joint.body0 is WORLD else [body_prims[_body_name(joint.body0)].GetPath()]
+        expected1 = [] if joint.body1 is WORLD else [body_prims[_body_name(joint.body1)].GetPath()]
         if list(schema.GetBody0Rel().GetTargets()) != expected0:
             raise RuntimeError(f"USDZ audit body0 relationship mismatch for joint {name!r}")
         if list(schema.GetBody1Rel().GetTargets()) != expected1:
