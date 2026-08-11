@@ -81,6 +81,8 @@ Read only the executable example closest to the current task:
 - Hollow shell: `docs/sdk/examples/hollow_shell.py`.
 - Section loft with a swept wire: `docs/sdk/examples/section_loft_with_wires.py`.
 - Mixed build123d and mesh assembly: `docs/sdk/examples/mixed_articulated_assembly.py`.
+- Closed loop linkage (a hydraulic ram) posed through drives:
+  `docs/sdk/examples/hydraulic_ram_loop.py`.
 - Molding a handle/protrusion into a body (no mounting pads):
   `docs/sdk/examples/molded_mug.py`.
 - Mass properties from materials and geometry:
