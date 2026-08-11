@@ -205,10 +205,39 @@ class _Scene:
 
     parts: dict[str, Usd.Prim] = field(default_factory=dict)
     joints: list[_Joint] = field(default_factory=list)
+    articulation_root: str | None = None
 
     @property
     def tree_joints(self) -> list[_Joint]:
         return [joint for joint in self.joints if not joint.excluded]
+
+    def orient_tree(self) -> None:
+        """Point every tree joint away from the root.
+
+        ``body0``/``body1`` are symmetric in the assembly, so a joint may be
+        authored child-first. MuJoCo nests bodies, so one pointing backwards
+        makes its own child a second root. Walk out from the articulation root
+        and swap the ones facing the wrong way.
+        """
+
+        pending = self.tree_joints
+        seen = {self.articulation_root} if self.articulation_root in self.parts else set()
+        while pending:
+            reachable = [j for j in pending if j.parent in seen or j.child in seen]
+            if not reachable:  # no root marked, or a separate component
+                reachable = [pending[0]]
+                seen.add(pending[0].parent)
+            for joint in reachable:
+                if joint.parent not in seen:
+                    joint.parent, joint.child = joint.child, joint.parent
+                    joint.anchor, joint.parent_anchor = joint.parent_anchor, joint.anchor
+                    joint.axis = (-joint.axis[0], -joint.axis[1], -joint.axis[2])
+                    joint.lower, joint.upper = (
+                        (None if joint.upper is None else -joint.upper),
+                        (None if joint.lower is None else -joint.lower),
+                    )
+                seen.update((joint.parent, joint.child))
+            pending = [joint for joint in pending if joint not in reachable]
 
     def root(self) -> str:
         children = {joint.child for joint in self.tree_joints}
@@ -564,6 +593,10 @@ def _read_scene(stage: Usd.Stage) -> _Scene:
     bodies = _bodies_scope(obj)
     assert bodies is not None
     scene = _Scene(parts={prim.GetName(): prim for prim in bodies.GetChildren()})
+    scene.articulation_root = next(
+        (name for name, prim in scene.parts.items() if prim.HasAPI(UsdPhysics.ArticulationRootAPI)),
+        None,
+    )
     joints_scope = obj.GetChild("joints")
     for prim in joints_scope.GetChildren() if joints_scope else []:
         type_name = str(prim.GetTypeName())
@@ -594,6 +627,7 @@ def _read_scene(stage: Usd.Stage) -> _Scene:
                 extra_axes=tuple(free[1:]),
             )
         )
+    scene.orient_tree()
     return scene
 
 

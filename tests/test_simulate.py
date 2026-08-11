@@ -343,3 +343,35 @@ def test_a_multi_dof_joint_becomes_one_mjcf_joint_per_free_axis(tmp_path) -> Non
 
     assert text.count('type="hinge"') == 3
     assert 'name="socket"' in text and 'name="socket_2"' in text and 'name="socket_3"' in text
+
+
+def test_a_joint_authored_child_first_still_nests_under_the_root(tmp_path: Path) -> None:
+    """``body0`` is not the parent -- the articulation root decides that.
+
+    MuJoCo nests bodies, so a joint pointing back at the root used to make its
+    own child a second root and the translation refused the whole model. A
+    generated excavator hit this: its cylinder rod eyes were authored rod-first.
+    """
+
+    model = RigidBodyAssembly("reversed")
+    base = model.rigid_body("base")
+    base.add(BoxGeometry((0.2, 0.2, 0.05)), name="plate", material=Material.STEEL)
+    arm = model.rigid_body("arm")
+    arm.add(BoxGeometry((0.02, 0.02, 0.20)), name="post", material=Material.STEEL)
+    # Authored child first: the arm carries body0, the base body1.
+    model.joint(
+        "mount",
+        body0=arm,
+        frame0=JointFrame(),
+        body1=base,
+        frame1=JointFrame(xyz=(0.0, 0.0, 0.025)),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=(-0.5, 0.5)),),
+    )
+    model.articulation("main", root=base, joints=["mount"])
+
+    write_mjcf(_export(model, tmp_path), tmp_path / "sim")
+    root = ET.parse(tmp_path / "sim" / "model.xml").getroot()
+
+    top = [body for body in root.findall(".//worldbody/body") if body.get("name") != "floor"]
+    assert [body.get("name") for body in top] == ["base"]
+    assert [child.get("name") for child in top[0].findall("body")] == ["arm"]
