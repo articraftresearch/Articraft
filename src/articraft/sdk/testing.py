@@ -25,7 +25,7 @@ from articraft.sdk._collision import (
 from articraft.sdk._mesh.core import geometry_to_trimesh
 from articraft.sdk._mesh.health import MeshHealthIssue, analyze_mesh_health
 from articraft.sdk.errors import ValidationError
-from articraft.sdk.joints import Articulation, ArticulationType
+from articraft.sdk.joints import Articulation, ArticulationType, partition_articulations
 from articraft.sdk.mass import resolve_mass
 from articraft.sdk.materials import LIBRARY
 from articraft.sdk.object import ArticulatedObject, Part, PartRef
@@ -359,21 +359,37 @@ class TestContext:
         previous = dict(self._pose)
         updates: dict[str, float] = {}
         articulation_names = {item.name for item in self.model.articulations}
-        for key, value in dict(articulation_positions or {}).items():
+        for key, value in {**dict(articulation_positions or {}), **kwargs}.items():
             name = _articulation_name(key)
             if name not in articulation_names:
                 raise ValidationError(f"unknown articulation: {name!r}")
-            updates[name] = _finite(value, "articulation position")
-        for key, value in kwargs.items():
-            name = _articulation_name(key)
-            if name not in articulation_names:
-                raise ValidationError(f"unknown articulation: {name!r}")
+            self._reject_unposable(name)
             updates[name] = _finite(value, "articulation position")
         try:
             self._pose.update(updates)
             yield
         finally:
             self._pose = previous
+
+    def _reject_unposable(self, name: str) -> None:
+        """A driven or loop-closing joint has no value of its own to pose.
+
+        Accepting one silently would sweep N identical poses and pass every
+        check vacuously, so it is an error: pose or sample the driving joint.
+        """
+
+        articulation = self.model.get_articulation(name)
+        if articulation.drive is not None:
+            raise ValidationError(
+                f"articulation {name!r} is driven; its value is solved from the "
+                "mechanism, so pose or sample the joint that drives it instead"
+            )
+        _tree, loops = partition_articulations(self.model.articulations)
+        if any(item.name == name for item in loops):
+            raise ValidationError(
+                f"articulation {name!r} closes a loop and cannot be posed; pose "
+                "the tree joints that move its parts instead"
+            )
 
     def part_world_position(self, part: PartRef) -> Vec3:
         return self._kernel().part_world_position(_part_name(part, field_name="part"), self._pose)
@@ -444,6 +460,7 @@ class TestContext:
         samples: int = 5,
     ) -> tuple[PoseSample, ...]:
         joint = self.model.get_articulation(articulation)
+        self._reject_unposable(joint.name)
         values = (
             _articulation_sweep_values(joint, max(2, int(samples)))
             if positions is None

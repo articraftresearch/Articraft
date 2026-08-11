@@ -138,28 +138,48 @@ class MeshCollisionKernel:
     def _resolve_drives(self, pose: dict[str, float]) -> dict[str, float]:
         """Fill in the joints the mechanism decides rather than the author.
 
-        A driven joint reads a part it does not move, so placing the model once
-        with the authored pose already puts every anchor where it belongs.
+        Values handed in for driven joints are discarded: the mechanism owns
+        them. Drives are solved shallowest parent first, re-placing the model
+        after each, so a driven joint hanging off another driven joint reads a
+        final frame rather than a stale one.
         """
 
         driven = [item for item in self.model.articulations if item.drive is not None]
         if not driven:
             return pose
-        anchors = self._place(pose)
-        resolved = dict(pose)
-        for articulation in driven:
+        resolved = {
+            name: value
+            for name, value in pose.items()
+            if name not in {item.name for item in driven}
+        }
+        tree, _loops = partition_articulations(self.model.articulations)
+        parent_of = {item.child: item.parent for item in tree}
+
+        def _depth(part: str) -> int:
+            depth = 0
+            while part in parent_of:
+                part = parent_of[part]
+                depth += 1
+            return depth
+
+        for articulation in sorted(driven, key=lambda item: _depth(item.parent)):
             drive = articulation.drive
             if drive is None:
                 continue
-            target = anchors.get(drive.part)
-            frame = anchors.get(articulation.parent)
+            placed = self._place(resolved)
+            target = placed.get(drive.part)
+            frame = placed.get(articulation.parent)
             if target is None or frame is None:
                 continue
             joint = frame @ _origin_matrix(articulation.origin)
             anchor = _apply(target, np.asarray(drive.point, dtype=np.float64))
             local = _apply(np.linalg.inv(joint), anchor)
             if isinstance(drive, SpanTo):
-                resolved[articulation.name] = float(np.linalg.norm(local)) - drive.rest_length
+                # The axial component, signed: an anchor behind the origin must
+                # retract the joint, and any perpendicular offset is the frame's
+                # business, not extra travel.
+                axial = float(np.dot(local, _normalize(articulation.axis)))
+                resolved[articulation.name] = axial - drive.rest_length
             else:
                 resolved[articulation.name] = _angle_about(
                     _normalize(articulation.axis),

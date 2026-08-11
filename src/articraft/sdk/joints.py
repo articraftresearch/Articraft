@@ -193,6 +193,20 @@ class Articulation:
         if math.hypot(*self.axis) == 0.0:
             raise ValidationError(f"articulation {self.name!r} axis must be non-zero")
 
+        if isinstance(self.drive, AimAt):
+            axis = self.axis
+            reference = self.drive.reference
+            cross = (
+                axis[1] * reference[2] - axis[2] * reference[1],
+                axis[2] * reference[0] - axis[0] * reference[2],
+                axis[0] * reference[1] - axis[1] * reference[0],
+            )
+            if math.hypot(*cross) <= 1e-9 * math.hypot(*axis) * math.hypot(*reference):
+                raise ValidationError(
+                    f"articulation {self.name!r} aim reference is parallel to the joint axis, "
+                    "so rotating can never aim it; use a reference perpendicular to the axis"
+                )
+
         if self.motion_limits is None:
             raise ValidationError(
                 f"articulation {self.name!r} must include motion_limits=MotionLimits(...)"

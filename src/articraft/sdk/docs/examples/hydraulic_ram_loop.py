@@ -30,9 +30,9 @@ from articraft.sdk import (
 )
 
 # The two pins of the ram, each in the frame of the part that carries it.
-ARM_EYE = (0.42, 0.0, -0.02)  # rod eye pin, in the arm's frame
+ARM_EYE = (0.40, 0.0, -0.04)  # rod eye pin, in the arm's frame
 BARREL_PIVOT = (0.28, 0.0, 0.05)  # barrel trunnion pin, in the base's frame
-REST = 0.20  # gap the ram spans at stroke = 0, and the barrel's working length
+REST = 0.20  # the rest gap |(0.12, 0, 0.16)| = 0.20: stroke solves to zero at rest
 
 
 def build_object_model() -> ArticulatedObject:
@@ -90,7 +90,12 @@ def build_object_model() -> ArticulatedObject:
         ArticulationType.REVOLUTE,
         base,
         barrel,
-        origin=Origin(xyz=BARREL_PIVOT),
+        # Zero must be the ASSEMBLED pose, so the origin carries the rest
+        # aim: at rest the eye sits (0.12, 0, 0.16) from the pivot, and
+        # atan2(-0.16, 0.12) folds that angle into the frame. Export refuses a
+        # model whose drives solve non-zero at rest, because engines assemble
+        # from the baked pose.
+        origin=Origin(xyz=BARREL_PIVOT, rpy=(0.0, math.atan2(-0.16, 0.12), 0.0)),
         axis=(0.0, 1.0, 0.0),
         motion_limits=MotionLimits(lower=-1.6, upper=1.6),
         # Not posed: the barrel swivels to stay aimed at the arm's eye pin.

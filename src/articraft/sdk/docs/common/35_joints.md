@@ -352,6 +352,10 @@ Rules worth knowing:
 - A drive reads a part that no drive influences: not the joint's own parent or
   child, nothing in its own subtree, and nothing placed by another driven
   joint. Drives resolve in one pass, so anchor them on posed structure.
+- Author zero as the assembled pose. At the rest pose every drive must solve to
+  zero: fold the rest angle into the joint origin's `rpy` and the rest gap into
+  `rest_length`. Export refuses anything else, because simulators assemble the
+  mechanism from the baked rest pose.
 - Give the joint honest `motion_limits`. A drive solves the value; it does not
   check that the mechanism stays inside its travel.
 - Drives are kinematic. They keep the model assembled for posing, rendering, and

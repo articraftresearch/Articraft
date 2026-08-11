@@ -235,7 +235,9 @@ def _write_parts(
     asset_dir: Path | None = None,
 ) -> tuple[dict[str, str], TextureExportReport, dict[str, dict[str, object]]]:
     UsdGeom.Scope.Define(stage, scope_path)
-    transforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance).world_transforms({})
+    # Bake at the authored zero pose, drives unresolved: joint value zero must
+    # stay the baked pose so limits, sliders, and MJCF qpos0 line up.
+    transforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance)._place({})
     safe_part_names = _safe_name_map(part.name for part in obj.parts)
     paths: dict[str, str] = {}
     masses: dict[str, dict[str, object]] = {}
@@ -675,6 +677,19 @@ def _write_articulations(
     safe_names = _safe_name_map(item.name for item in obj.articulations)
     _tree, loops = partition_articulations(obj.articulations)
     loop_names = {item.name for item in loops}
+    kernel = MeshCollisionKernel(obj, mesh_tolerance=DEFAULT_MESH_TOLERANCE)
+    rest = kernel._place({})
+    resolved = kernel._resolve_drives({})
+    for articulation in obj.articulations:
+        if articulation.drive is None:
+            continue
+        value = resolved.get(articulation.name, 0.0)
+        if abs(value) > 1e-3:
+            raise ValueError(
+                f"driven articulation {articulation.name!r} solves to {value:.4f} at the "
+                "rest pose; zero must be the assembled pose, so fold the rest angle into "
+                "the joint origin's rpy or the rest gap into the drive's rest_length"
+            )
     for articulation in obj.articulations:
         schema = _articulation_schema(
             stage, f"{scope_path}/{safe_names[articulation.name]}", articulation
@@ -685,6 +700,17 @@ def _write_articulations(
             # USD articulations are trees, but a regular joint outside the
             # articulation may close a loop. The solver still enforces it.
             schema.CreateExcludeFromArticulationAttr(True)
+            # A tree child's frame sits on its joint, so localPos1 = 0 there.
+            # A loop child's frame belongs to its tree parent, so the pin must
+            # be located in that frame explicitly or engines snap the child's
+            # origin onto the pin.
+            axis_rot = _axis_matrix(articulation.axis)
+            local0 = axis_rot * _gf_matrix(_rpy_matrix(articulation.origin.rpy))
+            frame0 = local0 * Gf.Matrix4d(1.0).SetTranslateOnly(Gf.Vec3d(*articulation.origin.xyz))
+            world = frame0 * _gf_matrix(rest[articulation.parent])
+            frame1 = world * _gf_matrix(np.linalg.inv(rest[articulation.child]))
+            schema.CreateLocalPos1Attr(Gf.Vec3f(frame1.ExtractTranslation()))
+            schema.CreateLocalRot1Attr(_quat(frame1))
         _articulation_attrs(schema.GetPrim(), articulation)
 
 
@@ -734,6 +760,7 @@ def _articulation_attrs(prim: Usd.Prim, articulation: Articulation) -> None:
         "parent": articulation.parent,
         "child": articulation.child,
         "axis": Gf.Vec3d(*articulation.axis),
+        "driven": "true" if articulation.drive is not None else "false",
         "origin:xyz": Gf.Vec3d(*articulation.origin.xyz),
         "origin:rpy": Gf.Vec3d(*articulation.origin.rpy),
     }
@@ -842,6 +869,7 @@ def _object_to_payload(
                 "axis": item.axis,
                 "motion_limits": _limits(item.motion_limits),
                 "closes_loop": item.name in loop_names,
+                "driven": item.drive is not None,
             }
             for item in obj.articulations
         ],
@@ -992,7 +1020,7 @@ def _audit_usdz(
     normal_meshes = 0
     material_bindings = 0
     source_meshes: dict[tuple[str, str], trimesh.Trimesh] = {}
-    xforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance).world_transforms({})
+    xforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance)._place({})
     source_points: list[np.ndarray] = []
 
     for part in obj.parts:

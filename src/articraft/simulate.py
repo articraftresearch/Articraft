@@ -25,6 +25,7 @@ MuJoCo is an optional dependency. Install it with ``uv sync --group sim``.
 from __future__ import annotations
 
 import math
+import warnings
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -272,6 +273,12 @@ def simulate_usdz(
 
     if scenario == "release":
         for index in range(model.njnt):
+            # Placing each joint at mid-travel independently is an impossible
+            # configuration for a closed loop, and the stiff pin would snap the
+            # linkage at the first step. Looped mechanisms release from the
+            # assembled rest pose instead.
+            if model.neq:
+                break
             if model.jnt_type[index] not in (
                 mujoco.mjtJoint.mjJNT_HINGE,
                 mujoco.mjtJoint.mjJNT_SLIDE,
@@ -464,6 +471,11 @@ def write_mjcf(usdz: Path, out_dir: Path) -> Path:
             if joint.kind == "slide":
                 # A point constraint cannot carry a sliding pin; leave it to
                 # engines with native prismatic loop constraints.
+                warnings.warn(
+                    f"prismatic loop closure {joint.name!r} is not enforced in MuJoCo; "
+                    "the loop simulates open",
+                    stacklevel=2,
+                )
                 continue
             # MuJoCo's default equality impedance is sized for light objects;
             # a multi tonne linkage sags visibly on it. A stiff pin is the

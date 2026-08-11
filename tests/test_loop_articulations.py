@@ -14,6 +14,7 @@ import pytest
 from build123d import Box
 from pxr import Usd
 
+from articraft import package_dir
 from articraft.sdk import ArticulatedObject, ArticulationType, MotionLimits, Origin
 from articraft.sdk._collision import MeshCollisionKernel
 from articraft.sdk.errors import ValidationError
@@ -168,3 +169,61 @@ def test_mujoco_enforces_the_closing_pin(tmp_path) -> None:
         pin = coupler @ np.array([0.15, 0.0, 0.0]) + data.xpos[model.body("coupler").id]
         worst = max(worst, float(np.linalg.norm(pin - rocker_position)))
     assert worst < 0.02, f"closing pin drifted {worst * 1000:.1f} mm"
+
+
+def test_loop_closure_authors_the_true_child_frame(tmp_path) -> None:
+    """localPos1 = 0 is only right for tree edges; a loop pin must be located
+    in the child's frame or USD consumers snap the child's origin onto it."""
+
+    import runpy
+
+    example = package_dir / "sdk" / "docs" / "examples" / "hydraulic_ram_loop.py"
+    values = runpy.run_path(str(example))
+    result = export_object(values["object_model"], tmp_path / "result")
+    stage = Usd.Stage.Open(str(result.usdz))
+    for prim in stage.Traverse():
+        name_attr = prim.GetAttribute("articraft:name")
+        if not name_attr or name_attr.Get() != "rod_eye_pin":
+            continue
+        local_pos_1 = tuple(prim.GetAttribute("physics:localPos1").Get())
+        # The rod's eye sits at x = REST = 0.20 in the rod's frame.
+        assert local_pos_1 == pytest.approx((0.20, 0.0, 0.0), abs=1e-5), local_pos_1
+        break
+    else:
+        pytest.fail("rod_eye_pin not found in the exported stage")
+
+
+def test_prismatic_loop_closure_warns_in_mjcf(tmp_path) -> None:
+    pytest.importorskip("mujoco", reason="loop constraints need the sim group")
+    from articraft.simulate import write_mjcf
+
+    model = _four_bar()
+    # replace the closing pin with a sliding closure
+    model.articulations.pop()
+    model.articulation(
+        "closing_slide",
+        ArticulationType.PRISMATIC,
+        model.get_part("coupler"),
+        model.get_part("rocker"),
+        axis=(1.0, 0.0, 0.0),
+        motion_limits=MotionLimits(lower=-0.2, upper=0.2),
+    )
+    result = export_object(model, tmp_path / "result")
+    with pytest.warns(UserWarning, match="prismatic loop closure"):
+        write_mjcf(result.usdz, tmp_path / "sim")
+
+
+def test_release_keeps_the_assembled_pose_for_looped_models(tmp_path) -> None:
+    pytest.importorskip("mujoco", reason="loop constraints need the sim group")
+    import runpy
+
+    from articraft.simulate import simulate_usdz
+
+    example = package_dir / "sdk" / "docs" / "examples" / "hydraulic_ram_loop.py"
+    values = runpy.run_path(str(example))
+    result = export_object(values["object_model"], tmp_path / "result")
+    outcome = simulate_usdz(result.usdz, tmp_path / "sim", scenario="release", seconds=2.0)
+    # Released from the assembled rest pose, the stiff pin must not snap the
+    # linkage: the reviewer measured 35/s when mid-travel displacement fought it.
+    assert outcome.peak_joint_speed is not None and outcome.peak_joint_speed < 8.0
+    assert outcome.stood_up

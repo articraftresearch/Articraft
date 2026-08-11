@@ -232,3 +232,99 @@ def test_drive_cannot_read_its_own_subtree() -> None:
     )
     with pytest.raises(ValidationError, match="own joint moves"):
         model.validate()
+
+
+def _offset_ram_model() -> ArticulatedObject:
+    """A ram whose stroke origin sits OFF its driven parent's swivel axis.
+
+    Distance to the anchor is then not rotation invariant, so a stale parent
+    frame during drive resolution produces a measurably wrong stroke.
+    """
+
+    model = _ram_model(driven=True)
+    for articulation in model.articulations:
+        if articulation.name == "ram_extension":
+            articulation.origin = Origin(xyz=(0.05, 0.0, 0.03))
+    return model
+
+
+def test_drive_on_a_driven_parent_resolves_from_the_final_frame() -> None:
+    model = _offset_ram_model()
+    kernel = MeshCollisionKernel(model, mesh_tolerance=0.001)
+    for angle in np.linspace(-0.6, 0.6, 7):
+        resolved = kernel._resolve_drives({"arm_hinge": float(angle)})
+        transforms = kernel.world_transforms({"arm_hinge": float(angle)})
+        joint = transforms["barrel"] @ np.array(
+            [[1, 0, 0, 0.05], [0, 1, 0, 0.0], [0, 0, 1, 0.03], [0, 0, 0, 1.0]]
+        )
+        eye = transforms["arm"][:3, :3] @ np.array(ARM_EYE) + transforms["arm"][:3, 3]
+        local = joint[:3, :3].T @ (eye - joint[:3, 3])
+        assert resolved["ram_extension"] == pytest.approx(local[0] - REST_LENGTH, abs=1e-9)
+
+
+def test_meddled_driven_values_cannot_move_the_anchor_pass() -> None:
+    """Even with an off-axis origin, authored values for driven joints are inert."""
+
+    model = _offset_ram_model()
+    kernel = MeshCollisionKernel(model, mesh_tolerance=0.001)
+    honest = kernel.world_transforms({"arm_hinge": 0.4})
+    meddled = kernel.world_transforms(
+        {"arm_hinge": 0.4, "barrel_swivel": 1.2, "ram_extension": 5.0}
+    )
+    for part in ("barrel", "rod"):
+        assert np.allclose(honest[part], meddled[part])
+
+
+def test_span_to_is_signed_along_the_axis() -> None:
+    """An anchor behind the joint origin must retract the slide, not extend it."""
+
+    model = ArticulatedObject("signed_span")
+    base = _slider(model, "base")
+    anchor = _slider(model, "anchor")
+    rod = _slider(model, "rod")
+    model.articulation(
+        "anchor_mount",
+        ArticulationType.FIXED,
+        base,
+        anchor,
+        origin=Origin(xyz=(-0.3, 0.0, 0.0)),
+    )
+    model.articulation(
+        "slide",
+        ArticulationType.PRISMATIC,
+        base,
+        rod,
+        axis=(1.0, 0.0, 0.0),
+        motion_limits=MotionLimits(lower=-1.0, upper=1.0),
+        drive=SpanTo("anchor", (0.0, 0.0, 0.0)),
+    )
+    kernel = MeshCollisionKernel(model, mesh_tolerance=0.001)
+    assert kernel._resolve_drives({})["slide"] == pytest.approx(-0.3, abs=1e-9)
+
+
+def test_aim_reference_parallel_to_axis_is_rejected() -> None:
+    model = ArticulatedObject("parallel_aim")
+    base = _slider(model, "base")
+    arm = _slider(model, "arm")
+    other = _slider(model, "other")
+    model.articulation("mount", ArticulationType.FIXED, base, other)
+    with pytest.raises(ValidationError, match="parallel to the joint axis"):
+        model.articulation(
+            "swivel",
+            ArticulationType.REVOLUTE,
+            base,
+            arm,
+            axis=(0.0, 1.0, 0.0),
+            motion_limits=MotionLimits(lower=-1.0, upper=1.0),
+            drive=AimAt("other", (0.3, 0.0, 0.0), reference=(0.0, 1.0, 0.0)),
+        )
+
+
+def test_driven_joints_cannot_be_posed_in_checks() -> None:
+    from articraft.sdk import TestContext
+
+    ctx = TestContext(_ram_model(driven=True))
+    with pytest.raises(ValidationError, match="is driven"):
+        ctx.sample_joint("ram_extension")
+    with pytest.raises(ValidationError, match="is driven"), ctx.pose({"barrel_swivel": 0.2}):
+        pass

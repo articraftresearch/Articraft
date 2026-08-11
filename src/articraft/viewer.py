@@ -116,6 +116,7 @@ def _read_version(path: Path) -> dict[str, object]:
                 "closes_loop": bool(
                     _usd_attribute(joint, "physics:excludeFromArticulation", False)
                 ),
+                "driven": _attribute(joint, "driven", "false") == "true",
             }
         )
 
