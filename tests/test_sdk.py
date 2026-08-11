@@ -291,3 +291,80 @@ def test_old_frame_and_joint_helpers_are_not_public() -> None:
     assert not hasattr(sdk, "Frame")
     assert not hasattr(model, "fixed")
     assert not hasattr(model, "revolute")
+
+
+def test_a_redundant_loop_still_poses_from_joint_values() -> None:
+    """A bail handle hangs on two coaxial pivots, which is a ring carrying one DOF.
+
+    The spanning tree decides the pose and the second pivot agrees with it, so
+    refusing to pose every ring outright would rule out the commonest hinge in
+    everyday objects.
+    """
+
+    model = RigidBodyAssembly("kettle")
+    body = add_box(model, "body")
+    handle = add_box(model, "handle")
+    swing = (JointDOF(JointAxis.ROT_X, limits=(-1.2, 1.2)),)
+    model.joint(
+        "left_pivot",
+        body0=body,
+        frame0=JointFrame(xyz=(-0.1, 0.0, 0.1)),
+        body1=handle,
+        frame1=JointFrame(xyz=(-0.1, 0.0, 0.0)),
+        dofs=swing,
+    )
+    model.joint(
+        "right_pivot",
+        body0=body,
+        frame0=JointFrame(xyz=(0.1, 0.0, 0.1)),
+        body1=handle,
+        frame1=JointFrame(xyz=(0.1, 0.0, 0.0)),
+        dofs=swing,
+    )
+    model.articulation("main", root=body, joints=["left_pivot"])
+    resolved = model.resolve()
+
+    assert resolved.has_closed_loops
+    state = resolved.forward_kinematics({"left_pivot.rotX": 0.6})
+
+    assert state.dof_positions["left_pivot.rotX"] == pytest.approx(0.6)
+    # The redundant pivot is carried along rather than fought.
+    assert state.dof_positions["right_pivot.rotX"] == pytest.approx(0.6)
+
+
+def test_a_ring_the_tree_cannot_satisfy_names_the_joint_that_broke() -> None:
+    model = RigidBodyAssembly("four_bar")
+    ground = add_box(model, "ground")
+    left = add_box(model, "left")
+    coupler = add_box(model, "coupler")
+    swing = (JointDOF(JointAxis.ROT_Y, limits=(-0.6, 0.6)),)
+    model.joint(
+        "ground_left",
+        body0=ground,
+        frame0=JointFrame(),
+        body1=left,
+        frame1=JointFrame(),
+        dofs=swing,
+    )
+    model.joint(
+        "left_coupler",
+        body0=left,
+        frame0=JointFrame(xyz=(0.0, 0.0, 0.08)),
+        body1=coupler,
+        frame1=JointFrame(),
+        dofs=swing,
+    )
+    model.joint(
+        "ground_coupler",
+        # Coincident at rest: the coupler origin rides 0.08 up on the crank.
+        body0=ground,
+        frame0=JointFrame(xyz=(0.12, 0.0, 0.08)),
+        body1=coupler,
+        frame1=JointFrame(xyz=(0.12, 0.0, 0.0)),
+        dofs=swing,
+    )
+    model.articulation("main", root=ground, joints=["ground_left", "left_coupler"])
+    resolved = model.resolve()
+
+    with pytest.raises(ValidationError, match="ground_coupler"):
+        resolved.forward_kinematics({"ground_left.rotY": 0.4})

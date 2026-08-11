@@ -123,8 +123,19 @@ loose the moment the object is simulated. See
 
 **A loop-closing joint cannot be posed.** Its value is decided by the rest of
 the mechanism, so `ctx.pose({...})` rejects it — pose the tree joints instead.
-Posing a closed loop from joint values is not supported at all; supply body
-poses or let a physics engine solve it.
+
+Posing the tree joints is fine even when the assembly has a ring. Many rings are
+redundant: a bail handle on two coaxial pivots, a lid on two hinges. The tree
+decides the pose and the extra joint agrees with it, so these behave like any
+chain. A ring that genuinely constrains the mechanism, such as a four-bar, will
+fail instead, naming the joint and the axis that no longer meets:
+
+```
+physics state violates locked axis 'transZ' on joint 'ground_coupler': value=0.08
+```
+
+That means posing the tree pulled the loop apart. Supply a full `PhysicsState`,
+or let a physics engine solve it.
 
 ## `PhysicsState`
 

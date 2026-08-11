@@ -343,13 +343,15 @@ class ResolvedRigidBodyAssembly:
         return PhysicsState(matrices, dof_positions=derived)
 
     def forward_kinematics(self, dof_positions: Mapping[str, float] | None = None) -> PhysicsState:
-        """Pose an acyclic physical graph; closed loops require a solver or body poses."""
+        """Pose the assembly by walking its spanning tree.
 
-        if self.has_closed_loops:
-            raise ValidationError(
-                "closed-loop assemblies cannot be posed from joint positions; "
-                "provide a complete PhysicsState or use a physics solver"
-            )
+        A ring is not refused outright. The tree is propagated and the result is
+        validated, so a redundant loop -- two coaxial pivots carrying one bail
+        handle, a lid on two hinges -- poses like any chain, while a ring whose
+        closure the tree cannot satisfy fails naming the joint and axis that
+        disagrees. Those need a full ``PhysicsState`` or a physics solver.
+        """
+
         positions = {
             _as_name(name, field_name="joint position"): _finite(
                 value, field_name=f"joint position {name!r}"
