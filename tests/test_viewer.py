@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import math
+import tempfile
 import threading
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -193,3 +195,65 @@ def test_sdk_rpy_matrix_is_extrinsic_xyz() -> None:
     # A leg yawed off a pitched frame keeps a level hinge axis; the reversed
     # order tilts it out of plane, which is the bug this guards.
     assert abs(float(hinge[2])) < 1e-9
+
+
+def test_a_cylinder_closer_tells_the_viewer_which_way_it_extends() -> None:
+    """The viewer holds a hydraulic loop shut by aiming, which needs the axis.
+
+    A d6 closer previews as fixed, so the free travel direction would otherwise
+    be dropped on the way to the page and the cylinder would pull apart.
+    """
+
+    model = RigidBodyAssembly("cylinder")
+    mount = model.rigid_body("mount")
+    mount.add(Box(0.2, 0.2, 0.05), name="body")
+    arm = model.rigid_body("arm")
+    arm.add(Box(0.4, 0.05, 0.05), name="body")
+    barrel = model.rigid_body("barrel")
+    barrel.add(Box(0.2, 0.04, 0.04), name="body")
+    model.joint(
+        "arm_hinge",
+        body0=mount,
+        frame0=JointFrame(),
+        body1=arm,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=(-0.5, 0.5)),),
+    )
+    model.joint(
+        "barrel_eye",
+        body0=mount,
+        frame0=JointFrame(xyz=(0.1, 0.0, 0.0)),
+        body1=barrel,
+        frame1=JointFrame(xyz=(0.1, 0.0, 0.0)),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=(-0.9, 0.9)),),
+    )
+    model.joint(
+        "barrel_slide",
+        body0=barrel,
+        frame0=JointFrame(),
+        body1=arm,
+        frame1=JointFrame(),
+        dofs=(
+            JointDOF(JointAxis.TRANS_X, limits=(-0.2, 0.2)),
+            JointDOF(JointAxis.TRANS_Z, limits=(-0.05, 0.05)),
+            JointDOF(JointAxis.ROT_Y, limits=(-0.3, 0.3)),
+        ),
+    )
+    model.articulation("main", root=mount, joints=["arm_hinge", "barrel_eye"])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        run_dir = Path(tmp) / "run"
+        export_assembly(model, run_dir / "result")
+        version = load_viewer_run(run_dir).versions[0]
+
+    joints = {
+        joint["name"]: joint
+        for joint in cast(
+            list[dict[str, Any]], cast(dict[str, Any], version["model"])["articulations"]
+        )
+    }
+    closer = joints["barrel_slide"]
+    assert closer["closes_loop"]
+    assert closer["slide_axis"] == [1.0, 0.0, 0.0]
+    # A plain pin has nothing to extend along, so it reports none.
+    assert joints["barrel_eye"]["slide_axis"] is None

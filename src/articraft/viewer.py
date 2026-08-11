@@ -147,8 +147,20 @@ def _read_joint(joint: Usd.Prim) -> dict[str, object]:
         # A loop closing joint is a constraint, not a place to hang the child;
         # the viewer must not reparent or pose along it.
         "closes_loop": bool(_usd_attribute(joint, "physics:excludeFromArticulation", False)),
+        # A closer free to translate is a cylinder: the two ends stay in line and
+        # the distance between them is the extension. That lets the viewer hold
+        # the loop shut by aiming, rather than letting the parts drift apart.
+        "slide_axis": _slide_axis(dofs),
         "driven": False,
     }
+
+
+def _slide_axis(dofs: list[dict[str, object]]) -> list[float] | None:
+    for dof in dofs:
+        axis = str(dof["axis"])
+        if axis.startswith("trans"):
+            return _AXIS_VECTORS[axis]
+    return None
 
 
 def _read_legacy_joint(joint: Usd.Prim) -> dict[str, object]:
@@ -178,6 +190,7 @@ def _read_legacy_joint(joint: Usd.Prim) -> dict[str, object]:
         "axis": _attribute(joint, "axis", [0.0, 0.0, 1.0]),
         "motion_limits": limits,
         "closes_loop": bool(_usd_attribute(joint, "physics:excludeFromArticulation", False)),
+        "slide_axis": None,  # the old model had no multi-axis closers
         "driven": _attribute(joint, "driven", "false") == "true",
     }
 
