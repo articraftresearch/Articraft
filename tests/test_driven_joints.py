@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from build123d import Box, Cylinder, Pos, Rot
 
-from articraft.sdk import ArticulatedObject, ArticulationType, MotionLimits, Origin
+from articraft.sdk import ArticulatedObject, ArticulationType, MotionLimits, Origin, Part
 from articraft.sdk._collision import MeshCollisionKernel
 from articraft.sdk.errors import ValidationError
 from articraft.sdk.joints import AimAt, SpanTo
@@ -162,3 +162,73 @@ def test_angle_matches_the_geometry_by_hand() -> None:
         float(np.linalg.norm(offset)) - REST_LENGTH, abs=1e-9
     )
     assert resolved["barrel_swivel"] == pytest.approx(math.atan2(-offset[2], offset[0]), abs=1e-9)
+
+
+def _slider(model: ArticulatedObject, name: str) -> Part:
+    part = model.part(name)
+    part.add(Box(0.05, 0.05, 0.05), name="block")
+    return part
+
+
+def test_drive_cannot_chain_through_another_driven_joint() -> None:
+    """One-pass resolution would hand the second drive a stale anchor."""
+
+    model = ArticulatedObject("chained")
+    base = _slider(model, "base")
+    arm = _slider(model, "arm")
+    carriage = _slider(model, "carriage")
+    shuttle = _slider(model, "shuttle")
+    model.articulation(
+        "arm_hinge",
+        ArticulationType.REVOLUTE,
+        base,
+        arm,
+        axis=(0.0, 1.0, 0.0),
+        motion_limits=MotionLimits(lower=-0.5, upper=0.5),
+    )
+    model.articulation(
+        "carriage_slide",
+        ArticulationType.PRISMATIC,
+        base,
+        carriage,
+        axis=(1.0, 0.0, 0.0),
+        motion_limits=MotionLimits(lower=-1.0, upper=1.0),
+        drive=SpanTo("arm", (0.3, 0.0, 0.0)),
+    )
+    model.articulation(
+        "shuttle_slide",
+        ArticulationType.PRISMATIC,
+        base,
+        shuttle,
+        axis=(1.0, 0.0, 0.0),
+        motion_limits=MotionLimits(lower=-1.0, upper=1.0),
+        drive=SpanTo("carriage", (0.0, 0.0, 0.0)),
+    )
+    with pytest.raises(ValidationError, match="drives resolve in one pass"):
+        model.validate()
+
+
+def test_drive_cannot_read_its_own_subtree() -> None:
+    """Reading a grandchild is circular: the joint moves its own anchor."""
+
+    model = ArticulatedObject("circular_deep")
+    base = _slider(model, "base")
+    carriage = _slider(model, "carriage")
+    tool = _slider(model, "tool")
+    model.articulation(
+        "carriage_slide",
+        ArticulationType.PRISMATIC,
+        base,
+        carriage,
+        axis=(1.0, 0.0, 0.0),
+        motion_limits=MotionLimits(lower=-1.0, upper=1.0),
+        drive=SpanTo("tool", (0.0, 0.0, 0.0)),
+    )
+    model.articulation(
+        "tool_mount",
+        ArticulationType.FIXED,
+        carriage,
+        tool,
+    )
+    with pytest.raises(ValidationError, match="own joint moves"):
+        model.validate()

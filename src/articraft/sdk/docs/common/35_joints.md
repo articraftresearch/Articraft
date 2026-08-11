@@ -349,8 +349,9 @@ Rules worth knowing:
 
 - The drive type must match the joint: `SpanTo` for prismatic, `AimAt` for
   revolute. `Drive` is the union of the two.
-- A drive cannot read the joint's own parent or child. It reads a part the joint
-  does not move, otherwise the value would depend on itself.
+- A drive reads a part that no drive influences: not the joint's own parent or
+  child, nothing in its own subtree, and nothing placed by another driven
+  joint. Drives resolve in one pass, so anchor them on posed structure.
 - Give the joint honest `motion_limits`. A drive solves the value; it does not
   check that the mechanism stays inside its travel.
 - Drives are kinematic. They keep the model assembled for posing, rendering, and

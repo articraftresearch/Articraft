@@ -322,6 +322,43 @@ class ArticulatedObject:
                 f"object contains unreachable parts: {sorted(part_name_set - visited)}"
             )
 
+        # Drives resolve in a single pass against the authored pose, so a drive
+        # may only read a part whose placement no drive influences. Anything
+        # else would read a stale anchor (chained) or itself (circular).
+        driven = [item for item in self.articulations if item.drive is not None]
+        if driven:
+            subtree: dict[str, set[str]] = {}
+
+            def _descendants(name: str) -> set[str]:
+                found = subtree.get(name)
+                if found is None:
+                    found = {name}
+                    for child in children[name]:
+                        found |= _descendants(child)
+                    subtree[name] = found
+                return found
+
+            for articulation in driven:
+                assert articulation.drive is not None
+                anchor = articulation.drive.part
+                if anchor not in part_name_set:
+                    raise ValidationError(
+                        f"articulation {articulation.name!r} drive references missing part "
+                        f"{anchor!r}"
+                    )
+                if anchor in _descendants(articulation.child):
+                    raise ValidationError(
+                        f"articulation {articulation.name!r} drive reads {anchor!r}, which its "
+                        "own joint moves; a drive must read a part outside its subtree"
+                    )
+                for other in driven:
+                    if other is not articulation and anchor in _descendants(other.child):
+                        raise ValidationError(
+                            f"articulation {articulation.name!r} drive reads {anchor!r}, which "
+                            f"is placed by the driven joint {other.name!r}; drives resolve in "
+                            "one pass, so read a part no drive influences"
+                        )
+
 
 def _validate_geometry(shape: object, *, context: str) -> None:
     if isinstance(shape, Shape):
