@@ -30,12 +30,12 @@ from articraft.agent.events import AssistantMessage, RunFinished, RunStarted, To
 BROKEN_NO_RUN_TESTS = """
 from build123d import Box
 
-from articraft.sdk import ArticulatedObject
+from articraft.sdk import RigidBodyAssembly
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("box")
-    base = model.part("base")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("box")
+    base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.1), name="body")
     return model
 
@@ -46,14 +46,14 @@ object_model = build_object_model()
 OVERLAP_MAIN = """
 from build123d import Box
 
-from articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("press_fit")
-    base = model.part("base")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("press_fit")
+    base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.1), name="body")
-    pin = model.part("pin")
+    pin = model.rigid_body("pin")
     pin.add(Box(0.05, 0.05, 0.2), name="body")
     model.articulation("press_fit_pin", "fixed", parent="base", child="pin")
     return model
@@ -192,10 +192,10 @@ def body_shape():
     return Box(0.4, 0.3, 0.2)
 """
     main = """from geometry_helpers import body_shape
-from articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
-object_model = ArticulatedObject("local_extension")
-object_model.part("body").add(body_shape(), name="shell")
+object_model = RigidBodyAssembly("local_extension")
+object_model.rigid_body("body").add(body_shape(), name="shell")
 
 def run_tests() -> TestReport:
     ctx = TestContext(object_model)

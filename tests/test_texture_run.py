@@ -4,13 +4,13 @@ import json
 from types import SimpleNamespace
 
 import articraft.compiler.worker as worker
-from articraft.sdk import ArticulatedObject, BoxGeometry
-from articraft.sdk.export import TextureExportReport, export_object
+from articraft.sdk import BoxGeometry, RigidBodyAssembly
+from articraft.sdk.export import TextureExportReport, export_assembly
 
 
-def _model() -> ArticulatedObject:
-    model = ArticulatedObject("plain")
-    model.part("base").add(
+def _model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("plain")
+    model.rigid_body("base").add(
         BoxGeometry([0.1, 0.1, 0.1]),
         name="body",
         color=(0.5, 0.5, 0.5),
@@ -27,7 +27,7 @@ def _run_dir(tmp_path):
 
 def test_texture_run_preserves_prior_result_when_export_fails(monkeypatch, tmp_path) -> None:
     run_dir = _run_dir(tmp_path)
-    prior = export_object(_model(), run_dir / "result")
+    prior = export_assembly(_model(), run_dir / "result")
     manifest_before = prior.manifest.read_bytes()
     monkeypatch.setattr(
         worker.runpy, "run_path", lambda *_args, **_kwargs: {"object_model": _model()}
@@ -36,7 +36,7 @@ def test_texture_run_preserves_prior_result_when_export_fails(monkeypatch, tmp_p
     def fail_export(*_args, **_kwargs):
         raise RuntimeError("injected failure")
 
-    monkeypatch.setattr(worker, "export_object", fail_export)
+    monkeypatch.setattr(worker, "export_assembly", fail_export)
     outcome = worker.texture_run(run_dir)
 
     assert not outcome.succeeded
@@ -47,7 +47,7 @@ def test_texture_run_preserves_prior_result_when_export_fails(monkeypatch, tmp_p
 
 def test_texture_run_keeps_parametric_result_when_no_textures_apply(monkeypatch, tmp_path) -> None:
     run_dir = _run_dir(tmp_path)
-    prior = export_object(_model(), run_dir / "result")
+    prior = export_assembly(_model(), run_dir / "result")
     manifest_before = prior.manifest.read_bytes()
     monkeypatch.setattr(
         worker.runpy, "run_path", lambda *_args, **_kwargs: {"object_model": _model()}
@@ -64,7 +64,7 @@ def test_texture_run_keeps_parametric_result_when_no_textures_apply(monkeypatch,
 
 def test_texture_run_reports_the_final_usdz(monkeypatch, tmp_path) -> None:
     run_dir = _run_dir(tmp_path)
-    prior = export_object(_model(), run_dir / "result")
+    prior = export_assembly(_model(), run_dir / "result")
     monkeypatch.setattr(
         worker.runpy, "run_path", lambda *_args, **_kwargs: {"object_model": _model()}
     )
@@ -77,7 +77,7 @@ def test_texture_run_reports_the_final_usdz(monkeypatch, tmp_path) -> None:
             textures=TextureExportReport(requested_shapes=1, textured_shapes=1),
         )
 
-    monkeypatch.setattr(worker, "export_object", textured_export)
+    monkeypatch.setattr(worker, "export_assembly", textured_export)
 
     outcome = worker.texture_run(run_dir)
 

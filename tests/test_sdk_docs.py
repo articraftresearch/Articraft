@@ -10,7 +10,7 @@ import articraft.sdk as sdk
 import articraft.sdk.mesh as sdk_mesh
 from articraft import package_dir
 from articraft.errors import MiniArticraftError
-from articraft.sdk import ArticulatedObject, TestReport
+from articraft.sdk import RigidBodyAssembly, TestReport
 from articraft.sdk.errors import SDKError, ValidationError
 
 
@@ -99,15 +99,15 @@ def test_key_apis_are_documented_by_their_owner_pages() -> None:
     sdk_docs = package_dir / "sdk" / "docs"
     expected = {
         "common/30_articulated_object.md": (
-            "`ArticulatedObject`",
+            "`RigidBodyAssembly`",
             "`Material`",
-            "`Part`",
+            "`RigidBody`",
             "`Material`",
             "`part.add(...)`",
         ),
         "common/35_joints.md": (
             "`Origin`",
-            "`MotionLimits`",
+            "`JointDOF`",
             "`model.articulation(...)`",
         ),
         "common/40_testing.md": (
@@ -228,7 +228,7 @@ def test_all_new_sdk_examples_execute() -> None:
         values = runpy.run_path(str(path))
         model = values["object_model"]
         report = values["run_tests"]()
-        assert isinstance(model, ArticulatedObject), path.name
+        assert isinstance(model, RigidBodyAssembly), path.name
         model.validate()
         assert isinstance(report, TestReport), path.name
         assert report.passed, (path.name, report.failures)
@@ -253,7 +253,7 @@ def test_prompt_and_docs_state_the_new_authoring_contract() -> None:
         "MeshGeometry",
         "name=",
         "Origin",
-        "MotionLimits",
+        "JointDOF",
         "realistic geometry",
         "primary mechanisms",
         "floating parts",

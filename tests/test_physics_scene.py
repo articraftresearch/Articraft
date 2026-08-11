@@ -7,18 +7,18 @@ import pytest
 from pxr import Usd, UsdPhysics
 
 from articraft.sdk import (
-    ArticulatedObject,
     BodyState,
     BoxGeometry,
     PhysicsScene,
+    RigidBodyAssembly,
 )
 from articraft.sdk.errors import ValidationError
-from articraft.sdk.export import export_object
+from articraft.sdk.export import export_assembly
 
 
-def _model(scene: PhysicsScene | None = None, **part_kwargs) -> ArticulatedObject:
-    model = ArticulatedObject("cart") if scene is None else ArticulatedObject("cart", scene=scene)
-    body = model.part("body", **part_kwargs)
+def _model(scene: PhysicsScene | None = None, **part_kwargs) -> RigidBodyAssembly:
+    model = RigidBodyAssembly("cart") if scene is None else RigidBodyAssembly("cart", scene=scene)
+    body = model.rigid_body("body", **part_kwargs)
     body.add(BoxGeometry((0.2, 0.2, 0.2)), name="shell")
     model.validate()
     return model
@@ -32,7 +32,7 @@ def _rigid_body(usdz) -> tuple[Usd.Stage, UsdPhysics.RigidBodyAPI]:
 
 
 def test_default_scene_is_earth_gravity_down_the_up_axis(tmp_path) -> None:
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
     scene = UsdPhysics.Scene.Get(stage, "/World/physicsScene")
 
@@ -50,7 +50,7 @@ def test_default_scene_is_earth_gravity_down_the_up_axis(tmp_path) -> None:
 def test_explicit_gravity_is_normalized_and_exported(tmp_path) -> None:
     # A non-unit direction is a direction, not a magnitude: the length is dropped.
     scene = PhysicsScene(direction=(0.0, -2.0, 0.0), magnitude=1.62)
-    result = export_object(_model(scene), tmp_path)
+    result = export_assembly(_model(scene), tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
     usd_scene = UsdPhysics.Scene.Get(stage, "/World/physicsScene")
 
@@ -60,7 +60,7 @@ def test_explicit_gravity_is_normalized_and_exported(tmp_path) -> None:
 
 
 def test_default_body_state_is_a_free_body_at_rest(tmp_path) -> None:
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     _stage, rigid = _rigid_body(result.usdz)
 
     assert rigid.GetRigidBodyEnabledAttr().Get() is True
@@ -86,7 +86,7 @@ def test_authored_body_state_reaches_usd_with_angles_in_degrees(tmp_path) -> Non
         angular_velocity=(0.0, math.pi, 0.0),
         starts_asleep=True,
     )
-    result = export_object(_model(body_state=state), tmp_path)
+    result = export_assembly(_model(body_state=state), tmp_path)
     _stage, rigid = _rigid_body(result.usdz)
 
     assert rigid.GetKinematicEnabledAttr().Get() is True
@@ -101,7 +101,7 @@ def test_authored_body_state_reaches_usd_with_angles_in_degrees(tmp_path) -> Non
 
 
 def test_disabled_body_exports_as_a_body_the_simulator_does_not_move(tmp_path) -> None:
-    result = export_object(_model(body_state=BodyState(enabled=False)), tmp_path)
+    result = export_assembly(_model(body_state=BodyState(enabled=False)), tmp_path)
     _stage, rigid = _rigid_body(result.usdz)
 
     assert rigid.GetRigidBodyEnabledAttr().Get() is False
@@ -121,6 +121,6 @@ def test_scene_and_body_state_reject_unusable_values() -> None:
     with pytest.raises(ValidationError, match="3 numeric values"):
         BodyState(linear_velocity=(1.0, 2.0))  # pyright: ignore[reportArgumentType]
     with pytest.raises(ValidationError, match="scene must be a PhysicsScene"):
-        ArticulatedObject("cart", scene="earth")  # pyright: ignore[reportArgumentType]
+        RigidBodyAssembly("cart", scene="earth")  # pyright: ignore[reportArgumentType]
     with pytest.raises(ValidationError, match="body_state must be BodyState"):
-        ArticulatedObject("cart").part("body", body_state="asleep")  # pyright: ignore[reportArgumentType]
+        RigidBodyAssembly("cart").rigid_body("body", body_state="asleep")  # pyright: ignore[reportArgumentType]

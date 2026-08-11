@@ -329,7 +329,7 @@ def test_compiler_owned_checks_keep_their_codes_and_sources() -> None:
             ),
             TestFailure(
                 name="fail_if_parts_overlap_in_current_pose()",
-                details="Part overlaps detected",
+                details="RigidBody overlaps detected",
                 kind=FailureKind.OVERLAP,
             ),
             sources=("compiler",) * 4,

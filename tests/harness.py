@@ -963,13 +963,13 @@ def compile_success_tool() -> Tool:
 GOOD_MAIN_PY = """
 from build123d import Box
 
-from articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("box")
-    base = model.part("base")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("box")
+    base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.1), name="body")
     return model
 

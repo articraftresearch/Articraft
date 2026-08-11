@@ -7,16 +7,16 @@ from pathlib import Path
 import pytest
 from pxr import Usd, UsdGeom, UsdPhysics, UsdShade  # pyright: ignore[reportAttributeAccessIssue]
 
-from articraft.sdk import ArticulatedObject, BoxGeometry, Material
-from articraft.sdk.export import export_object
+from articraft.sdk import BoxGeometry, Material, RigidBodyAssembly
+from articraft.sdk.export import export_assembly
 
 # The usd-core stubs omit these schemas; bind them once rather than at every use.
 _MaterialAPI = UsdPhysics.MaterialAPI  # pyright: ignore[reportAttributeAccessIssue]
 
 
-def _model() -> ArticulatedObject:
-    model = ArticulatedObject("rig")
-    part = model.part("frame")
+def _model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("rig")
+    part = model.rigid_body("frame")
     part.add(
         BoxGeometry((0.30, 0.16, 0.12)).translate(0.0, 0.0, 0.06),
         name="shell",
@@ -46,7 +46,7 @@ def _bound_physics_material(stage: Usd.Stage, mesh: Usd.Prim) -> Usd.Prim | None
 
 
 def test_each_collider_carries_its_material_friction(tmp_path: Path) -> None:
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     stage, meshes = _open(str(result.usdz))
 
     shell = _MaterialAPI(_bound_physics_material(stage, meshes["shell"]))
@@ -63,7 +63,7 @@ def test_each_collider_carries_its_material_friction(tmp_path: Path) -> None:
 
 
 def test_one_physics_material_is_shared_by_every_shape_made_of_it(tmp_path: Path) -> None:
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     stage, meshes = _open(str(result.usdz))
 
     first = _bound_physics_material(stage, meshes["foot"])
@@ -74,10 +74,10 @@ def test_one_physics_material_is_shared_by_every_shape_made_of_it(tmp_path: Path
 
 
 def test_shapes_without_a_material_bind_no_physics_material(tmp_path: Path) -> None:
-    model = ArticulatedObject("plain")
-    model.part("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube")
+    model = RigidBodyAssembly("plain")
+    model.rigid_body("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube")
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
     stage, meshes = _open(str(result.usdz))
 
     # No invented friction: the engine applies its own default instead.
@@ -85,7 +85,7 @@ def test_shapes_without_a_material_bind_no_physics_material(tmp_path: Path) -> N
 
 
 def test_physics_binding_does_not_disturb_the_appearance_binding(tmp_path: Path) -> None:
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     stage, meshes = _open(str(result.usdz))
     assert stage  # keep the stage alive: its prims go invalid when it is collected
     shell = meshes["shell"]
@@ -100,7 +100,7 @@ def test_physics_binding_does_not_disturb_the_appearance_binding(tmp_path: Path)
 def test_exported_stage_passes_openusd_physics_validation(tmp_path: Path) -> None:
     from pxr import UsdValidation
 
-    result = export_object(_model(), tmp_path)
+    result = export_assembly(_model(), tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
     validators = UsdValidation.ValidationRegistry().GetOrLoadValidatorsByName(
         [
@@ -119,8 +119,8 @@ def test_a_coating_moves_friction_to_the_surface_without_moving_mass(tmp_path: P
     """A rubber grip on a steel bar is heavy like steel and grippy like rubber."""
     from articraft.sdk.export import _resolve_part_mass
 
-    model = ArticulatedObject("gripped")
-    part = model.part("bar")
+    model = RigidBodyAssembly("gripped")
+    part = model.rigid_body("bar")
     part.add(
         BoxGeometry((0.02, 0.02, 0.30)),
         name="bar",
@@ -133,7 +133,7 @@ def test_a_coating_moves_friction_to_the_surface_without_moving_mass(tmp_path: P
     # Mass stays with the material underneath.
     assert resolved.mass == pytest.approx(0.02 * 0.02 * 0.30 * Material.STEEL.density)
 
-    result = export_object(model, tmp_path)
+    result = export_assembly(model, tmp_path)
     stage, meshes = _open(str(result.usdz))
     physics = _MaterialAPI(_bound_physics_material(stage, meshes["bar"]))
 
@@ -142,8 +142,8 @@ def test_a_coating_moves_friction_to_the_surface_without_moving_mass(tmp_path: P
 
 
 def test_a_coating_also_supplies_the_look(tmp_path: Path) -> None:
-    model = ArticulatedObject("plated")
-    part = model.part("knob")
+    model = RigidBodyAssembly("plated")
+    part = model.rigid_body("knob")
     part.add(
         BoxGeometry((0.05, 0.05, 0.05)),
         name="knob",
@@ -175,10 +175,10 @@ def test_textured_shapes_keep_their_physics_material(monkeypatch, tmp_path: Path
         lambda kind: (texture_set, ambientcg.MaterialSpec("Metal009")),
     )
 
-    model = ArticulatedObject("textured")
-    model.part("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube", material=Material.STEEL)
+    model = RigidBodyAssembly("textured")
+    model.rigid_body("body").add(BoxGeometry((0.1, 0.1, 0.1)), name="cube", material=Material.STEEL)
 
-    result = export_object(model, tmp_path / "out", textured=True)
+    result = export_assembly(model, tmp_path / "out", textured=True)
     stage, meshes = _open(str(result.usdz))
     physics = _bound_physics_material(stage, meshes["cube"])
 
