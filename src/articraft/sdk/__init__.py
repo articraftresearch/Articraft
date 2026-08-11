@@ -57,19 +57,20 @@ from articraft.sdk._mesh.sweeps import (
     SweepGeometry,
     WirePolylineGeometry,
 )
-from articraft.sdk.errors import SDKError, ValidationError
-from articraft.sdk.joints import (
-    AimAt,
+from articraft.sdk.assembly import (
+    WORLD,
     Articulation,
-    ArticulationType,
-    Drive,
-    MotionLimits,
-    Origin,
-    SpanTo,
+    Joint,
+    JointAxis,
+    JointDOF,
+    JointFrame,
+    PhysicsState,
+    RigidBodyAssembly,
 )
+from articraft.sdk.bodies import RigidBody
+from articraft.sdk.errors import SDKError, ValidationError
 from articraft.sdk.mass import MassProperties
 from articraft.sdk.materials import Material
-from articraft.sdk.object import ArticulatedObject, Part
 from articraft.sdk.physics import EARTH_GRAVITY, BodyState, PhysicsScene
 from articraft.sdk.testing import (
     AllowedMeshIssues,
@@ -99,13 +100,11 @@ from articraft.sdk.visual import (
 
 __all__ = [
     "EARTH_GRAVITY",
-    "AimAt",
+    "WORLD",
     "AllowedMeshIssues",
     "AllowedOverlap",
     "ArcPipeGeometry",
-    "ArticulatedObject",
     "Articulation",
-    "ArticulationType",
     "BodyState",
     "BoxGeometry",
     "CapsuleGeometry",
@@ -113,12 +112,15 @@ __all__ = [
     "CylinderGeometry",
     "DistanceFinding",
     "DomeGeometry",
-    "Drive",
     "ExtrudeGeometry",
     "ExtrudeWithHolesGeometry",
     "FailureKind",
     "GeometryMetrics",
     "ImagePoint",
+    "Joint",
+    "JointAxis",
+    "JointDOF",
+    "JointFrame",
     "LatheGeometry",
     "LineOverlay",
     "LoftGeometry",
@@ -130,19 +132,18 @@ __all__ = [
     "MeshHealthIssue",
     "MeshHealthReport",
     "ModelView",
-    "MotionLimits",
     "MotionStripView",
-    "Origin",
-    "Part",
     "PhysicsScene",
+    "PhysicsState",
     "PipeGeometry",
     "PointOverlay",
     "PoseSample",
     "Reticle",
+    "RigidBody",
+    "RigidBodyAssembly",
     "RoundedBoxGeometry",
     "SDKError",
     "SectionView",
-    "SpanTo",
     "SphereGeometry",
     "SuperellipsoidGeometry",
     "SweepGeometry",

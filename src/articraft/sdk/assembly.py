@@ -10,9 +10,9 @@ from typing import TypeAlias, cast
 import numpy as np
 import trimesh
 
+from articraft.sdk._values import _as_name
 from articraft.sdk.bodies import RigidBody, RigidBodyRef
 from articraft.sdk.errors import ValidationError
-from articraft.sdk.joints import _as_name
 from articraft.sdk.mass import MassProperties
 from articraft.sdk.physics import PhysicsScene
 

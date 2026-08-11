@@ -10,15 +10,9 @@ import numpy as np
 import trimesh
 
 from articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
+from articraft.sdk.assembly import RigidBodyAssembly
+from articraft.sdk.bodies import Geometry
 from articraft.sdk.errors import ValidationError
-from articraft.sdk.joints import (
-    Articulation,
-    ArticulationType,
-    Origin,
-    SpanTo,
-    partition_articulations,
-)
-from articraft.sdk.object import ArticulatedObject, Geometry
 
 Vec3: TypeAlias = tuple[float, float, float]
 Bounds: TypeAlias = tuple[Vec3, Vec3]
@@ -100,10 +94,11 @@ class _GeometryComponent:
 
 
 class MeshCollisionKernel:
-    def __init__(self, model: ArticulatedObject, *, mesh_tolerance: float) -> None:
+    def __init__(self, model: RigidBodyAssembly, *, mesh_tolerance: float) -> None:
         if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
             raise ValidationError("mesh_tolerance must be a positive finite number")
         self.model = model
+        self.resolved = model.resolve()
         self.mesh_tolerance = float(mesh_tolerance)
         self._mesh_cache: dict[tuple[object, ...], _LocalMesh] = {}
 
@@ -133,89 +128,25 @@ class MeshCollisionKernel:
         return self._selector_entries(part_name, shape_name, pose)[0].bounds
 
     def world_transforms(self, pose: dict[str, float]) -> dict[str, Mat4]:
-        return self._place(self._resolve_drives(pose))
+        """Where every body sits, for a pose keyed by joint or by DOF."""
 
-    def _resolve_drives(self, pose: dict[str, float]) -> dict[str, float]:
-        """Fill in the joints the mechanism decides rather than the author.
+        state = self.resolved.forward_kinematics(self._dof_positions(pose))
+        return self.resolved.world_transforms(state)
 
-        Values handed in for driven joints are discarded: the mechanism owns
-        them. Drives are solved shallowest parent first, re-placing the model
-        after each, so a driven joint hanging off another driven joint reads a
-        final frame rather than a stale one.
+    def _dof_positions(self, pose: dict[str, float]) -> dict[str, float]:
+        """Accept ``{"hinge": 0.5}`` as well as ``{"hinge.rotZ": 0.5}``.
+
+        A joint with one degree of freedom is named unambiguously by the joint
+        alone, which is how every pose was written before joints could carry
+        six. The qualified form is only needed where it genuinely is.
         """
 
-        driven = [item for item in self.model.articulations if item.drive is not None]
-        if not driven:
-            return pose
-        resolved = {
-            name: value
-            for name, value in pose.items()
-            if name not in {item.name for item in driven}
+        single = {
+            item.joint.name: item.joint.dof_id(item.joint.dofs[0])
+            for item in self.resolved.joints
+            if len(item.joint.dofs) == 1
         }
-        tree, _loops = partition_articulations(self.model.articulations)
-        parent_of = {item.child: item.parent for item in tree}
-
-        def _depth(part: str) -> int:
-            depth = 0
-            while part in parent_of:
-                part = parent_of[part]
-                depth += 1
-            return depth
-
-        for articulation in sorted(driven, key=lambda item: _depth(item.parent)):
-            drive = articulation.drive
-            if drive is None:
-                continue
-            placed = self._place(resolved)
-            target = placed.get(drive.part)
-            frame = placed.get(articulation.parent)
-            if target is None or frame is None:
-                continue
-            joint = frame @ _origin_matrix(articulation.origin)
-            anchor = _apply(target, np.asarray(drive.point, dtype=np.float64))
-            local = _apply(np.linalg.inv(joint), anchor)
-            if isinstance(drive, SpanTo):
-                # The axial component, signed: an anchor behind the origin must
-                # retract the joint, and any perpendicular offset is the frame's
-                # business, not extra travel.
-                axial = float(np.dot(local, _normalize(articulation.axis)))
-                resolved[articulation.name] = axial - drive.rest_length
-            else:
-                resolved[articulation.name] = _angle_about(
-                    _normalize(articulation.axis),
-                    np.asarray(drive.reference, dtype=np.float64),
-                    local,
-                )
-        return resolved
-
-    def _place(self, pose: dict[str, float]) -> dict[str, Mat4]:
-        parts = {part.name: part for part in self.model.parts}
-        children: dict[str, list[Articulation]] = {name: [] for name in parts}
-        child_names: set[str] = set()
-        # Only the spanning tree places parts. A loop closing joint is a
-        # constraint on the mechanism, not a second place to hang its child.
-        tree, _loops = partition_articulations(self.model.articulations)
-        for articulation in tree:
-            if articulation.parent in parts and articulation.child in parts:
-                children[articulation.parent].append(articulation)
-                child_names.add(articulation.child)
-
-        roots = [name for name in parts if name not in child_names]
-        transforms: dict[str, Mat4] = {}
-        stack = [(root, _identity()) for root in roots]
-        while stack:
-            part_name, transform = stack.pop()
-            if part_name in transforms:
-                continue
-            transforms[part_name] = transform
-            for articulation in children.get(part_name, []):
-                child_transform = (
-                    transform
-                    @ _origin_matrix(articulation.origin)
-                    @ _motion_matrix(articulation, float(pose.get(articulation.name, 0.0)))
-                )
-                stack.append((articulation.child, child_transform))
-        return transforms
+        return {single.get(key, key): float(value) for key, value in pose.items()}
 
     def collision_between(
         self,
@@ -268,7 +199,7 @@ class MeshCollisionKernel:
         *,
         max_contacts: int = 16,
     ) -> list[DistanceQuery]:
-        parts = [part.name for part in self.model.parts]
+        parts = [body.name for body in self.resolved.rigid_bodies]
         by_part: dict[str, list[_CollisionEntry]] = {part: [] for part in parts}
         for entry in self._all_entries(pose):
             by_part[entry.part_name].append(entry)
@@ -338,7 +269,7 @@ class MeshCollisionKernel:
         contact_tol: float,
     ) -> list[GeometryConnectivityFinding]:
         findings: list[GeometryConnectivityFinding] = []
-        for part in self.model.parts:
+        for part in self.resolved.rigid_bodies:
             components = self._geometry_components(part.name)
             if len(components) <= 1:
                 continue
@@ -374,7 +305,7 @@ class MeshCollisionKernel:
         transforms = self.world_transforms(pose)
         return [
             self._entry(part.name, shape.name, shape.geometry, transforms[part.name])
-            for part in self.model.parts
+            for part in self.resolved.rigid_bodies
             for shape in part._iter_shapes()
         ]
 
@@ -384,7 +315,7 @@ class MeshCollisionKernel:
         shape_name: str | None,
         pose: dict[str, float],
     ) -> list[_CollisionEntry]:
-        part = self.model.get_part(part_name)
+        part = self.resolved.get_rigid_body(part_name)
         transform = self.world_transforms(pose).get(part.name)
         if transform is None:
             raise ValidationError(f"unknown part: {part.name!r}")
@@ -447,7 +378,7 @@ class MeshCollisionKernel:
         return cached
 
     def _geometry_components(self, part_name: str) -> tuple[_GeometryComponent, ...]:
-        part = self.model.get_part(part_name)
+        part = self.resolved.get_rigid_body(part_name)
         components: list[_GeometryComponent] = []
         for shape in part._iter_shapes():
             mesh = self._local_mesh(shape.geometry).mesh
@@ -662,23 +593,6 @@ def _mesh_to_bvh(mesh: trimesh.Trimesh) -> object:
 
 def _identity() -> Mat4:
     return np.identity(4, dtype=np.float64)
-
-
-def _origin_matrix(origin: Origin) -> Mat4:
-    matrix = _rpy_matrix(origin.rpy)
-    matrix[:3, 3] = np.asarray(origin.xyz, dtype=np.float64)
-    return matrix
-
-
-def _motion_matrix(articulation: Articulation, value: float) -> Mat4:
-    if articulation.articulation_type == ArticulationType.FIXED:
-        return _identity()
-    axis = _normalize(articulation.axis)
-    if articulation.articulation_type == ArticulationType.PRISMATIC:
-        matrix = _identity()
-        matrix[:3, 3] = axis * value
-        return matrix
-    return _axis_angle_matrix(axis, value)
 
 
 def _rpy_matrix(rpy: Vec3) -> Mat4:

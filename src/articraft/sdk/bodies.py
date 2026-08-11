@@ -7,8 +7,8 @@ from typing import TypeAlias
 from build123d.topology import Shape
 
 from articraft.sdk._mesh.core import MeshGeometry
+from articraft.sdk._values import _as_name
 from articraft.sdk.errors import ValidationError
-from articraft.sdk.joints import _as_name
 from articraft.sdk.mass import MassProperties
 from articraft.sdk.materials import Color, Material, _as_color, _as_material
 from articraft.sdk.physics import BodyState

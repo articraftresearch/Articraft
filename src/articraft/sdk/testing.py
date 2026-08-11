@@ -24,11 +24,16 @@ from articraft.sdk._collision import (
 )
 from articraft.sdk._mesh.core import geometry_to_trimesh
 from articraft.sdk._mesh.health import MeshHealthIssue, analyze_mesh_health
+from articraft.sdk.assembly import (
+    WORLD,
+    Joint,
+    JointAxis,
+    RigidBodyAssembly,
+)
+from articraft.sdk.bodies import RigidBody, RigidBodyRef
 from articraft.sdk.errors import ValidationError
-from articraft.sdk.joints import Articulation, ArticulationType, partition_articulations
 from articraft.sdk.mass import resolve_mass
 from articraft.sdk.materials import LIBRARY
-from articraft.sdk.object import ArticulatedObject, Part, PartRef
 
 DEFAULT_MESH_TOLERANCE = 0.001
 DEFAULT_CONTACT_TOLERANCE = 1e-6
@@ -149,7 +154,7 @@ class TestReport:
 class TestContext:
     __test__: ClassVar[bool] = False
 
-    model: ArticulatedObject
+    model: RigidBodyAssembly
     mesh_tolerance: float = DEFAULT_MESH_TOLERANCE
 
     checks_run: int = 0
@@ -166,8 +171,8 @@ class TestContext:
     _kernel_cache: MeshCollisionKernel | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.model, ArticulatedObject):
-            raise ValidationError("TestContext model must be an ArticulatedObject")
+        if not isinstance(self.model, RigidBodyAssembly):
+            raise ValidationError("TestContext model must be a RigidBodyAssembly")
         self.mesh_tolerance = float(self.mesh_tolerance)
         if self.mesh_tolerance <= 0.0 or not math.isfinite(self.mesh_tolerance):
             raise ValidationError("mesh_tolerance must be a positive finite number")
@@ -279,8 +284,8 @@ class TestContext:
 
     def allow_overlap(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         reason: str,
         shape_a: str,
@@ -288,12 +293,12 @@ class TestContext:
     ) -> None:
         part_a_name = _part_name(part_a, field_name="part_a")
         part_b_name = _part_name(part_b, field_name="part_b")
-        self.model.get_part(part_a_name)
-        self.model.get_part(part_b_name)
+        self.model.get_rigid_body(part_a_name)
+        self.model.get_rigid_body(part_b_name)
         shape_a = str(shape_a).strip()
         shape_b = str(shape_b).strip()
-        self.model.get_part(part_a_name).get_shape(shape_a)
-        self.model.get_part(part_b_name).get_shape(shape_b)
+        self.model.get_rigid_body(part_a_name).get_shape(shape_a)
+        self.model.get_rigid_body(part_b_name).get_shape(shape_b)
         reason = str(reason or "").strip()
         if not reason:
             raise ValueError("allow_overlap requires a non-empty reason")
@@ -308,9 +313,9 @@ class TestContext:
             f"allow_overlap({part_a_name!r}, {part_b_name!r}{shape_text}): {reason}"
         )
 
-    def allow_isolated_part(self, part: PartRef, *, reason: str) -> None:
+    def allow_isolated_part(self, part: RigidBodyRef, *, reason: str) -> None:
         part_name = _part_name(part, field_name="part")
-        self.model.get_part(part_name)
+        self.model.get_rigid_body(part_name)
         reason = str(reason or "").strip()
         if not reason:
             raise ValueError("allow_isolated_part requires a non-empty reason")
@@ -319,14 +324,14 @@ class TestContext:
 
     def allow_mesh_issues(
         self,
-        part: PartRef,
+        part: RigidBodyRef,
         *,
         shape: str,
         issues: Sequence[MeshHealthIssue | str],
         reason: str,
     ) -> None:
         part_name = _part_name(part, field_name="part")
-        model_part = self.model.get_part(part_name)
+        model_part = self.model.get_rigid_body(part_name)
         shape_name = str(shape).strip()
         model_part.get_shape(shape_name)
         if isinstance(issues, (str, MeshHealthIssue)):
@@ -358,7 +363,7 @@ class TestContext:
     ) -> Iterator[None]:
         previous = dict(self._pose)
         updates: dict[str, float] = {}
-        articulation_names = {item.name for item in self.model.articulations}
+        articulation_names = {item.name for item in self.model.joints}
         for key, value in {**dict(articulation_positions or {}), **kwargs}.items():
             name = _articulation_name(key)
             if name not in articulation_names:
@@ -372,37 +377,32 @@ class TestContext:
             self._pose = previous
 
     def _reject_unposable(self, name: str) -> None:
-        """A driven or loop-closing joint has no value of its own to pose.
+        """A loop-closing joint has no value of its own to pose.
 
         Accepting one silently would sweep N identical poses and pass every
-        check vacuously, so it is an error: pose or sample the driving joint.
+        check vacuously, so it is an error: pose the tree joints instead.
         """
 
-        articulation = self.model.get_articulation(name)
-        if articulation.drive is not None:
+        resolved = self.model.resolve()
+        joint = resolved.get_joint(name)
+        if joint.exclude_from_articulation:
             raise ValidationError(
-                f"articulation {name!r} is driven; its value is solved from the "
-                "mechanism, so pose or sample the joint that drives it instead"
-            )
-        _tree, loops = partition_articulations(self.model.articulations)
-        if any(item.name == name for item in loops):
-            raise ValidationError(
-                f"articulation {name!r} closes a loop and cannot be posed; pose "
+                f"joint {name!r} closes a loop and cannot be posed; pose "
                 "the tree joints that move its parts instead"
             )
 
-    def part_world_position(self, part: PartRef) -> Vec3:
+    def part_world_position(self, part: RigidBodyRef) -> Vec3:
         return self._kernel().part_world_position(_part_name(part, field_name="part"), self._pose)
 
-    def part_world_bounds(self, part: PartRef) -> Bounds:
+    def part_world_bounds(self, part: RigidBodyRef) -> Bounds:
         return self._kernel().part_world_bounds(_part_name(part, field_name="part"), self._pose)
 
-    def shape_world_bounds(self, part: PartRef, shape: str) -> Bounds:
+    def shape_world_bounds(self, part: RigidBodyRef, shape: str) -> Bounds:
         return self._kernel().shape_world_bounds(
             _part_name(part, field_name="part"), shape, self._pose
         )
 
-    def part_world_point(self, part: PartRef, point: Sequence[float]) -> Vec3:
+    def part_world_point(self, part: RigidBodyRef, point: Sequence[float]) -> Vec3:
         part_name = _part_name(part, field_name="part")
         local = np.asarray(_vec3(point, "point"), dtype=np.float64)
         transform = self._kernel().world_transforms(self._pose).get(part_name)
@@ -413,7 +413,7 @@ class TestContext:
 
     def measure_geometry(
         self,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
     ) -> GeometryMetrics:
@@ -454,12 +454,12 @@ class TestContext:
 
     def sample_joint(
         self,
-        articulation: str | Articulation,
+        articulation: str | Joint,
         positions: Sequence[float] | None = None,
         *,
         samples: int = 5,
     ) -> tuple[PoseSample, ...]:
-        joint = self.model.get_articulation(articulation)
+        joint = self.model.get_joint(articulation)
         self._reject_unposable(joint.name)
         values = (
             _articulation_sweep_values(joint, max(2, int(samples)))
@@ -478,7 +478,7 @@ class TestContext:
 
     def track_point(
         self,
-        part: PartRef,
+        part: RigidBodyRef,
         point: Sequence[float],
         poses: Sequence[PoseSample | Mapping[object, float]],
     ) -> tuple[Vec3, ...]:
@@ -490,7 +490,7 @@ class TestContext:
 
     def expect_bounds(
         self,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
         minimum: Sequence[float] | None = None,
@@ -523,7 +523,7 @@ class TestContext:
 
     def expect_radial_extent(
         self,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
         axis: Sequence[float] = (0.0, 0.0, 1.0),
@@ -555,7 +555,7 @@ class TestContext:
     def expect_component_count(
         self,
         expected: int,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
         name: str | None = None,
@@ -573,7 +573,7 @@ class TestContext:
 
     def expect_watertight(
         self,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
         name: str | None = None,
@@ -588,7 +588,7 @@ class TestContext:
 
     def expect_positive_volume(
         self,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
         minimum: float = 0.0,
@@ -618,7 +618,7 @@ class TestContext:
 
     def expect_symmetry(
         self,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
         plane_origin: Sequence[float] = (0.0, 0.0, 0.0),
@@ -650,8 +650,8 @@ class TestContext:
 
     def distance_between(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None = None,
         shape_b: str | None = None,
@@ -660,8 +660,8 @@ class TestContext:
 
     def expect_no_collision_at_poses(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         poses: Sequence[PoseSample | Mapping[object, float]],
         *,
         shape_a: str | None = None,
@@ -685,8 +685,8 @@ class TestContext:
 
     def expect_distance_at_poses(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         poses: Sequence[PoseSample | Mapping[object, float]],
         *,
         shape_a: str | None = None,
@@ -720,8 +720,8 @@ class TestContext:
 
     def expect_contact_at_poses(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         poses: Sequence[PoseSample | Mapping[object, float]],
         *,
         shape_a: str | None = None,
@@ -747,8 +747,8 @@ class TestContext:
 
     def expect_within_at_poses(
         self,
-        inner_part: PartRef,
-        outer_part: PartRef,
+        inner_part: RigidBodyRef,
+        outer_part: RigidBodyRef,
         poses: Sequence[PoseSample | Mapping[object, float]],
         *,
         inner_shape: str | None = None,
@@ -789,8 +789,8 @@ class TestContext:
 
     def expect_no_collision(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None = None,
         shape_b: str | None = None,
@@ -804,8 +804,8 @@ class TestContext:
 
     def expect_collision(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None = None,
         shape_b: str | None = None,
@@ -819,8 +819,8 @@ class TestContext:
 
     def expect_contact(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None = None,
         shape_b: str | None = None,
@@ -839,8 +839,8 @@ class TestContext:
 
     def expect_distance(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None = None,
         shape_b: str | None = None,
@@ -864,8 +864,8 @@ class TestContext:
 
     def expect_gap(
         self,
-        positive_part: PartRef,
-        negative_part: PartRef,
+        positive_part: RigidBodyRef,
+        negative_part: RigidBodyRef,
         *,
         axis: str,
         positive_shape: str | None = None,
@@ -913,8 +913,8 @@ class TestContext:
 
     def expect_within(
         self,
-        inner_part: PartRef,
-        outer_part: PartRef,
+        inner_part: RigidBodyRef,
+        outer_part: RigidBodyRef,
         *,
         inner_shape: str | None = None,
         outer_shape: str | None = None,
@@ -949,8 +949,8 @@ class TestContext:
 
     def expect_overlap(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None = None,
         shape_b: str | None = None,
@@ -1004,7 +1004,7 @@ class TestContext:
 
     def fail_if_mesh_unhealthy(
         self,
-        part: PartRef | None = None,
+        part: RigidBodyRef | None = None,
         *,
         shape: str | None = None,
         name: str | None = None,
@@ -1048,7 +1048,7 @@ class TestContext:
         """
 
         unresolved: list[str] = []
-        for part in self.model.parts:
+        for part in self.model.rigid_bodies:
             try:
                 resolve_mass(
                     part.mass_properties,
@@ -1084,7 +1084,7 @@ class TestContext:
             if contact_tol == DEFAULT_CONTACT_TOLERANCE
             else f"fail_if_isolated_parts(contact_tol={contact_tol:.4g})"
         )
-        part_names = [part.name for part in self.model.parts]
+        part_names = [part.name for part in self.model.rigid_bodies]
         if len(part_names) <= 1:
             return self._record(check_name, True)
 
@@ -1178,22 +1178,24 @@ class TestContext:
         gap_tol = _non_negative(gap_tol, "gap_tol")
         check_name = name or f"fail_if_articulation_separates_child(gap_tol={gap_tol:.6g})"
         findings: list[str] = []
-        _tree, loop_closures = partition_articulations(self.model.articulations)
-        loop_names = {item.name for item in loop_closures}
-        for articulation in self.model.articulations:
-            if articulation.articulation_type not in (
-                ArticulationType.REVOLUTE,
-                ArticulationType.CONTINUOUS,
-            ):
+        # A loop closing joint never places its child: the child moves when the
+        # tree joints around the ring are swept, so skipping it here loses no
+        # coverage a posable sweep could give. (Carried across from #116, where
+        # driven joints were skipped for the same reason.)
+        closers = {
+            item.joint.name
+            for item in self.model.resolve().joints
+            if item.exclude_from_articulation
+        }
+        for articulation in self.model.joints:
+            if articulation.body0 is WORLD or articulation.body1 is WORLD:
                 continue
-            # A driven joint has no value of its own to sweep, and a loop
-            # closure never places its child; both move when the joints that
-            # drive them are swept, so skipping them here loses no coverage a
-            # posable sweep could give.
-            if articulation.drive is not None or articulation.name in loop_names:
+            if not any(cast(JointAxis, dof.axis).is_rotational for dof in articulation.dofs):
                 continue
-            parent = _part_name(articulation.parent, field_name="parent")
-            child = _part_name(articulation.child, field_name="child")
+            if articulation.name in closers:
+                continue
+            parent = _part_name(cast(RigidBody, articulation.body0).name, field_name="parent")
+            child = _part_name(cast(RigidBody, articulation.body1).name, field_name="child")
             values = _articulation_sweep_values(articulation, samples)
             with self.pose({articulation.name: values[0]}):
                 rest_gap = self.distance_between(parent, child).distance
@@ -1206,7 +1208,7 @@ class TestContext:
             if worst_gap - rest_gap > gap_tol:
                 findings.append(
                     f"articulation={articulation.name!r} "
-                    f"type={articulation.articulation_type} parent={parent!r} "
+                    f"axes={[cast(JointAxis, dof.axis).value for dof in articulation.dofs]} parent={parent!r} "
                     f"child={child!r} rest_gap={rest_gap:.4g}m max_gap={worst_gap:.4g}m "
                     f"at value={worst_value:.4g} "
                     f"(child pulls {worst_gap - rest_gap:.4g}m off the parent as it moves)"
@@ -1233,7 +1235,7 @@ class TestContext:
         ratio = _non_negative(outlier_ratio, "outlier_ratio")
         check_name = name or "warn_if_absurd_dimensions()"
         spans: list[tuple[str, str, float]] = []
-        for part in self.model.parts:
+        for part in self.model.rigid_bodies:
             for shape in part._iter_shapes():
                 bounds = self.shape_world_bounds(part, shape.name)
                 span = max(bounds[1][axis] - bounds[0][axis] for axis in range(3))
@@ -1300,7 +1302,7 @@ class TestContext:
         return self._record(
             check_name,
             False,
-            "Part overlaps detected "
+            "RigidBody overlaps detected "
             f"(overlap_tol={overlap_tol:.4g}, overlap_volume_tol={volume_tol:.4g}):\n"
             + "\n".join(details[:10]),
             kind=FailureKind.OVERLAP,
@@ -1332,8 +1334,8 @@ class TestContext:
 
     def _collision_query(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None,
         shape_b: str | None,
@@ -1348,8 +1350,8 @@ class TestContext:
 
     def _distance_query(
         self,
-        part_a: PartRef,
-        part_b: PartRef,
+        part_a: RigidBodyRef,
+        part_b: RigidBodyRef,
         *,
         shape_a: str | None,
         shape_b: str | None,
@@ -1369,7 +1371,7 @@ class TestContext:
 
     def _selected_world_meshes(
         self,
-        part: PartRef | None,
+        part: RigidBodyRef | None,
         shape: str | None,
     ) -> list[trimesh.Trimesh]:
         if shape is not None and part is None:
@@ -1377,7 +1379,7 @@ class TestContext:
         selected_part = None if part is None else _part_name(part, field_name="part")
         transforms = self._kernel().world_transforms(self._pose)
         meshes: list[trimesh.Trimesh] = []
-        for model_part in self.model.parts:
+        for model_part in self.model.rigid_bodies:
             if selected_part is not None and model_part.name != selected_part:
                 continue
             transform = transforms.get(model_part.name)
@@ -1390,23 +1392,23 @@ class TestContext:
                 mesh.apply_transform(transform)
                 meshes.append(mesh)
         if selected_part is not None:
-            self.model.get_part(selected_part)
+            self.model.get_rigid_body(selected_part)
             if shape is not None:
-                self.model.get_part(selected_part).get_shape(shape)
+                self.model.get_rigid_body(selected_part).get_shape(shape)
         if not meshes:
             raise ValidationError("geometry selector did not match any shapes")
         return meshes
 
     def _selected_geometries(
         self,
-        part: PartRef | None,
+        part: RigidBodyRef | None,
         shape: str | None,
     ) -> list[tuple[str, str, object]]:
         if shape is not None and part is None:
             raise ValidationError("shape requires a part selector")
         selected_part = None if part is None else _part_name(part, field_name="part")
         geometries: list[tuple[str, str, object]] = []
-        for model_part in self.model.parts:
+        for model_part in self.model.rigid_bodies:
             if selected_part is not None and model_part.name != selected_part:
                 continue
             geometries.extend(
@@ -1415,16 +1417,16 @@ class TestContext:
                 if shape is None or entry.name == shape
             )
         if selected_part is not None:
-            self.model.get_part(selected_part)
+            self.model.get_rigid_body(selected_part)
             if shape is not None:
-                self.model.get_part(selected_part).get_shape(shape)
+                self.model.get_rigid_body(selected_part).get_shape(shape)
         if not geometries:
             raise ValidationError("geometry selector did not match any shapes")
         return geometries
 
     def _selected_world_vertices(
         self,
-        part: PartRef | None,
+        part: RigidBodyRef | None,
         shape: str | None,
     ) -> np.ndarray:
         return np.concatenate(
@@ -1478,10 +1480,10 @@ class TestContext:
         return self._kernel_cache
 
 
-def _part_name(value: PartRef, *, field_name: str) -> str:
-    raw = value.name if isinstance(value, Part) else value
+def _part_name(value: RigidBodyRef, *, field_name: str) -> str:
+    raw = value.name if isinstance(value, RigidBody) else value
     if not isinstance(raw, str) or not raw.strip():
-        raise ValidationError(f"{field_name} must be a part name or Part")
+        raise ValidationError(f"{field_name} must be a part name or RigidBody")
     return raw.strip()
 
 
@@ -1519,7 +1521,7 @@ def _vec3(value: Sequence[float], field_name: str) -> Vec3:
     return cast(Vec3, values)
 
 
-def _geometry_selector(part: PartRef | None, shape: str | None) -> str:
+def _geometry_selector(part: RigidBodyRef | None, shape: str | None) -> str:
     if part is None:
         return "model"
     part_name = _part_name(part, field_name="part")
@@ -1555,16 +1557,17 @@ def _pose_dicts(
     return result
 
 
-def _articulation_sweep_values(articulation: Articulation, samples: int) -> list[float]:
+def _articulation_sweep_values(articulation: Joint, samples: int) -> list[float]:
     """Joint values to sample across an articulation's motion range.
 
     The first value is the rest pose. A bounded joint sweeps lower..upper; a
     continuous or unbounded joint samples a half turn (0..pi), which is enough to
     reveal a child that separates as it rotates.
     """
-    limits = articulation.motion_limits
-    if limits is not None and limits.lower is not None and limits.upper is not None:
-        low, high = float(limits.lower), float(limits.upper)
+    rotational = [dof for dof in articulation.dofs if cast(JointAxis, dof.axis).is_rotational]
+    limits = rotational[0].limits if rotational else None
+    if limits is not None:
+        low, high = float(limits[0]), float(limits[1])
     else:
         low, high = 0.0, math.pi
     if high <= low:
@@ -1573,9 +1576,9 @@ def _articulation_sweep_values(articulation: Articulation, samples: int) -> list
 
 
 def _articulation_name(value: object) -> str:
-    raw = value.name if isinstance(value, Articulation) else value
+    raw = value.name if isinstance(value, Joint) else value
     if not isinstance(raw, str) or not raw.strip():
-        raise ValidationError("pose keys must be articulation names or Articulation objects")
+        raise ValidationError("pose keys must be joint names or Joint objects")
     return raw.strip()
 
 
@@ -1673,9 +1676,11 @@ def _format_optional(value: float | None) -> str:
     return "unknown" if value is None else f"{value:.6g}"
 
 
-def _root_part_names(model: ArticulatedObject) -> list[str]:
-    part_names = {part.name for part in model.parts}
-    child_names = {item.child for item in model.articulations}
+def _root_part_names(model: RigidBodyAssembly) -> list[str]:
+    part_names = {body.name for body in model.rigid_bodies}
+    child_names = {
+        cast(RigidBody, joint.body1).name for joint in model.joints if joint.body1 is not WORLD
+    }
     return sorted(part_names - child_names)
 
 

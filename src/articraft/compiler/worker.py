@@ -16,13 +16,13 @@ from typing import Any, TypeVar
 from articraft.compiler.feedback import with_compile_report
 from articraft.compiler.result import CompilePayload, CompileResult
 from articraft.sdk import (
-    ArticulatedObject,
     FailureKind,
+    RigidBodyAssembly,
     TestContext,
     TestMetric,
     TestReport,
 )
-from articraft.sdk.export import export_object
+from articraft.sdk.export import export_assembly
 
 T = TypeVar("T", bound=Hashable)
 _COMPILE_PROGRESS_FILE = ".compile-progress.json"
@@ -49,11 +49,11 @@ class _CompileTracker:
             self.phases[name] = round(time.perf_counter() - self.phase_started, 4)
             self._write()
 
-    def set_model(self, obj: ArticulatedObject) -> None:
+    def set_model(self, obj: RigidBodyAssembly) -> None:
         self.model = {
-            "parts": len(obj.parts),
-            "shapes": sum(1 for part in obj.parts for _shape in part._iter_shapes()),
-            "articulations": len(obj.articulations),
+            "parts": len(obj.rigid_bodies),
+            "shapes": sum(1 for body in obj.rigid_bodies for _shape in body._iter_shapes()),
+            "articulations": len(obj.joints),
         }
         self._write()
 
@@ -135,12 +135,12 @@ def texture_run(run_dir: Path) -> TextureRunResult:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             globals_dict = runpy.run_path(str(workspace / "main.py"), run_name="__main__")
             object_model = globals_dict.get("object_model")
-            if not isinstance(object_model, ArticulatedObject):
+            if not isinstance(object_model, RigidBodyAssembly):
                 return TextureRunResult(
                     succeeded=False,
-                    error="main.py must define object_model as an ArticulatedObject",
+                    error="main.py must define object_model as a RigidBodyAssembly",
                 )
-            export_result = export_object(object_model, result_dir, textured=True)
+            export_result = export_assembly(object_model, result_dir, textured=True)
 
             report = export_result.textures
             if report.textured_shapes == 0:
@@ -194,8 +194,8 @@ def _compile_workspace(
             with tracker.phase("loading main.py and building the model"):
                 globals_dict = runpy.run_path(str(workspace / "main.py"), run_name="__main__")
             object_model = globals_dict.get("object_model")
-            if not isinstance(object_model, ArticulatedObject):
-                raise TypeError("main.py must define object_model as an ArticulatedObject")
+            if not isinstance(object_model, RigidBodyAssembly):
+                raise TypeError("main.py must define object_model as a RigidBodyAssembly")
             tracker.set_model(object_model)
             with tracker.phase("running authored tests"):
                 authored_report = _run_required_tests(globals_dict)
@@ -211,16 +211,16 @@ def _compile_workspace(
                 compiler_failure_names={failure.name for failure in baseline_report.failures},
             )
             with tracker.phase("exporting and validating the USDZ file"):
-                export_result = export_object(object_model, export_dir)
+                export_result = export_assembly(object_model, export_dir)
             result.manifest = str(export_result.manifest)
             result.usdz = str(export_result.usdz)
             audit = export_result.audit
             audit_metrics = (
-                TestMetric("export part count", float(audit.part_count), unit="count"),
+                TestMetric("export body count", float(audit.rigid_body_count), unit="count"),
                 TestMetric("export shape count", float(audit.shape_count), unit="count"),
                 TestMetric(
                     "export articulation count",
-                    float(audit.articulation_count),
+                    float(audit.joint_count),
                     unit="count",
                 ),
                 TestMetric("export triangle count", float(audit.triangle_count), unit="triangles"),
@@ -275,7 +275,7 @@ def _run_required_tests(globals_dict: dict[str, Any]) -> TestReport:
 
 
 def _run_baseline_tests(
-    obj: ArticulatedObject,
+    obj: RigidBodyAssembly,
     authored_report: TestReport,
     *,
     tracker: _CompileTracker,

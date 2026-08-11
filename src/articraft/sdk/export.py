@@ -1,4 +1,4 @@
-"""Publish articulated objects as validated USDZ packages."""
+"""Publish rigid body assemblies as validated USDZ packages."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from pxr import (  # pyright: ignore[reportAttributeAccessIssue]
 )
 
 from articraft.sdk import ambientcg
-from articraft.sdk._collision import MeshCollisionKernel, _rpy_matrix
+from articraft.sdk._collision import _rpy_matrix
 from articraft.sdk._mesh.core import MeshGeometry, geometry_to_trimesh
 from articraft.sdk.assembly import (
     WORLD,
@@ -38,27 +38,17 @@ from articraft.sdk.assembly import (
     ResolvedRigidBodyAssembly,
     RigidBodyAssembly,
 )
-from articraft.sdk.bodies import RigidBody
-from articraft.sdk.joints import (
-    Articulation,
-    ArticulationType,
-    MotionLimits,
-    partition_articulations,
-)
+from articraft.sdk.bodies import Geometry, RigidBody
 from articraft.sdk.mass import ResolvedMass, resolve_mass
 from articraft.sdk.materials import Material, is_library_material
-from articraft.sdk.object import ArticulatedObject, Geometry, Part
 from articraft.sdk.physics import BodyState, PhysicsScene
 from articraft.sdk.testing import DEFAULT_MESH_TOLERANCE
 
 __all__ = [
     "AssemblyExportAudit",
     "AssemblyExportResult",
-    "ExportAudit",
-    "ExportResult",
     "TextureExportReport",
     "export_assembly",
-    "export_object",
 ]
 
 
@@ -67,26 +57,6 @@ class TextureExportReport:
     requested_shapes: int = 0
     textured_shapes: int = 0
     errors: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class ExportResult:
-    root: Path
-    manifest: Path
-    usdz: Path
-    textures: TextureExportReport
-    audit: ExportAudit
-
-
-@dataclass(frozen=True)
-class ExportAudit:
-    part_count: int
-    shape_count: int
-    articulation_count: int
-    triangle_count: int
-    bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
-    meshes_with_normals: int
-    material_bindings: int
 
 
 @dataclass(frozen=True)
@@ -125,55 +95,6 @@ class _TextureResolver:
                 self.resolved[kind] = None
                 self.errors[kind] = f"{kind.name}: {type(exc).__name__}: {exc}"
         return self.resolved[kind]
-
-
-def export_object(
-    obj: ArticulatedObject,
-    output_dir: Path | str,
-    *,
-    mesh_tolerance: float = DEFAULT_MESH_TOLERANCE,
-    textured: bool = False,
-) -> ExportResult:
-    """Publish ``obj`` as a validated USDZ package.
-
-    With ``textured=True``, shapes whose material has a texture set are
-    upgraded to a tiling ambientCG PBR material with the maps embedded in the
-    package. Materials without one -- or whose maps cannot be fetched -- stay
-    parametric.
-    """
-
-    root = Path(output_dir)
-    root.mkdir(parents=True, exist_ok=True)
-    obj.validate()
-
-    usdz = _next_usdz_path(root / "usdz")
-    manifest = root / "model.json"
-    manifest_temp = manifest.with_name(f".{manifest.name}.tmp")
-    try:
-        texture_report, masses = _write_usdz(
-            obj,
-            usdz,
-            mesh_tolerance,
-            textured=textured,
-        )
-        audit = _audit_usdz(obj, usdz, mesh_tolerance)
-        payload = _object_to_payload(obj, masses) | {
-            "files": {"usdz": usdz.relative_to(root).as_posix()}
-        }
-        manifest_temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        manifest_temp.replace(manifest)
-    except BaseException:
-        usdz.unlink(missing_ok=True)
-        raise
-    finally:
-        manifest_temp.unlink(missing_ok=True)
-    return ExportResult(
-        root=root,
-        manifest=manifest,
-        usdz=usdz,
-        textures=texture_report,
-        audit=audit,
-    )
 
 
 def export_assembly(
@@ -223,61 +144,6 @@ def export_assembly(
 def _next_usdz_path(usdz_dir: Path) -> Path:
     indexes = [int(path.stem) for path in usdz_dir.glob("*.usdz") if path.stem.isdigit()]
     return usdz_dir / f"{(max(indexes) + 1) if indexes else 0:04d}.usdz"
-
-
-def _write_usdz(
-    obj: ArticulatedObject,
-    path: Path,
-    mesh_tolerance: float,
-    *,
-    textured: bool = False,
-) -> tuple[TextureExportReport, dict[str, dict[str, object]]]:
-    if mesh_tolerance <= 0.0 or not math.isfinite(mesh_tolerance):
-        raise ValueError("mesh_tolerance must be a positive finite number")
-
-    with tempfile.TemporaryDirectory(prefix="articraft-usd-") as temp_dir:
-        stage_path = Path(temp_dir) / "model.usdc"
-        stage = Usd.Stage.CreateNew(str(stage_path))
-        UsdGeom.SetStageMetersPerUnit(stage, 1.0)
-        UsdPhysics.SetStageKilogramsPerUnit(stage, 1.0)  # pyright: ignore[reportAttributeAccessIssue]
-        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
-
-        world = UsdGeom.Xform.Define(stage, "/World")
-        stage.SetDefaultPrim(world.GetPrim())
-
-        _write_scene(stage, "/World/physicsScene", obj.scene)
-
-        object_path = f"/World/{_safe_name(obj.name)}"
-        object_prim = UsdGeom.Xform.Define(stage, object_path).GetPrim()
-        UsdPhysics.ArticulationRootAPI.Apply(object_prim)
-        _attrs(object_prim, {"name": obj.name, "units": "meters"})
-
-        # Textured shapes copy their maps next to the layer (in temp_dir) so
-        # CreateNewUsdzPackage bundles them into the .usdz.
-        part_paths, texture_report, masses = _write_parts(
-            stage,
-            f"{object_path}/parts",
-            obj,
-            mesh_tolerance,
-            textured=textured,
-            asset_dir=Path(temp_dir),
-        )
-        _write_articulations(stage, f"{object_path}/joints", obj, part_paths)
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        stage.GetRootLayer().Save()
-        _validate_stage(stage)
-
-        temp_path = path.with_name(f".{path.stem}.tmp.usdz")
-        temp_path.unlink(missing_ok=True)
-        try:
-            if not UsdUtils.CreateNewUsdzPackage(str(stage_path), str(temp_path)):
-                raise RuntimeError(f"failed to create USDZ package: {path}")
-            _validate_usdz(temp_path)
-            temp_path.replace(path)
-        finally:
-            temp_path.unlink(missing_ok=True)
-    return texture_report, masses
 
 
 def _write_scene(stage: Usd.Stage, path: str, scene: PhysicsScene) -> None:
@@ -364,29 +230,6 @@ def _write_assembly_usdz(
         finally:
             temp_path.unlink(missing_ok=True)
     return texture_report, masses
-
-
-def _write_parts(
-    stage: Usd.Stage,
-    scope_path: str,
-    obj: ArticulatedObject,
-    mesh_tolerance: float,
-    *,
-    textured: bool = False,
-    asset_dir: Path | None = None,
-) -> tuple[dict[str, str], TextureExportReport, dict[str, dict[str, object]]]:
-    # Bake at the authored zero pose, drives unresolved: joint value zero must
-    # stay the baked pose so limits, sliders, and MJCF qpos0 line up.
-    transforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance)._place({})
-    return _write_body_geometry(
-        stage,
-        scope_path,
-        tuple(obj.parts),
-        transforms,
-        mesh_tolerance,
-        textured=textured,
-        asset_dir=asset_dir,
-    )
 
 
 def _write_body_geometry(
@@ -956,114 +799,6 @@ def _graph_joint_type(joint: Joint) -> str:
     return "d6"
 
 
-def _write_articulations(
-    stage: Usd.Stage,
-    scope_path: str,
-    obj: ArticulatedObject,
-    part_paths: dict[str, str],
-) -> None:
-    UsdGeom.Scope.Define(stage, scope_path)
-    safe_names = _safe_name_map(item.name for item in obj.articulations)
-    _tree, loops = partition_articulations(obj.articulations)
-    loop_names = {item.name for item in loops}
-    kernel = MeshCollisionKernel(obj, mesh_tolerance=DEFAULT_MESH_TOLERANCE)
-    rest = kernel._place({})
-    resolved = kernel._resolve_drives({})
-    for articulation in obj.articulations:
-        if articulation.drive is None:
-            continue
-        value = resolved.get(articulation.name, 0.0)
-        if abs(value) > 1e-3:
-            raise ValueError(
-                f"driven articulation {articulation.name!r} solves to {value:.4f} at the "
-                "rest pose; zero must be the assembled pose, so fold the rest angle into "
-                "the joint origin's rpy or the rest gap into the drive's rest_length"
-            )
-    for articulation in obj.articulations:
-        schema = _articulation_schema(
-            stage, f"{scope_path}/{safe_names[articulation.name]}", articulation
-        )
-        schema.CreateBody0Rel().SetTargets([part_paths[articulation.parent]])
-        schema.CreateBody1Rel().SetTargets([part_paths[articulation.child]])
-        if articulation.name in loop_names:
-            # USD articulations are trees, but a regular joint outside the
-            # articulation may close a loop. The solver still enforces it.
-            schema.CreateExcludeFromArticulationAttr(True)
-            # A tree child's frame sits on its joint, so localPos1 = 0 there.
-            # A loop child's frame belongs to its tree parent, so the pin must
-            # be located in that frame explicitly or engines snap the child's
-            # origin onto the pin.
-            axis_rot = _axis_matrix(articulation.axis)
-            local0 = axis_rot * _gf_matrix(_rpy_matrix(articulation.origin.rpy))
-            frame0 = local0 * Gf.Matrix4d(1.0).SetTranslateOnly(Gf.Vec3d(*articulation.origin.xyz))
-            world = frame0 * _gf_matrix(rest[articulation.parent])
-            frame1 = world * _gf_matrix(np.linalg.inv(rest[articulation.child]))
-            schema.CreateLocalPos1Attr(Gf.Vec3f(frame1.ExtractTranslation()))
-            schema.CreateLocalRot1Attr(_quat(frame1))
-        _articulation_attrs(schema.GetPrim(), articulation)
-
-
-def _articulation_schema(stage: Usd.Stage, path: str, articulation: Articulation):
-    if articulation.articulation_type == ArticulationType.FIXED:
-        schema = UsdPhysics.FixedJoint.Define(stage, path)
-        _set_articulation_frames(schema, articulation)
-        return schema
-
-    schema_type = (
-        UsdPhysics.PrismaticJoint
-        if articulation.articulation_type == ArticulationType.PRISMATIC
-        else UsdPhysics.RevoluteJoint
-    )
-    schema = schema_type.Define(stage, path)
-    schema.CreateAxisAttr("X")
-    _set_articulation_frames(schema, articulation, rotate_axis=True)
-    limits = articulation.motion_limits
-    if limits is not None and limits.lower is not None and limits.upper is not None:
-        lower, upper = limits.lower, limits.upper
-        if articulation.articulation_type == ArticulationType.REVOLUTE:
-            lower, upper = math.degrees(lower), math.degrees(upper)
-        schema.CreateLowerLimitAttr(lower)
-        schema.CreateUpperLimitAttr(upper)
-    return schema
-
-
-def _set_articulation_frames(
-    schema,
-    articulation: Articulation,
-    *,
-    rotate_axis: bool = False,
-) -> None:
-    axis = _axis_matrix(articulation.axis) if rotate_axis else Gf.Matrix4d(1.0)
-    # Gf uses row-vector composition while the SDK uses column vectors.
-    frame = axis * _gf_matrix(_rpy_matrix(articulation.origin.rpy))
-    schema.CreateLocalPos0Attr(Gf.Vec3f(*articulation.origin.xyz))
-    schema.CreateLocalRot0Attr(_quat(frame))
-    schema.CreateLocalPos1Attr(Gf.Vec3f(0.0, 0.0, 0.0))
-    schema.CreateLocalRot1Attr(_quat(axis))
-
-
-def _articulation_attrs(prim: Usd.Prim, articulation: Articulation) -> None:
-    values: dict[str, object] = {
-        "name": articulation.name,
-        "articulationType": cast(ArticulationType, articulation.articulation_type).value,
-        "parent": articulation.parent,
-        "child": articulation.child,
-        "axis": Gf.Vec3d(*articulation.axis),
-        "driven": "true" if articulation.drive is not None else "false",
-        "origin:xyz": Gf.Vec3d(*articulation.origin.xyz),
-        "origin:rpy": Gf.Vec3d(*articulation.origin.rpy),
-    }
-    limits = articulation.motion_limits
-    if limits is not None:
-        values |= {
-            "limits:effort": limits.effort,
-            "limits:velocity": limits.velocity,
-        }
-        if limits.lower is not None and limits.upper is not None:
-            values |= {"limits:lower": limits.lower, "limits:upper": limits.upper}
-    _attrs(prim, values)
-
-
 def _attrs(prim: Usd.Prim, values: dict[str, object]) -> None:
     types = {
         str: Sdf.ValueTypeNames.String,
@@ -1118,56 +853,7 @@ def _normal_data(mesh, crease_angle: float) -> tuple[np.ndarray, str]:
     return corner_normals.reshape((-1, 3)).astype(np.float32), UsdGeom.Tokens.faceVarying
 
 
-def _object_to_payload(
-    obj: ArticulatedObject, masses: dict[str, dict[str, object]] | None = None
-) -> dict[str, object]:
-    masses = masses or {}
-    loop_names = {loop.name for loop in partition_articulations(obj.articulations)[1]}
-    return {
-        "name": obj.name,
-        "units": "meters",
-        "meters_per_unit": 1.0,
-        "up_axis": "Z",
-        "scene": {
-            "gravity_direction": list(obj.scene.direction),
-            "gravity_magnitude": obj.scene.magnitude,
-        },
-        "parts": [
-            {
-                "name": part.name,
-                "mass": masses.get(part.name),
-                "body_state": _body_state_payload(part),
-                "shapes": [
-                    {
-                        "name": shape.name,
-                        "geometry_type": type(shape.geometry).__name__,
-                        "color": shape.color,
-                        "material": _material_payload(shape.material),
-                        "coating": _material_payload(shape.coating),
-                    }
-                    for shape in part._iter_shapes()
-                ],
-            }
-            for part in obj.parts
-        ],
-        "articulations": [
-            {
-                "name": item.name,
-                "type": cast(ArticulationType, item.articulation_type).value,
-                "parent": item.parent,
-                "child": item.child,
-                "origin": {"xyz": item.origin.xyz, "rpy": item.origin.rpy},
-                "axis": item.axis,
-                "motion_limits": _limits(item.motion_limits),
-                "closes_loop": item.name in loop_names,
-                "driven": item.drive is not None,
-            }
-            for item in obj.articulations
-        ],
-    }
-
-
-def _body_state_payload(body: Part | RigidBody) -> dict[str, object]:
+def _body_state_payload(body: RigidBody) -> dict[str, object]:
     """The manifest view of how a part starts. Angles stay in radians here."""
 
     state = body.body_state
@@ -1288,31 +974,6 @@ def _material_payload(material: Material | None) -> dict[str, object] | None:
     }
 
 
-def _limits(limits: MotionLimits | None) -> dict[str, float | None] | None:
-    if limits is None:
-        return None
-    return {
-        "effort": limits.effort,
-        "velocity": limits.velocity,
-        "lower": limits.lower,
-        "upper": limits.upper,
-    }
-
-
-def _axis_matrix(axis: tuple[float, float, float]) -> Gf.Matrix4d:
-    length = math.hypot(*axis)
-    if length <= 0.0:
-        raise ValueError("articulation axis must be non-zero")
-    matrix = Gf.Matrix4d(1.0)
-    matrix.SetRotate(
-        Gf.Rotation(
-            Gf.Vec3d(1.0, 0.0, 0.0),
-            Gf.Vec3d(*(float(value) / length for value in axis)),
-        )
-    )
-    return matrix
-
-
 def _quat(matrix: Gf.Matrix4d) -> Gf.Quatf:
     return Gf.Quatf(matrix.ExtractRotationQuat())
 
@@ -1369,184 +1030,6 @@ def _validate_usdz(path: Path) -> None:
         raise RuntimeError(
             "OpenUSD USDZ validation failed: " + "; ".join(str(error) for error in errors)
         )
-
-
-def _audit_usdz(
-    obj: ArticulatedObject,
-    path: Path,
-    mesh_tolerance: float,
-) -> ExportAudit:
-    stage = Usd.Stage.Open(str(path))
-    if stage is None:
-        raise RuntimeError("OpenUSD could not reopen the generated USDZ package for audit")
-
-    expected_parts = {part.name for part in obj.parts}
-    expected_shapes = {
-        (part.name, shape.name) for part in obj.parts for shape in part._iter_shapes()
-    }
-    expected_joints = {joint.name: joint for joint in obj.articulations}
-    found_parts: set[str] = set()
-    found_shapes: set[tuple[str, str]] = set()
-    found_joints: dict[str, Usd.Prim] = {}
-    physics_scenes = 0
-    exported_points: list[np.ndarray] = []
-    triangle_count = 0
-    normal_meshes = 0
-    material_bindings = 0
-    source_meshes: dict[tuple[str, str], trimesh.Trimesh] = {}
-    xforms = MeshCollisionKernel(obj, mesh_tolerance=mesh_tolerance)._place({})
-    source_points: list[np.ndarray] = []
-
-    for part in obj.parts:
-        for shape in part._iter_shapes():
-            mesh = geometry_to_trimesh(shape.geometry, mesh_tolerance).copy()
-            mesh.apply_transform(xforms[part.name])
-            source_meshes[(part.name, shape.name)] = mesh
-            source_points.append(np.asarray(mesh.vertices, dtype=np.float64))
-
-    cache = UsdGeom.XformCache(  # pyright: ignore[reportAttributeAccessIssue]
-        Usd.TimeCode.Default()  # pyright: ignore[reportAttributeAccessIssue]
-    )
-    for prim in stage.Traverse():
-        path_text = str(prim.GetPath())
-        authored_name = _custom_string(prim, "name")
-        if "/parts/" in path_text and "/shapes/" not in path_text and authored_name:
-            found_parts.add(authored_name)
-        if "/joints/" in path_text and authored_name:
-            found_joints[authored_name] = prim
-        if prim.IsA(UsdPhysics.Scene):
-            physics_scenes += 1
-        if not prim.IsA(UsdGeom.Mesh):
-            continue
-        mesh = UsdGeom.Mesh(prim)  # pyright: ignore[reportCallIssue]
-        shape_name = authored_name
-        part_prim = prim.GetParent().GetParent()
-        part_name = _custom_string(part_prim, "name")
-        if not part_name or not shape_name:
-            raise RuntimeError(f"USDZ audit found an unnamed mesh at {prim.GetPath()}")
-        selector = (part_name, shape_name)
-        found_shapes.add(selector)
-        points = mesh.GetPointsAttr().Get()
-        faces = mesh.GetFaceVertexIndicesAttr().Get()
-        if points is None or faces is None:
-            raise RuntimeError(f"USDZ audit found an empty mesh at {prim.GetPath()}")
-        triangle_count += len(faces) // 3
-        matrix = cache.GetLocalToWorldTransform(prim)
-        exported_points.append(
-            np.asarray(
-                [
-                    tuple(
-                        matrix.Transform(
-                            Gf.Vec3d(float(point[0]), float(point[1]), float(point[2]))
-                        )
-                    )
-                    for point in points
-                ],
-                dtype=np.float64,
-            )
-        )
-        normals = mesh.GetNormalsAttr().Get()
-        if normals is None or len(normals) == 0:
-            raise RuntimeError(f"USDZ audit found a mesh without normals at {prim.GetPath()}")
-        normal_meshes += 1
-        orientation = mesh.GetOrientationAttr().Get()
-        if orientation != UsdGeom.Tokens.rightHanded:
-            raise RuntimeError(f"USDZ audit found non-right-handed winding at {prim.GetPath()}")
-        # Purpose-scoped: a physics material also binds here, and it is not an
-        # appearance, so counting it would make every collider look textured.
-        if UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel("").GetTargets():
-            material_bindings += 1
-        source = source_meshes.get(selector)
-        if source is None:
-            raise RuntimeError(f"USDZ audit found an unexpected mesh {selector!r}")
-        if len(source.faces) != len(faces) // 3:
-            raise RuntimeError(
-                f"USDZ audit triangle mismatch for {selector!r}: "
-                f"source={len(source.faces)} package={len(faces) // 3}"
-            )
-        source_sign = math.copysign(1.0, _signed_volume(source))
-        exported_mesh = trimesh.Trimesh(
-            vertices=np.asarray([tuple(point) for point in points], dtype=np.float64),
-            faces=np.asarray(faces, dtype=np.int64).reshape((-1, 3)),
-            process=False,
-        )
-        exported_sign = math.copysign(1.0, _signed_volume(exported_mesh))
-        if source.is_watertight and source_sign != exported_sign:
-            raise RuntimeError(f"USDZ audit winding changed for {selector!r}")
-
-    # Bodies carry no simulation owner, so a second scene would leave which one
-    # governs them up to the reader.
-    if physics_scenes != 1:
-        raise RuntimeError(f"USDZ audit expected exactly one physics scene, found {physics_scenes}")
-    if found_parts != expected_parts:
-        raise RuntimeError(
-            f"USDZ audit part mismatch: expected={sorted(expected_parts)!r} "
-            f"found={sorted(found_parts)!r}"
-        )
-    if found_shapes != expected_shapes:
-        raise RuntimeError(
-            f"USDZ audit shape mismatch: expected={sorted(expected_shapes)!r} "
-            f"found={sorted(found_shapes)!r}"
-        )
-    if set(found_joints) != set(expected_joints):
-        raise RuntimeError(
-            f"USDZ audit articulation mismatch: expected={sorted(expected_joints)!r} "
-            f"found={sorted(found_joints)!r}"
-        )
-    loop_names = {loop.name for loop in partition_articulations(obj.articulations)[1]}
-    for name, joint in expected_joints.items():
-        prim = found_joints[name]
-        excluded_attr = prim.GetAttribute("physics:excludeFromArticulation")
-        excluded = bool(excluded_attr.Get()) if excluded_attr else False
-        if excluded != (name in loop_names):
-            raise RuntimeError(f"USDZ audit loop exclusion mismatch for {name!r}")
-        if (
-            _custom_string(prim, "articulationType")
-            != cast(ArticulationType, joint.articulation_type).value
-        ):
-            raise RuntimeError(f"USDZ audit joint type mismatch for {name!r}")
-        if _custom_string(prim, "parent") != joint.parent:
-            raise RuntimeError(f"USDZ audit joint parent mismatch for {name!r}")
-        if _custom_string(prim, "child") != joint.child:
-            raise RuntimeError(f"USDZ audit joint child mismatch for {name!r}")
-        _expect_vector_attr(prim, "axis", joint.axis, joint_name=name)
-        _expect_vector_attr(prim, "origin:xyz", joint.origin.xyz, joint_name=name)
-        _expect_vector_attr(prim, "origin:rpy", joint.origin.rpy, joint_name=name)
-        limits = joint.motion_limits
-        if limits is not None:
-            _expect_number_attr(prim, "limits:effort", limits.effort, joint_name=name)
-            _expect_number_attr(prim, "limits:velocity", limits.velocity, joint_name=name)
-            if limits.lower is not None:
-                _expect_number_attr(prim, "limits:lower", limits.lower, joint_name=name)
-            if limits.upper is not None:
-                _expect_number_attr(prim, "limits:upper", limits.upper, joint_name=name)
-
-    # Material drives the bound UsdPreviewSurface, and a material supplies one
-    # when nothing overrides it, so count what the shape will actually look like.
-    expected_materials = sum(
-        shape.display_material is not None for part in obj.parts for shape in part._iter_shapes()
-    )
-    if material_bindings != expected_materials:
-        raise RuntimeError(
-            f"USDZ audit material binding mismatch: "
-            f"expected={expected_materials} found={material_bindings}"
-        )
-    source_bounds = _point_bounds(np.concatenate(source_points, axis=0))
-    package_bounds = _point_bounds(np.concatenate(exported_points, axis=0))
-    tolerance = max(mesh_tolerance * 2.0, 1e-6)
-    if not np.allclose(source_bounds, package_bounds, rtol=1e-6, atol=tolerance):
-        raise RuntimeError(
-            f"USDZ audit bounds mismatch: source={source_bounds!r} package={package_bounds!r}"
-        )
-    return ExportAudit(
-        part_count=len(found_parts),
-        shape_count=len(found_shapes),
-        articulation_count=len(found_joints),
-        triangle_count=triangle_count,
-        bounds=package_bounds,
-        meshes_with_normals=normal_meshes,
-        material_bindings=material_bindings,
-    )
 
 
 def _audit_assembly_usdz(
