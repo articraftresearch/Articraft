@@ -8,14 +8,14 @@ import pytest
 from build123d import Box
 from pxr import Kind, Usd, UsdPhysics
 
-from mini_articraft.sdk.assembly import (
+from articraft.sdk.assembly import (
     WORLD,
     JointAxis,
     JointDOF,
     JointFrame,
     RigidBodyAssembly,
 )
-from mini_articraft.sdk.export import export_assembly
+from articraft.sdk.export import export_assembly
 
 
 def body(assembly: RigidBodyAssembly, name: str):
@@ -85,7 +85,7 @@ def test_closed_loop_exports_every_joint_and_excludes_only_closures(
     assert not root.HasAPI(UsdPhysics.ArticulationRootAPI)
     assert ground.HasAPI(UsdPhysics.ArticulationRootAPI)
     excluded = {
-        joint.GetAttribute("mini_articraft:name").Get(): bool(
+        joint.GetAttribute("articraft:name").Get(): bool(
             UsdPhysics.Joint(joint).GetExcludeFromArticulationAttr().Get()
         )
         for joint in joints.GetChildren()
