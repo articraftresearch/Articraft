@@ -14,6 +14,7 @@ from articraft.sdk.bodies import RigidBody, RigidBodyRef
 from articraft.sdk.errors import ValidationError
 from articraft.sdk.joints import _as_name
 from articraft.sdk.mass import MassProperties
+from articraft.sdk.physics import PhysicsScene
 
 Vec3: TypeAlias = tuple[float, float, float]
 Mat4: TypeAlias = np.ndarray
@@ -234,6 +235,7 @@ class ResolvedRigidBodyAssembly:
     articulations: tuple[ResolvedArticulation, ...]
     reference_state: PhysicsState
     has_closed_loops: bool
+    scene: PhysicsScene
 
     def get_rigid_body(self, body: RigidBodyRef) -> RigidBody:
         name = _body_name(body, field_name="rigid body")
@@ -381,12 +383,15 @@ class RigidBodyAssembly:
     """A connected graph of USD rigid bodies, joints, and solver articulations."""
 
     name: str
+    scene: PhysicsScene = field(default=PhysicsScene(), kw_only=True)
     rigid_bodies: list[RigidBody] = field(default_factory=list, init=False)
     joints: list[Joint] = field(default_factory=list, init=False)
     articulations: list[Articulation] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         self.name = _as_name(self.name, field_name="assembly name")
+        if not isinstance(self.scene, PhysicsScene):
+            raise ValidationError(f"assembly {self.name!r} scene must be a PhysicsScene")
 
     @property
     def meters_per_unit(self) -> float:
@@ -498,6 +503,7 @@ class RigidBodyAssembly:
             articulations=resolved_articulations,
             reference_state=PhysicsState(transforms),
             has_closed_loops=has_closed_loops,
+            scene=self.scene,
         )
         reference = unresolved.validate_state(unresolved.reference_state)
         return ResolvedRigidBodyAssembly(
@@ -507,6 +513,7 @@ class RigidBodyAssembly:
             articulations=unresolved.articulations,
             reference_state=reference,
             has_closed_loops=unresolved.has_closed_loops,
+            scene=unresolved.scene,
         )
 
     def physics_state(

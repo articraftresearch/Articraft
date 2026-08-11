@@ -11,6 +11,7 @@ from articraft.sdk.errors import ValidationError
 from articraft.sdk.joints import _as_name
 from articraft.sdk.mass import MassProperties
 from articraft.sdk.materials import Color, Material, _as_color, _as_material
+from articraft.sdk.physics import BodyState
 
 Geometry: TypeAlias = Shape | MeshGeometry
 
@@ -51,13 +52,19 @@ class RigidBody:
     name: str
     _shapes: dict[str, _ShapeData] = field(default_factory=dict, init=False, repr=False)
     mass_properties: MassProperties | None = field(default=None, kw_only=True)
+    body_state: BodyState = field(default=BodyState(), kw_only=True)
 
     def __post_init__(self) -> None:
         self.name = _as_name(self.name, field_name="rigid body name")
+        self._validate_physics()
+
+    def _validate_physics(self) -> None:
         if self.mass_properties is not None and not isinstance(
             self.mass_properties, MassProperties
         ):
             raise ValidationError(f"rigid body {self.name!r} mass must be MassProperties")
+        if not isinstance(self.body_state, BodyState):
+            raise ValidationError(f"rigid body {self.name!r} body_state must be BodyState")
 
     def add(
         self,
@@ -118,10 +125,7 @@ class RigidBody:
 
     def validate(self) -> None:
         self.name = _as_name(self.name, field_name="rigid body name")
-        if self.mass_properties is not None and not isinstance(
-            self.mass_properties, MassProperties
-        ):
-            raise ValidationError(f"rigid body {self.name!r} mass must be MassProperties")
+        self._validate_physics()
         if not self._shapes:
             raise ValidationError(f"rigid body {self.name!r} must contain at least one shape")
         for name, entry in self._shapes.items():
