@@ -320,6 +320,13 @@ posed. A `drive` reads a point on a part the joint does not move.
 A hydraulic ram uses both: the barrel aims at the far eye and the rod spans to
 it.
 
+Reach for a drive only when the mechanism *changes length*. A fixed length link
+-- a pitman arm, a pull rod, a drag brace, a hood hinge link -- is one rigid
+part pinned at both ends, and no formula gives its angle: it needs a loop
+closure, and its follower angles are then solved for you. `AimAt` on such a link
+points it at the anchor and leaves it hanging there, which `compile` reports as
+a link that never attaches. See `docs/sdk/examples/four_bar_linkage.py`.
+
 ```python
 model.articulation(
     "boom_ram_pivot",

@@ -25,12 +25,21 @@ from articraft.sdk._collision import (
 from articraft.sdk._mesh.core import geometry_to_trimesh
 from articraft.sdk._mesh.health import MeshHealthIssue, analyze_mesh_health
 from articraft.sdk.errors import ValidationError
-from articraft.sdk.joints import Articulation, ArticulationType, partition_articulations
+from articraft.sdk.joints import (
+    AimAt,
+    Articulation,
+    ArticulationType,
+    partition_articulations,
+)
 from articraft.sdk.mass import resolve_mass
 from articraft.sdk.materials import LIBRARY
 from articraft.sdk.object import ArticulatedObject, Part, PartRef
 
 DEFAULT_MESH_TOLERANCE = 0.001
+# How far the gap between an aimed part and its anchor may wander before the two
+# are clearly not pinned together. A real pin holds it fixed; mesh tessellation
+# moves it by a hair.
+_AIM_REACH_TOLERANCE = 0.005
 DEFAULT_CONTACT_TOLERANCE = 1e-6
 DEFAULT_OVERLAP_TOLERANCE = 0.005
 DEFAULT_OVERLAP_VOLUME_TOLERANCE = 5e-7
@@ -1153,6 +1162,144 @@ class TestContext:
         name: str | None = None,
     ) -> bool:
         return self._check_disconnected_geometry(contact_tol=contact_tol, name=name, warn=True)
+
+    def fail_if_aimed_link_never_reaches(
+        self,
+        *,
+        samples: int = 5,
+        name: str | None = None,
+    ) -> bool:
+        """Fail if a joint aims a part at an anchor the part never reaches.
+
+        ``AimAt`` points a part at an anchor; it does not attach it. That is the
+        right tool for the barrel of a ram, whose rod extends the rest of the
+        way. It is the wrong tool for a fixed length link -- a pitman arm, a
+        pull rod, a drag brace -- which is one rigid part pinned at both ends
+        and needs a loop closure instead.
+
+        The failure is silent without this check: the link swings, points the
+        right way, and hangs in space with its far eye nowhere near its pin,
+        while every other check passes. So for each aimed joint, this asks
+        whether the child can physically reach the anchor it is aiming at.
+        """
+
+        samples = max(2, int(samples))
+        check_name = name or "fail_if_aimed_link_never_reaches()"
+        aimed = [
+            item
+            for item in self.model.articulations
+            if isinstance(item.drive, AimAt) and item.drive.part in self._part_names()
+        ]
+        if not aimed:
+            return self._record(check_name, True, "")
+
+        kernel = self._kernel()
+        findings: list[str] = []
+        for articulation in aimed:
+            drive = articulation.drive
+            assert isinstance(drive, AimAt)
+            # A ram aims its barrel but reaches with its rod, so the whole
+            # driven assembly counts: the aimed part plus everything a drive
+            # extends from it.
+            # A ram aims its barrel but reaches with its rod, so the whole
+            # driven assembly counts: the aimed part plus everything a drive
+            # extends from it. Each is tracked separately, because it only
+            # takes one of them to be pinned for the assembly to be attached.
+            tracked: dict[str, list[float]] = {
+                name: [] for name in self._driven_extent(articulation.child)
+            }
+            for pose in self._aim_probe_poses(articulation, samples):
+                transforms = kernel.world_transforms(pose)
+                target = transforms.get(drive.part)
+                if target is None:
+                    continue
+                anchor = target[:3, :3] @ np.asarray(drive.point, dtype=float) + target[:3, 3]
+                for part_name in tracked:
+                    if part_name not in transforms:
+                        continue
+                    vertices = kernel.part_world_vertices(part_name, pose)
+                    tracked[part_name].append(
+                        float(np.linalg.norm(vertices - anchor, axis=1).min())
+                    )
+            drifts = [max(values) - min(values) for values in tracked.values() if len(values) > 1]
+            if not drifts:
+                continue
+            gaps = [min(drifts)]
+            # Distance alone says nothing: a rod eye ring sits a bore radius away
+            # from the pin it holds. What separates a pinned link from one that
+            # merely points is whether that distance *stays put* as the mechanism
+            # moves. A pin holds it constant; an aim lets it wander.
+            drift = gaps[0]
+            if drift > _AIM_REACH_TOLERANCE:
+                findings.append(
+                    f"{articulation.name!r} aims {articulation.child!r} at {drive.part!r} but "
+                    f"never attaches: the gap between them wanders by {drift * 1000:.0f} mm as "
+                    f"{drive.part!r} moves. AimAt points a part at an anchor, it does not pin "
+                    f"it there. A fixed length link needs a loop closure: declare a second "
+                    f"articulation pinning {articulation.child!r} to {drive.part!r}."
+                )
+        return self._record(check_name, not findings, "; ".join(findings))
+
+    def _driven_extent(self, part: str) -> set[str]:
+        """A part and everything a drive extends from it.
+
+        A hydraulic ram is two parts: the barrel aims, the rod reaches. Asking
+        whether the barrel alone touches its anchor would condemn every correct
+        ram, so the rod it drives out counts as part of the same reach.
+        """
+
+        reached = {part}
+        frontier = [part]
+        while frontier:
+            current = frontier.pop()
+            for articulation in self.model.articulations:
+                if (
+                    articulation.parent == current
+                    and articulation.drive is not None
+                    and articulation.child not in reached
+                ):
+                    reached.add(articulation.child)
+                    frontier.append(articulation.child)
+        return reached
+
+    def _part_names(self) -> set[str]:
+        return {part.name for part in self.model.parts}
+
+    def _aim_probe_poses(self, articulation: Articulation, samples: int) -> list[dict[str, float]]:
+        """Poses that move the anchor around, so a fixed gap cannot hide.
+
+        The anchor rides another part, so the joints that place *that* part are
+        what must be swept -- the aimed joint itself is driven and follows.
+        """
+
+        tree, _loops = partition_articulations(self.model.articulations)
+        parent_of = {item.child: item for item in tree}
+        walked: list[Articulation] = []
+        part = articulation.drive.part if articulation.drive is not None else None
+        while part in parent_of:
+            walked.append(parent_of[part])
+            part = parent_of[part].parent
+        movable = [
+            item
+            for item in walked
+            if item.drive is None
+            and item.articulation_type != ArticulationType.FIXED
+            and item.motion_limits is not None
+            and item.motion_limits.lower is not None
+            and item.motion_limits.upper is not None
+        ]
+        if not movable:
+            return [dict(self._pose)]
+        poses: list[dict[str, float]] = []
+        for index in range(samples):
+            blend = index / (samples - 1)
+            pose = dict(self._pose)
+            for item in movable:
+                limits = item.motion_limits
+                assert limits is not None and limits.lower is not None and limits.upper is not None
+                pose[item.name] = limits.lower + (limits.upper - limits.lower) * blend
+            poses.append(pose)
+        return poses
 
     def fail_if_articulation_separates_child(
         self,

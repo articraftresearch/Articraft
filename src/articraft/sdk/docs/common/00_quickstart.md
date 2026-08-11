@@ -83,6 +83,8 @@ Read only the executable example closest to the current task:
 - Mixed build123d and mesh assembly: `docs/sdk/examples/mixed_articulated_assembly.py`.
 - Closed loop linkage (a hydraulic ram) posed through drives:
   `docs/sdk/examples/hydraulic_ram_loop.py`.
+- Fixed length link pinned at both ends (a four bar):
+  `docs/sdk/examples/four_bar_linkage.py`.
 - Molding a handle/protrusion into a body (no mounting pads):
   `docs/sdk/examples/molded_mug.py`.
 - Mass properties from materials and geometry:
