@@ -74,3 +74,45 @@ def test_separation_check_ignores_prismatic_liftoff() -> None:
     ctx = TestContext(model)
     ctx.fail_if_articulation_separates_child()
     assert ctx.report().passed
+
+
+def test_a_loop_closing_joint_is_left_out_of_the_separation_sweep() -> None:
+    """The ring's own joint never places its child, so sweeping it proves nothing.
+
+    #116 made this skip driven joints for the same reason. Drives are gone, but a
+    loop closer has the identical problem: its value is decided by the rest of
+    the mechanism, and the check would read a legitimate linkage motion as the
+    child coming loose.
+    """
+
+    model = RigidBodyAssembly("bail")
+    body = model.rigid_body("body")
+    body.add(BoxGeometry((0.10, 0.10, 0.10)), name="shell")
+    handle = model.rigid_body("handle")
+    handle.add(BoxGeometry((0.12, 0.01, 0.01)).translate(0.0, 0.0, 0.05), name="bail")
+    swing = (JointDOF(JointAxis.ROT_X, limits=(-1.0, 1.0)),)
+    model.joint(
+        "left_pivot",
+        body0=body,
+        frame0=JointFrame(xyz=(-0.05, 0.0, 0.05)),
+        body1=handle,
+        frame1=JointFrame(xyz=(-0.05, 0.0, 0.05)),
+        dofs=swing,
+    )
+    model.joint(
+        "right_pivot",
+        body0=body,
+        frame0=JointFrame(xyz=(0.05, 0.0, 0.05)),
+        body1=handle,
+        frame1=JointFrame(xyz=(0.05, 0.0, 0.05)),
+        dofs=swing,
+    )
+    model.articulation("main", root=body, joints=["left_pivot"])
+
+    ctx = TestContext(model)
+    ctx.fail_if_articulation_separates_child()
+    report = ctx.report()
+
+    assert report.passed
+    # Only the tree pivot was swept; the closer was skipped rather than failed.
+    assert report.checks_run == 1
