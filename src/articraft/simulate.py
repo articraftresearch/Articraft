@@ -508,14 +508,26 @@ def write_mjcf(usdz: Path, out_dir: Path) -> Path:
     return path
 
 
+def _bodies_scope(prim: Usd.Prim) -> Usd.Prim | None:
+    """The scope holding an object's rigid bodies, under either schema.
+
+    A v1 stage calls it ``parts``; a rigid-body graph calls it
+    ``rigid_bodies``. Both hold one prim per body, which is all a reader needs.
+    """
+
+    return prim.GetChild("rigid_bodies") or prim.GetChild("parts") or None
+
+
 def _read_scene(stage: Usd.Stage) -> _Scene:
     world = stage.GetDefaultPrim()
-    objects = [prim for prim in world.GetChildren() if prim.GetChild("parts")]
+    objects = [prim for prim in world.GetChildren() if _bodies_scope(prim)]
     if len(objects) != 1:
         raise ValueError("expected one articulated object on the stage")
     obj = objects[0]
 
-    scene = _Scene(parts={prim.GetName(): prim for prim in obj.GetChild("parts").GetChildren()})
+    bodies = _bodies_scope(obj)
+    assert bodies is not None
+    scene = _Scene(parts={prim.GetName(): prim for prim in bodies.GetChildren()})
     joints_scope = obj.GetChild("joints")
     for prim in joints_scope.GetChildren() if joints_scope else []:
         kind = _JOINT_TYPES.get(str(prim.GetTypeName()))
