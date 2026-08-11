@@ -123,6 +123,8 @@ _AXIS_VECTORS = {
 
 def _read_joint(joint: Usd.Prim) -> dict[str, object]:
     joint_type = _attribute(joint, "jointType", "fixed")
+    if not joint.GetAttribute("articraft:jointType"):
+        return _read_legacy_joint(joint)
     dofs = json.loads(str(_attribute(joint, "dofs", "[]")))
     # Only a single axis moves in the viewer; a d6 joint previews as fixed.
     dof = dofs[0] if joint_type in ("revolute", "prismatic") and dofs else None
@@ -146,6 +148,37 @@ def _read_joint(joint: Usd.Prim) -> dict[str, object]:
         # the viewer must not reparent or pose along it.
         "closes_loop": bool(_usd_attribute(joint, "physics:excludeFromArticulation", False)),
         "driven": False,
+    }
+
+
+def _read_legacy_joint(joint: Usd.Prim) -> dict[str, object]:
+    """A joint written before the graph model.
+
+    Runs already on disk cannot be regenerated, so the viewer keeps reading them.
+    Their metadata names the joint kind and a single parent-side origin outright.
+    """
+
+    joint_type = _attribute(joint, "articulationType", "fixed")
+    limits = None
+    if joint_type != "fixed":
+        limits = {
+            "lower": _attribute(joint, "limits:lower"),
+            "upper": _attribute(joint, "limits:upper"),
+        }
+    return {
+        "name": _attribute(joint, "name", joint.GetName()),
+        "type": joint_type,
+        "parent": _attribute(joint, "parent"),
+        "child": _attribute(joint, "child"),
+        "origin": {
+            "xyz": _attribute(joint, "origin:xyz", [0.0, 0.0, 0.0]),
+            "rpy": _attribute(joint, "origin:rpy", [0.0, 0.0, 0.0]),
+        },
+        "child_origin": {"xyz": [0.0, 0.0, 0.0], "rpy": [0.0, 0.0, 0.0]},
+        "axis": _attribute(joint, "axis", [0.0, 0.0, 1.0]),
+        "motion_limits": limits,
+        "closes_loop": bool(_usd_attribute(joint, "physics:excludeFromArticulation", False)),
+        "driven": _attribute(joint, "driven", "false") == "true",
     }
 
 
