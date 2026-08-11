@@ -308,3 +308,35 @@ def test_simulate_reads_a_rigid_body_graph_stage(tmp_path) -> None:
 
     assert set(simulated.bodies) == {"base", "lid"}
     assert not simulated.fell_through_floor
+
+
+def test_a_multi_dof_joint_becomes_one_mjcf_joint_per_free_axis(tmp_path) -> None:
+    """MuJoCo has no six-axis joint; sibling joints compose to the same motion."""
+
+    from articraft.sdk.assembly import JointAxis, JointDOF, JointFrame, RigidBodyAssembly
+    from articraft.sdk.export import export_assembly
+
+    assembly = RigidBodyAssembly("ball")
+    post = assembly.rigid_body("post")
+    post.add(BoxGeometry((0.06, 0.06, 0.06)), name="stem", material=Material.STEEL)
+    head = assembly.rigid_body("head")
+    head.add(BoxGeometry((0.06, 0.06, 0.06)), name="plate", material=Material.STEEL)
+    assembly.joint(
+        "socket",
+        body0=post,
+        frame0=JointFrame(xyz=(0.0, 0.0, 0.06)),
+        body1=head,
+        frame1=JointFrame(),
+        dofs=tuple(
+            JointDOF(axis, limits=(-0.6, 0.6))
+            for axis in (JointAxis.ROT_X, JointAxis.ROT_Y, JointAxis.ROT_Z)
+        ),
+    )
+    assembly.articulation("main", root=post, joints=["socket"])
+
+    result = export_assembly(assembly, tmp_path / "out")
+    model = write_mjcf(result.usdz, tmp_path / "work")
+    text = model.read_text()
+
+    assert text.count('type="hinge"') == 3
+    assert 'name="socket"' in text and 'name="socket_2"' in text and 'name="socket_3"' in text

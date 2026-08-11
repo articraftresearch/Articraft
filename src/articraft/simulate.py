@@ -195,6 +195,8 @@ class _Joint:
     excluded: bool = False
     """Marked ``physics:excludeFromArticulation``: a loop closing constraint."""
     parent_anchor: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    extra_axes: tuple[tuple[str, tuple[float, float, float], float | None, float | None], ...] = ()
+    """Further free axes on a D6 joint, as (kind, axis, lower, upper)."""
 
 
 @dataclass
@@ -518,6 +520,40 @@ def _bodies_scope(prim: Usd.Prim) -> Usd.Prim | None:
     return prim.GetChild("rigid_bodies") or prim.GetChild("parts") or None
 
 
+_D6_AXES = {
+    "transX": ("slide", (1.0, 0.0, 0.0)),
+    "transY": ("slide", (0.0, 1.0, 0.0)),
+    "transZ": ("slide", (0.0, 0.0, 1.0)),
+    "rotX": ("hinge", (1.0, 0.0, 0.0)),
+    "rotY": ("hinge", (0.0, 1.0, 0.0)),
+    "rotZ": ("hinge", (0.0, 0.0, 1.0)),
+}
+
+
+def _general_joint_axes(
+    prim: Usd.Prim,
+) -> list[tuple[str, tuple[float, float, float], float | None, float | None]]:
+    """The free axes of a UsdPhysics.Joint, in USD's own order.
+
+    A D6 joint locks an axis with a LimitAPI whose low exceeds its high, and
+    leaves an axis free by carrying no LimitAPI for it at all. Anything else is
+    a limited axis. MuJoCo has no six-axis joint, so each free axis becomes a
+    sibling hinge or slide on the same body, which composes to the same motion.
+    """
+
+    free: list[tuple[str, tuple[float, float, float], float | None, float | None]] = []
+    for token, (kind, axis) in _D6_AXES.items():
+        low = _number(_attr(prim, f"limit:{token}:physics:low"))
+        high = _number(_attr(prim, f"limit:{token}:physics:high"))
+        if low is not None and high is not None and low > high:
+            continue  # locked
+        if low is None and high is None:
+            free.append((kind, axis, None, None))  # free, unlimited
+            continue
+        free.append((kind, axis, low, high))
+    return free
+
+
 def _read_scene(stage: Usd.Stage) -> _Scene:
     world = stage.GetDefaultPrim()
     objects = [prim for prim in world.GetChildren() if _bodies_scope(prim)]
@@ -530,9 +566,16 @@ def _read_scene(stage: Usd.Stage) -> _Scene:
     scene = _Scene(parts={prim.GetName(): prim for prim in bodies.GetChildren()})
     joints_scope = obj.GetChild("joints")
     for prim in joints_scope.GetChildren() if joints_scope else []:
-        kind = _JOINT_TYPES.get(str(prim.GetTypeName()))
-        if str(prim.GetTypeName()) not in _JOINT_TYPES:
+        type_name = str(prim.GetTypeName())
+        general = type_name == "PhysicsJoint"
+        kind = _JOINT_TYPES.get(type_name)
+        if not general and type_name not in _JOINT_TYPES:
             continue
+        free: list[tuple[str, tuple[float, float, float], float | None, float | None]] = []
+        if general:
+            free = _general_joint_axes(prim)
+            # every axis locked is a fixed joint by another name
+            kind = free[0][0] if free else None
         bodies = [prim.GetRelationship(f"physics:body{index}").GetTargets() for index in (0, 1)]
         if not all(bodies):
             continue
@@ -543,11 +586,12 @@ def _read_scene(stage: Usd.Stage) -> _Scene:
                 parent=bodies[0][0].name,
                 child=bodies[1][0].name,
                 anchor=_triple(_attr(prim, "physics:localPos1", (0.0, 0.0, 0.0))),
-                axis=_joint_axis(prim),
-                lower=_number(_attr(prim, "physics:lowerLimit")),
-                upper=_number(_attr(prim, "physics:upperLimit")),
+                axis=free[0][1] if free else _joint_axis(prim),
+                lower=free[0][2] if free else _number(_attr(prim, "physics:lowerLimit")),
+                upper=free[0][3] if free else _number(_attr(prim, "physics:upperLimit")),
                 excluded=bool(_attr(prim, "physics:excludeFromArticulation", False)),
                 parent_anchor=_triple(_attr(prim, "physics:localPos0", (0.0, 0.0, 0.0))),
+                extra_axes=tuple(free[1:]),
             )
         )
     return scene
@@ -605,6 +649,18 @@ def _add_body(
             attributes["range"] = f"{joint.lower * scale:.6f} {joint.upper * scale:.6f}"
             attributes["limited"] = "true"
         ET.SubElement(body, "joint", attributes)
+        for index, (kind, axis, low, high) in enumerate(joint.extra_axes, start=2):
+            extra = {
+                "name": f"{joint.name}_{index}",
+                "type": kind,
+                "pos": _vector(joint.anchor),
+                "axis": _vector(axis),
+            }
+            if low is not None and high is not None:
+                scale = math.pi / 180.0 if kind == "hinge" else 1.0
+                extra["range"] = f"{low * scale:.6f} {high * scale:.6f}"
+                extra["limited"] = "true"
+            ET.SubElement(body, "joint", extra)
 
     mass_api = _MassAPI(prim)
     mass = _number(mass_api.GetMassAttr().Get())
