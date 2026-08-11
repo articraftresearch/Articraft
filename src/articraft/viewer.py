@@ -111,6 +111,11 @@ def _read_version(path: Path) -> dict[str, object]:
                 },
                 "axis": _attribute(joint, "axis", [0.0, 0.0, 1.0]),
                 "motion_limits": limits,
+                # A loop closing joint is a constraint, not a place to hang the
+                # child; the viewer must not reparent or pose along it.
+                "closes_loop": bool(
+                    _usd_attribute(joint, "physics:excludeFromArticulation", False)
+                ),
             }
         )
 
@@ -182,6 +187,13 @@ def _read_appearance(shape: Usd.Prim) -> dict[str, object] | None:
         # viewer keeps those and only layers on the authored tint + metalness.
         "textured": _attribute(shape, "material:textured") is not None,
     }
+
+
+def _usd_attribute(prim: Usd.Prim, name: str, default=None):
+    """Read a schema attribute by its full USD name, no articraft prefix."""
+    attribute = prim.GetAttribute(name)
+    value = attribute.Get() if attribute else None
+    return default if value is None else value
 
 
 def _attribute(prim: Usd.Prim, name: str, default=None):

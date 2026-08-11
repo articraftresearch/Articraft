@@ -258,10 +258,25 @@ Full model validation requires one rooted tree.
 - Each child part may have only one parent articulation.
 - Parent and child must be different parts.
 - Exactly one part must have no parent articulation.
-- Every other part must be reachable from that root.
-- Cycles and detached branches are invalid.
+- Every other part must be reachable from that root along tree edges.
+- Detached branches are invalid.
 
 A single part model needs no articulation and is its own root.
+
+## Closing a loop
+
+A mechanism may pin two parts that already both have parents: a four bar
+linkage, or a hydraulic ram whose rod pushes on the boom it came from. Declare
+that pin as one more articulation. The first articulation declared for each
+child owns the tree edge; a later articulation reaching the same child closes
+the loop.
+
+- Declare the main chains first, then the closing pins, with the already
+  parented part as the child.
+- A loop closing joint is exported as a regular USD joint marked
+  `physics:excludeFromArticulation`, so physics engines enforce the pin.
+- It does not place its child and cannot be posed. To keep the linkage
+  assembled while posing, give the loop members a `drive` (below).
 
 The tree rule describes rigid ownership and motion. It does not prove that
 parts touch. Compile time geometry checks report physically isolated parts and
@@ -285,3 +300,59 @@ The returned object exposes these fields:
 Call `articulation.validate()` to validate one articulation again. Call
 `model.validate()` to check its part references and its place in the complete
 tree.
+
+## Joints the mechanism decides: `SpanTo` and `AimAt`
+
+Some joints do not have a value of their own. A hydraulic ram is however long
+the gap between its two eyes happens to be, and its barrel points wherever that
+far eye has moved to. Posing such a joint by hand is what pulls a linkage apart:
+swing the boom, and a ram that was told to hold still tears off its pin.
+
+Give the joint a `drive` and it is solved from the rest of the model instead of
+posed. A `drive` reads a point on a part the joint does not move.
+
+- `SpanTo(part, point, rest_length)` on a `PRISMATIC` joint. The value becomes
+  the distance from the joint frame to that anchor, less `rest_length`. Use
+  `rest_length` for the length the joint already spans at its zero value.
+- `AimAt(part, point, reference)` on a `REVOLUTE` joint. The value becomes the
+  rotation about the joint axis that swings `reference` onto that anchor.
+
+A hydraulic ram uses both: the barrel aims at the far eye and the rod spans to
+it.
+
+```python
+model.articulation(
+    "boom_ram_pivot",
+    ArticulationType.REVOLUTE,
+    mount,
+    barrel,
+    origin=Origin(xyz=BARREL_PIVOT, rpy=(0.0, rest_angle, 0.0)),
+    axis=(0.0, 1.0, 0.0),
+    motion_limits=MotionLimits(lower=-0.6, upper=0.6),
+    drive=AimAt("boom", BOOM_EYE),
+)
+model.articulation(
+    "boom_ram_stroke",
+    ArticulationType.PRISMATIC,
+    barrel,
+    rod,
+    axis=(1.0, 0.0, 0.0),
+    motion_limits=MotionLimits(lower=-0.45, upper=0.58),
+    drive=SpanTo("boom", BOOM_EYE, rest_length=rest_distance),
+)
+```
+
+Now posing `boom_hinge` alone keeps both rams assembled. A value passed for a
+driven joint is ignored, because the mechanism owns it.
+
+Rules worth knowing:
+
+- The drive type must match the joint: `SpanTo` for prismatic, `AimAt` for
+  revolute. `Drive` is the union of the two.
+- A drive cannot read the joint's own parent or child. It reads a part the joint
+  does not move, otherwise the value would depend on itself.
+- Give the joint honest `motion_limits`. A drive solves the value; it does not
+  check that the mechanism stays inside its travel.
+- Drives are kinematic. They keep the model assembled for posing, rendering, and
+  geometry checks. They are not exported as physics constraints, so a simulator
+  still sees independent joints.

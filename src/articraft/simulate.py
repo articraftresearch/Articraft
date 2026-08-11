@@ -191,6 +191,9 @@ class _Joint:
     axis: tuple[float, float, float]
     lower: float | None
     upper: float | None
+    excluded: bool = False
+    """Marked ``physics:excludeFromArticulation``: a loop closing constraint."""
+    parent_anchor: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 @dataclass
@@ -200,8 +203,12 @@ class _Scene:
     parts: dict[str, Usd.Prim] = field(default_factory=dict)
     joints: list[_Joint] = field(default_factory=list)
 
+    @property
+    def tree_joints(self) -> list[_Joint]:
+        return [joint for joint in self.joints if not joint.excluded]
+
     def root(self) -> str:
-        children = {joint.child for joint in self.joints}
+        children = {joint.child for joint in self.tree_joints}
         roots = [name for name in self.parts if name not in children]
         if len(roots) != 1:
             raise ValueError(f"expected exactly one root part, found {roots}")
@@ -450,6 +457,39 @@ def write_mjcf(usdz: Path, out_dir: Path) -> Path:
 
     _add_body(world, asset, scene, root, np.linalg.inv(lift), stage, out_dir)
 
+    closures = [joint for joint in scene.joints if joint.excluded]
+    if closures:
+        equality = ET.SubElement(mujoco_el, "equality")
+        for joint in closures:
+            if joint.kind == "slide":
+                # A point constraint cannot carry a sliding pin; leave it to
+                # engines with native prismatic loop constraints.
+                continue
+            # MuJoCo's default equality impedance is sized for light objects;
+            # a multi tonne linkage sags visibly on it. A stiff pin is the
+            # honest reading of a physical pin.
+            stiffness = {"solref": "0.004 1", "solimp": "0.99 0.999 0.0001 0.5 2"}
+            if joint.kind is None:
+                ET.SubElement(
+                    equality,
+                    "weld",
+                    {"name": joint.name, "body1": joint.parent, "body2": joint.child, **stiffness},
+                )
+            else:
+                # A hinge pin holds a shared point; the connect constraint is
+                # exactly that, anchored on the parent side of the pin.
+                ET.SubElement(
+                    equality,
+                    "connect",
+                    {
+                        "name": joint.name,
+                        "body1": joint.parent,
+                        "body2": joint.child,
+                        "anchor": _vector(joint.parent_anchor),
+                        **stiffness,
+                    },
+                )
+
     path = out_dir / "model.xml"
     ET.indent(mujoco_el)
     path.write_text(ET.tostring(mujoco_el, encoding="unicode"), encoding="utf-8")
@@ -482,6 +522,8 @@ def _read_scene(stage: Usd.Stage) -> _Scene:
                 axis=_joint_axis(prim),
                 lower=_number(_attr(prim, "physics:lowerLimit")),
                 upper=_number(_attr(prim, "physics:upperLimit")),
+                excluded=bool(_attr(prim, "physics:excludeFromArticulation", False)),
+                parent_anchor=_triple(_attr(prim, "physics:localPos0", (0.0, 0.0, 0.0))),
             )
         )
     return scene
@@ -522,7 +564,7 @@ def _add_body(
         placement["quat"] = _vector(orientation)
     body = ET.SubElement(parent_el, "body", placement)
 
-    joint = next((item for item in scene.joints if item.child == part_name), None)
+    joint = next((item for item in scene.tree_joints if item.child == part_name), None)
     if joint is None:
         ET.SubElement(body, "freejoint")
     elif joint.kind is not None:
@@ -567,7 +609,7 @@ def _add_body(
             geom["friction"] = f"{friction:.4f} 0.005 0.0001"
         ET.SubElement(body, "geom", geom)
 
-    for child in (item.child for item in scene.joints if item.parent == part_name):
+    for child in (item.child for item in scene.tree_joints if item.parent == part_name):
         _add_body(body, asset, scene, child, world, stage, out_dir)
 
 

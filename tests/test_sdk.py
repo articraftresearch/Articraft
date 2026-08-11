@@ -231,21 +231,32 @@ def test_articulation_type_specific_rules_are_validated() -> None:
         )
 
 
-def test_articulation_tree_requires_one_root_and_one_parent_per_child() -> None:
+def test_articulation_tree_requires_one_root() -> None:
     disconnected = ArticulatedObject("two_roots")
     add_box(disconnected, "left")
     add_box(disconnected, "right")
     with pytest.raises(ValidationError, match="exactly one root"):
         disconnected.validate()
 
-    duplicate_parent = ArticulatedObject("duplicate_parent")
-    left = add_box(duplicate_parent, "left")
-    right = add_box(duplicate_parent, "right")
-    child = add_box(duplicate_parent, "child")
-    duplicate_parent.articulation("left_child", "fixed", left, child)
-    duplicate_parent.articulation("right_child", "fixed", right, child)
-    with pytest.raises(ValidationError, match="multiple parent articulations"):
-        duplicate_parent.validate()
+    # A second parent articulation is a loop closure now, not an error, but the
+    # spanning tree it leaves behind must still be rooted in exactly one part.
+    two_rooted = ArticulatedObject("two_rooted_loop")
+    left = add_box(two_rooted, "left")
+    right = add_box(two_rooted, "right")
+    child = add_box(two_rooted, "child")
+    two_rooted.articulation("left_child", "fixed", left, child)
+    two_rooted.articulation("right_child", "fixed", right, child)
+    with pytest.raises(ValidationError, match="exactly one root"):
+        two_rooted.validate()
+
+    rooted = ArticulatedObject("rooted_loop")
+    base = add_box(rooted, "base")
+    upper = add_box(rooted, "upper")
+    brace = add_box(rooted, "brace")
+    rooted.articulation("base_upper", "fixed", base, upper)
+    rooted.articulation("base_brace", "fixed", base, brace)
+    rooted.articulation("upper_brace", "fixed", upper, brace)
+    rooted.validate()
 
 
 def test_duplicate_and_unknown_names_are_rejected() -> None:

@@ -59,10 +59,13 @@ from articraft.sdk._mesh.sweeps import (
 )
 from articraft.sdk.errors import SDKError, ValidationError
 from articraft.sdk.joints import (
+    AimAt,
     Articulation,
     ArticulationType,
+    Drive,
     MotionLimits,
     Origin,
+    SpanTo,
 )
 from articraft.sdk.mass import MassProperties
 from articraft.sdk.materials import Material
@@ -96,6 +99,7 @@ from articraft.sdk.visual import (
 
 __all__ = [
     "EARTH_GRAVITY",
+    "AimAt",
     "AllowedMeshIssues",
     "AllowedOverlap",
     "ArcPipeGeometry",
@@ -109,6 +113,7 @@ __all__ = [
     "CylinderGeometry",
     "DistanceFinding",
     "DomeGeometry",
+    "Drive",
     "ExtrudeGeometry",
     "ExtrudeWithHolesGeometry",
     "FailureKind",
@@ -137,6 +142,7 @@ __all__ = [
     "RoundedBoxGeometry",
     "SDKError",
     "SectionView",
+    "SpanTo",
     "SphereGeometry",
     "SuperellipsoidGeometry",
     "SweepGeometry",
