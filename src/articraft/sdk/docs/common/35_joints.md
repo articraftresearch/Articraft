@@ -126,6 +126,19 @@ the mechanism, so `ctx.pose({...})` rejects it — pose the tree joints instead.
 Posing a closed loop from joint values is not supported at all; supply body
 poses or let a physics engine solve it.
 
+## `PhysicsState`
+
+```python
+PhysicsState(body_poses, *, dof_positions=None)
+```
+
+Where every body actually is: a 4x4 world transform per body, plus the joint
+values those poses imply. Body poses are the authority, so a state that
+disagrees with its own joints is rejected rather than quietly reinterpreted.
+
+`resolved.forward_kinematics({"lid_hinge": 0.5})` builds one from joint values,
+for a tree. A closed loop cannot be posed that way and needs a full state.
+
 ## Frames must meet
 
 The two frames of a joint coincide at rest. If they do not, validation says so

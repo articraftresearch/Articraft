@@ -6,9 +6,9 @@ not extra import paths.
 
 Six threads run through this package:
 
-- **structure** -- what the object is and how it moves. ``object`` holds
-  ``Part`` and ``ArticulatedObject``; ``joints`` holds ``Articulation`` and
-  its motion limits.
+- **structure** -- what the object is and how it moves. ``bodies`` holds
+  ``RigidBody``; ``assembly`` holds ``RigidBodyAssembly``, its ``Joint``s and
+  the ``Articulation``s that name the trees a simulator solves.
 - **geometry** -- how shapes are made. ``mesh`` is the public face; ``_mesh``
   is the engine behind it. Geometry is undifferentiated: a boolean or a weld
   does not know whether the result is heavy or shiny.

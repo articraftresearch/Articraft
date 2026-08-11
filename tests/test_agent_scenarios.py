@@ -46,7 +46,7 @@ object_model = build_object_model()
 OVERLAP_MAIN = """
 from build123d import Box
 
-from articraft.sdk import RigidBodyAssembly, TestContext, TestReport
+from articraft.sdk import JointFrame, RigidBodyAssembly, TestContext, TestReport
 
 
 def build_object_model() -> RigidBodyAssembly:
@@ -55,7 +55,13 @@ def build_object_model() -> RigidBodyAssembly:
     base.add(Box(0.2, 0.2, 0.1), name="body")
     pin = model.rigid_body("pin")
     pin.add(Box(0.05, 0.05, 0.2), name="body")
-    model.articulation("press_fit_pin", "fixed", parent="base", child="pin")
+    model.joint(
+        "press_fit_pin",
+        body0=base,
+        frame0=JointFrame(),
+        body1=pin,
+        frame1=JointFrame(),
+    )
     return model
 
 

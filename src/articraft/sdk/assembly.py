@@ -14,7 +14,7 @@ from articraft.sdk._values import _as_name
 from articraft.sdk.bodies import RigidBody, RigidBodyRef
 from articraft.sdk.errors import ValidationError
 from articraft.sdk.mass import MassProperties
-from articraft.sdk.physics import PhysicsScene
+from articraft.sdk.physics import BodyState, PhysicsScene
 
 Vec3: TypeAlias = tuple[float, float, float]
 Mat4: TypeAlias = np.ndarray
@@ -397,8 +397,18 @@ class RigidBodyAssembly:
     def meters_per_unit(self) -> float:
         return 1.0
 
-    def rigid_body(self, name: str, *, mass_properties: MassProperties | None = None) -> RigidBody:
-        body = RigidBody(name, mass_properties=mass_properties)
+    def rigid_body(
+        self,
+        name: str,
+        *,
+        mass_properties: MassProperties | None = None,
+        body_state: BodyState | None = None,
+    ) -> RigidBody:
+        body = RigidBody(
+            name,
+            mass_properties=mass_properties,
+            body_state=BodyState() if body_state is None else body_state,
+        )
         if any(existing.name == body.name for existing in self.rigid_bodies):
             raise ValidationError(f"duplicate rigid body name: {body.name!r}")
         self.rigid_bodies.append(body)

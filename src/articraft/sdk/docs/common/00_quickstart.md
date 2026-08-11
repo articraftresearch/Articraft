@@ -1,10 +1,10 @@
 # SDK quickstart
 
-Work in meters. Use radians for rotations and revolute limits.
+Work in meters and radians.
 
-Each `RigidBody` is one rigid body. Add one or more named shapes to it. A shape can be a
-`build123d.Shape` or `MeshGeometry`. Apply build123d `Pos`, `Rot`, or `Location` before you add
-the shape. There is no second shape transform.
+Each `RigidBody` is one rigid body holding named shapes, either `build123d.Shape` or
+`MeshGeometry`. Apply build123d `Pos`, `Rot`, or `Location` before adding; there is no second
+shape transform.
 
 ```python
 from build123d import Box, Pos
@@ -28,20 +28,17 @@ def run_tests() -> TestReport:
 Every shape needs a unique name within its part. A color can contain RGB or RGBA values from
 zero through one.
 
-Within one rigid part, overlapping shapes count as connected -- notice `leg_1` overlaps up into
-`top` above. To attach a handle, spout, or any protrusion, extend the protrusion's own end a few
-millimeters into the form it meets; it then reads as one molded piece with no extra geometry.
+Within one rigid body, overlapping shapes count as connected -- `leg_1` overlaps up into `top`
+above. To attach a handle or spout, extend its end a few millimeters into the form it meets; it
+then reads as one molded piece.
 
-Prefer build123d for exact solids, wall thickness, openings, bores, rims, mating
-faces, and local fillets. Use mesh helpers when the whole form is better
-described by freeform sections or paths. One part can contain both. A mesh weld
-rebuilds all input surfaces on a field grid, so it is not a local fillet for an
-otherwise exact solid.
+Prefer build123d for exact solids, wall thickness, openings, bores, rims and local fillets. Use
+mesh helpers when the form is better described by freeform sections or paths. One body can hold
+both.
 
 Motion is two steps. `model.joint(...)` connects two bodies at a frame on each, and its `dofs`
-say which of the six axes are free -- no listed axis means a fixed joint, one rotational axis is
-a hinge, one linear axis is a slide, three rotational axes are a ball. Then
-`model.articulation(...)` names the tree the simulator solves.
+say which axes are free: none is fixed, one rotational is a hinge, one linear is a slide, three
+rotational is a ball. `model.articulation(...)` then names the tree the simulator solves.
 
 ```python
 from articraft.sdk import JointAxis, JointDOF, JointFrame
@@ -60,16 +57,13 @@ model.joint(
 model.articulation("main", root=body, joints=["lid_hinge"])
 ```
 
+
 Each frame is where the joint sits *in that body's own coordinates*, so the two coincide at rest.
-Limits are radians for rotation, meters for travel, and must contain zero -- zero is the pose you
-authored.
+Limits are radians for rotation, meters for travel, and must contain zero.
 
-**Count the pivots before writing joints.** A body pinned in two places takes two joints, and that
-makes the mechanism a ring: linkages, four-bars, parallel grippers and scissor mechanisms all are.
-Author every joint it physically has, then leave the ring-closing one out of the articulation. See
-`docs/sdk/examples/closed_loop_linkage.py`.
-
-Use named shape arguments in exact checks when a body contains several shapes.
+**Count the pivots.** A body pinned in two places takes two joints, which makes the mechanism a
+ring -- linkages, four-bars, grippers and scissors all are. Author every joint it has, then leave
+the ring-closing one out of the articulation. See `docs/sdk/common/35_joints.md`.
 
 Read only the reference that applies to the next piece of geometry:
 
@@ -95,16 +89,13 @@ Read only the reference that applies to the next piece of geometry:
 - Mesh refinement and smoothing:
   `docs/sdk/mesh/50_refinement_and_smoothing.md`.
 
-Detailed build123d pages are under `docs/sdk/build123d/`. Start with
-`docs/sdk/build123d/key_concepts_algebra.md` for object algebra,
-`docs/sdk/build123d/moving_objects.md` for placement,
-`docs/sdk/build123d/operations.md` for solid operations, and
-`docs/sdk/build123d/topology_selection.md` for selecting faces and edges.
-The copied build123d examples may use arbitrary dimensions. Convert every dimension to meters in
-articraft.
+Detailed build123d pages are under `docs/sdk/build123d/`: `key_concepts_algebra.md` for object
+algebra, `moving_objects.md` for placement, `operations.md` for solid operations, and
+`topology_selection.md` for selecting faces and edges. Their examples use arbitrary dimensions;
+convert every one to meters.
 
-Use the reference pages for API discovery. Use short `exec_command` inspections after authoring to
-measure bounds, distances, collisions, and posed geometry.
+Use the reference pages for API discovery, and short `exec_command` inspections after authoring
+to measure bounds, distances, collisions, and posed geometry.
 
 Read only the executable example closest to the current task:
 
@@ -112,7 +103,6 @@ Read only the executable example closest to the current task:
 - Section loft with a swept wire: `docs/sdk/examples/section_loft_with_wires.py`.
 - Mixed build123d and mesh assembly: `docs/sdk/examples/mixed_articulated_assembly.py`.
 - Closed loop linkage (a hydraulic ram) posed through drives:
-  `docs/sdk/examples/hydraulic_ram_loop.py`.
 - Molding a handle/protrusion into a body (no mounting pads):
   `docs/sdk/examples/molded_mug.py`.
 - Mass properties from materials and geometry:
@@ -122,5 +112,5 @@ Read only the executable example closest to the current task:
 - Variable profile sweep and smooth section loft:
   `docs/sdk/examples/variable_sweep_and_loft.py`.
 
-Run `compile` after meaningful edits. Treat checks as design evidence. A failed check is not a
-reason to remove or simplify geometry that the prompt requires.
+Run `compile` after meaningful edits. Treat checks as design evidence: a failed check is not a
+reason to remove geometry the prompt requires.

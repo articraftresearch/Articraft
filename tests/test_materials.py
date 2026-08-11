@@ -153,7 +153,7 @@ def test_export_binds_usd_preview_surface(tmp_path) -> None:
     result = export_assembly(_model(), tmp_path)
     stage = Usd.Stage.Open(str(result.usdz))
 
-    mesh = stage.GetPrimAtPath("/World/materialed/parts/base/shapes/body")
+    mesh = stage.GetPrimAtPath("/World/materialed/rigid_bodies/base/shapes/body")
     assert mesh.IsA(UsdGeom.Mesh)
     binding = UsdShade.MaterialBindingAPI(mesh).GetDirectBinding()
     material = UsdShade.Material(stage.GetPrimAtPath(binding.GetMaterialPath()))
@@ -177,7 +177,7 @@ def test_export_payload_carries_material_and_appearance(tmp_path) -> None:
 
     result = export_assembly(model, tmp_path)
     manifest = json.loads(result.manifest.read_text())
-    body = manifest["parts"][0]["shapes"][0]
+    body = manifest["rigid_bodies"][0]["shapes"][0]
 
     assert body["material"]["name"] == "steel"
     assert body["material"]["library"] is True
@@ -232,7 +232,9 @@ def test_textured_export_applies_explicit_texture(monkeypatch, tmp_path) -> None
 
     result = export_assembly(model, tmp_path / "result", textured=True)
     stage = Usd.Stage.Open(str(result.usdz))
-    mesh = stage.GetPrimAtPath("/World/textured/parts/part/shapes/name_has_no_material_semantics")
+    mesh = stage.GetPrimAtPath(
+        "/World/textured/rigid_bodies/part/shapes/name_has_no_material_semantics"
+    )
 
     assert result.textures.requested_shapes == 1
     assert result.textures.textured_shapes == 1

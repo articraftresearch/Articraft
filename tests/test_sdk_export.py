@@ -27,7 +27,7 @@ def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> Non
     assert manifest["files"] == {"usdz": "usdz/0000.usdz"}
     assert manifest["units"] == "meters"
     assert manifest["meters_per_unit"] == 1.0
-    assert [shape["name"] for shape in manifest["parts"][0]["shapes"]] == [
+    assert [shape["name"] for shape in manifest["rigid_bodies"][0]["shapes"]] == [
         "shell",
         "trim",
     ]
@@ -36,13 +36,13 @@ def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> Non
     assert UsdGeom.GetStageMetersPerUnit(stage) == 1.0
     assert UsdGeom.GetStageUpAxis(stage) == "Z"
 
-    base = stage.GetPrimAtPath("/World/hinge/parts/base")
+    base = stage.GetPrimAtPath("/World/hinge/rigid_bodies/base")
     assert base.GetTypeName() == "Xform"
     assert base.HasAPI(UsdPhysics.RigidBodyAPI)
-    assert stage.GetPrimAtPath("/World/hinge/parts/base/shapes").GetTypeName() == "Scope"
+    assert stage.GetPrimAtPath("/World/hinge/rigid_bodies/base/shapes").GetTypeName() == "Scope"
 
-    shell = stage.GetPrimAtPath("/World/hinge/parts/base/shapes/shell")
-    trim = stage.GetPrimAtPath("/World/hinge/parts/base/shapes/trim")
+    shell = stage.GetPrimAtPath("/World/hinge/rigid_bodies/base/shapes/shell")
+    trim = stage.GetPrimAtPath("/World/hinge/rigid_bodies/base/shapes/trim")
     assert shell.GetTypeName() == "Mesh"
     assert trim.GetTypeName() == "Mesh"
     assert tuple(
@@ -56,11 +56,13 @@ def test_export_writes_rigid_part_bodies_and_named_child_meshes(tmp_path) -> Non
 
     joint_prim = stage.GetPrimAtPath("/World/hinge/joints/base_to_door")
     joint = UsdPhysics.RevoluteJoint.Get(stage, joint_prim.GetPath())
-    assert joint_prim.GetAttribute("articraft:articulationType").Get() == "revolute"
-    assert joint.GetBody0Rel().GetTargets()[0].pathString == "/World/hinge/parts/base"
-    assert joint.GetBody1Rel().GetTargets()[0].pathString == "/World/hinge/parts/door"
-    assert joint.GetAxisAttr().Get() == "X"
-    assert _joint_x_axis(joint) == (-0.074758, 0.71704, 0.693012)
+    assert joint_prim.GetAttribute("articraft:jointType").Get() == "revolute"
+    assert joint.GetBody0Rel().GetTargets()[0].pathString == "/World/hinge/rigid_bodies/base"
+    assert joint.GetBody1Rel().GetTargets()[0].pathString == "/World/hinge/rigid_bodies/door"
+    assert joint.GetAxisAttr().Get() == "Y"
+    assert _joint_axis_direction(joint) == _rpy_direction(
+        (math.pi / 4.0, 0.2, 0.3), (0.0, 1.0, 0.0)
+    )
     assert math.isclose(joint.GetUpperLimitAttr().Get(), math.degrees(1.57), abs_tol=1e-5)
 
 
@@ -227,12 +229,33 @@ def _hinge() -> RigidBodyAssembly:
     return model
 
 
-def _joint_x_axis(joint: UsdPhysics.RevoluteJoint) -> tuple[float, float, float]:
+def _joint_axis_direction(joint: UsdPhysics.RevoluteJoint) -> tuple[float, float, float]:
+    """Where the hinge axis points in the parent body, per the exported frame."""
+
     matrix = Gf.Matrix4d(1.0)
     matrix.SetRotate(joint.GetLocalRot0Attr().Get())
-    vector = matrix.TransformDir(Gf.Vec3d(1.0, 0.0, 0.0)).GetNormalized()
-    x, y, z = (round(float(component), 6) for component in vector)
-    return (x, y, z)
+    axis = {"X": (1.0, 0.0, 0.0), "Y": (0.0, 1.0, 0.0), "Z": (0.0, 0.0, 1.0)}[
+        joint.GetAxisAttr().Get()
+    ]
+    return _rounded(matrix.TransformDir(Gf.Vec3d(*axis)).GetNormalized())
+
+
+def _rpy_direction(
+    rpy: tuple[float, float, float], axis: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    """The same direction, built from the rpy the model authored."""
+
+    roll, pitch, yaw = rpy
+    matrix = Gf.Matrix4d(1.0)
+    for angle, about in ((roll, (1, 0, 0)), (pitch, (0, 1, 0)), (yaw, (0, 0, 1))):
+        turn = Gf.Matrix4d(1.0)
+        turn.SetRotate(Gf.Rotation(Gf.Vec3d(*about), math.degrees(angle)))
+        matrix = matrix * turn
+    return _rounded(matrix.TransformDir(Gf.Vec3d(*axis)).GetNormalized())
+
+
+def _rounded(vector) -> tuple[float, float, float]:
+    return (round(float(vector[0]), 6), round(float(vector[1]), 6), round(float(vector[2]), 6))
 
 
 def _assert_joint_frames_meet(stage: Usd.Stage, joint) -> None:

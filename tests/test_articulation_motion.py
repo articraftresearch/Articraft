@@ -29,7 +29,7 @@ def _hinged_lid(pivot: tuple[float, float, float]) -> RigidBodyAssembly:
     model.joint(
         "lid_hinge",
         body0=base,
-        frame0=JointFrame(),
+        frame0=JointFrame(xyz=pivot),
         body1=lid,
         frame1=JointFrame(),
         dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.2)),),

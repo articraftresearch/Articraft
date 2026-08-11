@@ -28,7 +28,7 @@ def _rigid_body(usdz) -> tuple[Usd.Stage, UsdPhysics.RigidBodyAPI]:
     # The stage is returned with the schema: a prim goes invalid the moment its
     # stage is collected.
     stage = Usd.Stage.Open(str(usdz))
-    return stage, UsdPhysics.RigidBodyAPI(stage.GetPrimAtPath("/World/cart/parts/body"))
+    return stage, UsdPhysics.RigidBodyAPI(stage.GetPrimAtPath("/World/cart/rigid_bodies/body"))
 
 
 def test_default_scene_is_earth_gravity_down_the_up_axis(tmp_path) -> None:
@@ -70,7 +70,7 @@ def test_default_body_state_is_a_free_body_at_rest(tmp_path) -> None:
     assert tuple(rigid.GetAngularVelocityAttr().Get()) == (0.0, 0.0, 0.0)
 
     manifest = json.loads(result.manifest.read_text())
-    assert manifest["parts"][0]["body_state"] == {
+    assert manifest["rigid_bodies"][0]["body_state"] == {
         "enabled": True,
         "kinematic": False,
         "linear_velocity": [0.0, 0.0, 0.0],
@@ -95,7 +95,7 @@ def test_authored_body_state_reaches_usd_with_angles_in_degrees(tmp_path) -> Non
     # The SDK authors rad/s; USD stores deg/s.
     assert tuple(rigid.GetAngularVelocityAttr().Get()) == pytest.approx((0.0, 180.0, 0.0))
     manifest = json.loads(result.manifest.read_text())
-    assert manifest["parts"][0]["body_state"]["angular_velocity"] == pytest.approx(
+    assert manifest["rigid_bodies"][0]["body_state"]["angular_velocity"] == pytest.approx(
         [0.0, math.pi, 0.0]
     )
 

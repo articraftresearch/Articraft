@@ -1,7 +1,7 @@
-# Articulated objects and parts
+# Assemblies and rigid bodies
 
-`RigidBodyAssembly` is the root model. It owns rigid parts and the
-articulations that connect them.
+`RigidBodyAssembly` is the root model. It owns rigid bodies and the joints
+that connect them.
 
 ```python
 from articraft.sdk import RigidBodyAssembly
@@ -66,10 +66,10 @@ they never move relative to each other.
 
 Create a separate part only when the geometry needs a separate rigid motion.
 
-### `part.add(...)`
+### `body.add(...)`
 
 ```python
-part.add(
+body.add(
     shape: build123d.Shape | MeshGeometry,
     *,
     name: str,
@@ -149,7 +149,7 @@ The part stores the mesh object itself. If you edit that mesh later, the part
 sees the edit. `model.validate()` validates the edited vertices and faces
 again.
 
-### `part.get_shape(...)`
+### `body.get_shape(...)`
 
 ```python
 part.get_shape(name: str) -> build123d.Shape | MeshGeometry

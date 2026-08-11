@@ -7,6 +7,7 @@ import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 from pxr import Usd
@@ -96,35 +97,8 @@ def _read_version(path: Path) -> dict[str, object]:
         ).GetChildren()
     ]
 
-    articulations = []
-    for joint in object_prim.GetChild("joints").GetChildren():
-        articulation_type = _attribute(joint, "articulationType", "fixed")
-        limits = None
-        if articulation_type != "fixed":
-            limits = {
-                "lower": _attribute(joint, "limits:lower"),
-                "upper": _attribute(joint, "limits:upper"),
-            }
-        articulations.append(
-            {
-                "name": _attribute(joint, "name", joint.GetName()),
-                "type": articulation_type,
-                "parent": _attribute(joint, "parent"),
-                "child": _attribute(joint, "child"),
-                "origin": {
-                    "xyz": _attribute(joint, "origin:xyz", [0.0, 0.0, 0.0]),
-                    "rpy": _attribute(joint, "origin:rpy", [0.0, 0.0, 0.0]),
-                },
-                "axis": _attribute(joint, "axis", [0.0, 0.0, 1.0]),
-                "motion_limits": limits,
-                # A loop closing joint is a constraint, not a place to hang the
-                # child; the viewer must not reparent or pose along it.
-                "closes_loop": bool(
-                    _usd_attribute(joint, "physics:excludeFromArticulation", False)
-                ),
-                "driven": _attribute(joint, "driven", "false") == "true",
-            }
-        )
+    articulations = [_read_joint(joint) for joint in object_prim.GetChild("joints").GetChildren()]
+    _orient_joints(articulations)
 
     return {
         "id": path.stem,
@@ -135,6 +109,67 @@ def _read_version(path: Path) -> dict[str, object]:
             "articulations": articulations,
         },
     }
+
+
+_AXIS_VECTORS = {
+    "transX": [1.0, 0.0, 0.0],
+    "transY": [0.0, 1.0, 0.0],
+    "transZ": [0.0, 0.0, 1.0],
+    "rotX": [1.0, 0.0, 0.0],
+    "rotY": [0.0, 1.0, 0.0],
+    "rotZ": [0.0, 0.0, 1.0],
+}
+
+
+def _read_joint(joint: Usd.Prim) -> dict[str, object]:
+    joint_type = _attribute(joint, "jointType", "fixed")
+    dofs = json.loads(str(_attribute(joint, "dofs", "[]")))
+    # Only a single axis moves in the viewer; a d6 joint previews as fixed.
+    dof = dofs[0] if joint_type in ("revolute", "prismatic") and dofs else None
+    limits = dof["limits"] if dof else None
+    return {
+        "name": _attribute(joint, "name", joint.GetName()),
+        "type": joint_type if dof else "fixed",
+        "parent": _attribute(joint, "body0"),
+        "child": _attribute(joint, "body1"),
+        "origin": {
+            "xyz": _attribute(joint, "frame0:xyz", [0.0, 0.0, 0.0]),
+            "rpy": _attribute(joint, "frame0:rpy", [0.0, 0.0, 0.0]),
+        },
+        "child_origin": {
+            "xyz": _attribute(joint, "frame1:xyz", [0.0, 0.0, 0.0]),
+            "rpy": _attribute(joint, "frame1:rpy", [0.0, 0.0, 0.0]),
+        },
+        "axis": _AXIS_VECTORS[dof["axis"]] if dof else [0.0, 0.0, 1.0],
+        "motion_limits": None if limits is None else {"lower": limits[0], "upper": limits[1]},
+        # A loop closing joint is a constraint, not a place to hang the child;
+        # the viewer must not reparent or pose along it.
+        "closes_loop": bool(_usd_attribute(joint, "physics:excludeFromArticulation", False)),
+        "driven": False,
+    }
+
+
+def _orient_joints(joints: list[dict[str, object]]) -> None:
+    """Point every tree joint away from the root.
+
+    ``body0``/``body1`` are symmetric in the assembly, but the viewer hangs the
+    child off the parent, so a joint authored the other way round would build a
+    cycle. Walk the tree and swap the ends that point backwards.
+    """
+    pending = [joint for joint in joints if not joint["closes_loop"]]
+    seen: set[object] = set()
+    while pending:
+        reachable = [j for j in pending if j["parent"] in seen or j["child"] in seen]
+        if not reachable:  # first joint, or the start of a separate component
+            reachable = [pending[0]]
+            seen.add(pending[0]["parent"])
+        for joint in reachable:
+            if joint["parent"] not in seen:
+                joint["parent"], joint["child"] = joint["child"], joint["parent"]
+                joint["origin"], joint["child_origin"] = joint["child_origin"], joint["origin"]
+                joint["axis"] = [-value for value in cast(list[float], joint["axis"])]
+            seen.update((joint["parent"], joint["child"]))
+        pending = [joint for joint in pending if joint not in reachable]
 
 
 def _read_shapes(part: Usd.Prim) -> list[dict[str, object]]:

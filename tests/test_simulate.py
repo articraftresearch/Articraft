@@ -44,11 +44,12 @@ def _hinged_box(
     model.joint(
         "lid_hinge",
         body0=base,
-        frame0=JointFrame(),
+        frame0=JointFrame(rpy=rpy),
         body1=lid,
         frame1=JointFrame(),
-        dofs=(JointDOF(JointAxis.ROT_X, limits=(LOWER, UPPER)),),
+        dofs=(JointDOF(axis, limits=(LOWER, UPPER)),),
     )
+    model.articulation("main", root=base, joints=["lid_hinge"])
     return model
 
 
@@ -182,11 +183,12 @@ def test_a_rotated_rest_pose_survives_the_translation(tmp_path: Path) -> None:
     model.joint(
         "mount",
         body0=base,
-        frame0=JointFrame(),
+        frame0=JointFrame(xyz=(0.0, 0.0, 0.025), rpy=(0.0, math.pi / 4.0, 0.0)),
         body1=arm,
         frame1=JointFrame(),
         dofs=(),
     )
+    model.articulation("main", root=base, joints=["mount"])
 
     write_mjcf(_export(model, tmp_path), tmp_path / "sim")
     arm_body = ET.parse(tmp_path / "sim" / "model.xml").getroot().find(".//body/body")
@@ -220,24 +222,22 @@ def _hinge_with_axis(
 
 
 @pytest.mark.parametrize(
-    "axis",
+    ("axis", "expected"),
     [
-        (-1.0, 0.0, 0.0),
-        (0.0, 1.0, 1.0),
-        (1.0, -2.0, 3.0),
+        (JointAxis.ROT_X, (1.0, 0.0, 0.0)),
+        (JointAxis.ROT_Y, (0.0, 1.0, 0.0)),
+        (JointAxis.ROT_Z, (0.0, 0.0, 1.0)),
     ],
 )
-def test_joint_axis_survives_the_usd_to_mjcf_round_trip(
-    tmp_path: Path, axis: tuple[float, float, float]
+def test_each_joint_axis_survives_the_usd_to_mjcf_round_trip(
+    tmp_path: Path, axis: JointAxis, expected: tuple[float, float, float]
 ) -> None:
-    model = _hinge_with_axis(axis, rpy=(0.2, -0.3, math.pi / 2))
+    model = _hinge_with_axis(axis)
     write_mjcf(_export(model, tmp_path), tmp_path / "sim")
     joint = ET.parse(tmp_path / "sim" / "model.xml").getroot().find(".//joint")
 
     assert joint is not None
     actual = tuple(float(value) for value in str(joint.get("axis")).split())
-    length = math.hypot(*axis)
-    expected = tuple(value / length for value in axis)
     assert actual == pytest.approx(expected, abs=1e-6)
 
 

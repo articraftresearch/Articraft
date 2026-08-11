@@ -29,7 +29,7 @@ def test_quickstart_is_short_and_routes_to_targeted_references() -> None:
 
     assert len(quickstart) < 5000
     for reference in [
-        "docs/sdk/common/30_articulated_object.md",
+        "docs/sdk/common/30_assembly.md",
         "docs/sdk/common/35_joints.md",
         "docs/sdk/common/40_testing.md",
         "docs/sdk/mesh/00_mesh_geometry.md",
@@ -98,16 +98,16 @@ def test_sdk_is_a_leaf_package_with_compatible_errors() -> None:
 def test_key_apis_are_documented_by_their_owner_pages() -> None:
     sdk_docs = package_dir / "sdk" / "docs"
     expected = {
-        "common/30_articulated_object.md": (
+        "common/30_assembly.md": (
             "`RigidBodyAssembly`",
             "`Material`",
             "`RigidBody`",
-            "`Material`",
-            "`part.add(...)`",
+            "`body.add(...)`",
         ),
         "common/35_joints.md": (
-            "`Origin`",
+            "`JointFrame`",
             "`JointDOF`",
+            "`model.joint(...)`",
             "`model.articulation(...)`",
         ),
         "common/40_testing.md": (

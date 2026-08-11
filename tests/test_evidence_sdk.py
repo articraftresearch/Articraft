@@ -134,7 +134,7 @@ def _slider_model() -> RigidBodyAssembly:
     model.joint(
         "slide",
         body0="base",
-        frame0=JointFrame(),
+        frame0=JointFrame(xyz=(1.0, 0.0, 0.0)),
         body1="slider",
         frame1=JointFrame(),
         dofs=(JointDOF(JointAxis.TRANS_X, limits=(0.0, 1.0)),),

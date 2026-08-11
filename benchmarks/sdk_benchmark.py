@@ -19,13 +19,12 @@ import trimesh
 from build123d import Axis, Box, Cylinder, Pos
 
 from articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
     BoxGeometry,
     CylinderGeometry,
     ExtrudeWithHolesGeometry,
+    JointFrame,
     MeshGeometry,
-    Origin,
+    RigidBodyAssembly,
     RoundedBoxGeometry,
     SphereGeometry,
     SuperellipsoidGeometry,
@@ -82,29 +81,33 @@ def _circle_points(radius: float, z: float, count: int) -> tuple[tuple[float, fl
     )
 
 
-def _collision_model() -> ArticulatedObject:
-    model = ArticulatedObject("benchmark_assembly")
+def _collision_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("benchmark_assembly")
     previous = None
+    joints: list[str] = []
     for index in range(10):
-        part = model.part(f"part_{index:02d}")
+        part = model.rigid_body(f"part_{index:02d}")
         part.add(BoxGeometry((0.032, 0.024, 0.018)), name="body")
         part.add(
             CylinderGeometry(0.006, 0.028, radial_segments=32).translate(0.0, 0.0, 0.012),
             name="post",
         )
         if previous is not None:
-            model.articulation(
-                f"joint_{index:02d}",
-                ArticulationType.FIXED,
-                previous,
-                part,
-                origin=Origin(xyz=(0.03, 0.0, 0.0)),
+            joints.append(
+                model.joint(
+                    f"joint_{index:02d}",
+                    body0=previous,
+                    frame0=JointFrame(xyz=(0.03, 0.0, 0.0)),
+                    body1=part,
+                    frame1=JointFrame(),
+                ).name
             )
         previous = part
+    model.articulation("main", root=model.rigid_bodies[0], joints=joints)
     return model
 
 
-def _run_compiler_checks(model: ArticulatedObject) -> object:
+def _run_compiler_checks(model: RigidBodyAssembly) -> object:
     context = TestContext(model)
     context.fail_if_isolated_parts()
     context.warn_if_part_contains_disconnected_geometry_islands()

@@ -135,7 +135,7 @@ def test_mesh_edits_are_revalidated_with_the_model() -> None:
         model.validate()
 
 
-def test_public_articulation_grammar_supports_all_four_types() -> None:
+def test_public_joint_grammar_covers_fixed_hinge_free_and_slide() -> None:
     model = RigidBodyAssembly("mechanism")
     root = add_box(model, "root")
     fixed = add_box(model, "fixed")
@@ -153,7 +153,7 @@ def test_public_articulation_grammar_supports_all_four_types() -> None:
     revolute = model.joint(
         "fixed_to_hinge",
         body0=fixed,
-        frame0=JointFrame(),
+        frame0=JointFrame(xyz=(0.0, 0.0, 0.2)),
         body1=hinge,
         frame1=JointFrame(),
         dofs=(JointDOF(JointAxis.ROT_Y, limits=(-math.pi / 4.0, math.pi / 4.0)),),
@@ -175,11 +175,19 @@ def test_public_articulation_grammar_supports_all_four_types() -> None:
         dofs=(JointDOF(JointAxis.TRANS_X, limits=(-0.02, 0.2)),),
     )
 
+    model.articulation(
+        "main",
+        root=root,
+        joints=["root_to_fixed", "fixed_to_hinge", "hinge_to_rotor", "rotor_to_slider"],
+    )
     model.validate()
-    assert revolute.origin.xyz == (0.0, 0.0, 0.2)
+
+    assert revolute.frame0.xyz == (0.0, 0.0, 0.2)
     assert revolute.dofs[0].limits == (-math.pi / 4.0, math.pi / 4.0)
-    assert model.get_articulation("fixed_to_hinge") is revolute
-    assert not hasattr(model, "joints")
+    assert model.get_joint("fixed_to_hinge") is revolute
+    assert model.get_joint("root_to_fixed").is_fixed
+    assert model.get_joint("hinge_to_rotor").dofs[0].limits is None
+    assert model.get_joint("rotor_to_slider").is_prismatic
 
 
 def test_joint_frame_and_dof_values_must_be_usable() -> None:
@@ -221,32 +229,46 @@ def test_the_graph_model_rules_are_validated() -> None:
         )
 
 
-def test_articulation_tree_requires_one_root() -> None:
-    disconnected = RigidBodyAssembly("two_roots")
+def test_the_graph_must_be_one_connected_whole() -> None:
+    disconnected = RigidBodyAssembly("two_islands")
     add_box(disconnected, "left")
     add_box(disconnected, "right")
-    with pytest.raises(ValidationError, match="exactly one root"):
+    with pytest.raises(ValidationError, match="one connected joint graph"):
         disconnected.validate()
 
-    # A second parent articulation is a loop closure now, not an error, but the
-    # spanning tree it leaves behind must still be rooted in exactly one part.
-    two_rooted = RigidBodyAssembly("two_rooted_loop")
-    left = add_box(two_rooted, "left")
-    right = add_box(two_rooted, "right")
-    child = add_box(two_rooted, "child")
-    two_rooted.articulation("left_child", "fixed", left, child)
-    two_rooted.articulation("right_child", "fixed", right, child)
-    with pytest.raises(ValidationError, match="exactly one root"):
-        two_rooted.validate()
 
-    rooted = RigidBodyAssembly("rooted_loop")
-    base = add_box(rooted, "base")
-    upper = add_box(rooted, "upper")
-    brace = add_box(rooted, "brace")
-    rooted.articulation("base_upper", "fixed", base, upper)
-    rooted.articulation("base_brace", "fixed", base, brace)
-    rooted.articulation("upper_brace", "fixed", upper, brace)
-    rooted.validate()
+def test_a_second_joint_into_a_body_closes_a_loop() -> None:
+    """Two joints reaching one body is a ring, not an error."""
+
+    model = RigidBodyAssembly("rooted_loop")
+    base = add_box(model, "base")
+    upper = add_box(model, "upper")
+    brace = add_box(model, "brace")
+    model.joint("base_upper", body0=base, frame0=JointFrame(), body1=upper, frame1=JointFrame())
+    model.joint("base_brace", body0=base, frame0=JointFrame(), body1=brace, frame1=JointFrame())
+    model.joint("upper_brace", body0=upper, frame0=JointFrame(), body1=brace, frame1=JointFrame())
+    model.articulation("main", root=base, joints=["base_upper", "base_brace"])
+
+    resolved = model.resolve()
+
+    assert resolved.has_closed_loops
+    excluded = [item.joint.name for item in resolved.joints if item.exclude_from_articulation]
+    assert excluded == ["upper_brace"]
+
+
+def test_an_articulation_must_select_a_tree() -> None:
+    model = RigidBodyAssembly("not_a_tree")
+    base = add_box(model, "base")
+    upper = add_box(model, "upper")
+    brace = add_box(model, "brace")
+    model.joint("base_upper", body0=base, frame0=JointFrame(), body1=upper, frame1=JointFrame())
+    model.joint("base_brace", body0=base, frame0=JointFrame(), body1=brace, frame1=JointFrame())
+    model.joint("upper_brace", body0=upper, frame0=JointFrame(), body1=brace, frame1=JointFrame())
+    # all three edges is the ring itself, not a spanning tree
+    model.articulation("main", root=base, joints=["base_upper", "base_brace", "upper_brace"])
+
+    with pytest.raises(ValidationError, match="must form a tree"):
+        model.validate()
 
 
 def test_duplicate_and_unknown_names_are_rejected() -> None:
@@ -254,13 +276,13 @@ def test_duplicate_and_unknown_names_are_rejected() -> None:
     root = add_box(model, "root")
     child = add_box(model, "child")
 
-    with pytest.raises(ValidationError, match="duplicate part name"):
+    with pytest.raises(ValidationError, match="duplicate rigid body name"):
         model.rigid_body("root")
-    model.articulation("connection", "fixed", root, child)
-    with pytest.raises(ValidationError, match="duplicate articulation name"):
-        model.articulation("connection", "fixed", root, child)
-    with pytest.raises(ValidationError, match="unknown part"):
-        model.articulation("missing", "fixed", root, "missing")
+    model.joint("connection", body0=root, frame0=JointFrame(), body1=child, frame1=JointFrame())
+    with pytest.raises(ValidationError, match="duplicate joint name"):
+        model.joint("connection", body0=root, frame0=JointFrame(), body1=child, frame1=JointFrame())
+    with pytest.raises(ValidationError, match="unknown"):
+        model.joint("missing", body0=root, frame0=JointFrame(), body1="absent", frame1=JointFrame())
 
 
 def test_old_frame_and_joint_helpers_are_not_public() -> None:

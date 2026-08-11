@@ -61,8 +61,11 @@ def test_load_viewer_run_reads_each_usdz_version(tmp_path) -> None:
     assert joint["type"] == "prismatic"
     assert joint["parent"] == "base plate"
     assert joint["child"] == "carriage"
-    assert joint["axis"] == [1.0, 1.0, 0.0]
-    assert joint["origin"] == {"xyz": [0.1, 0.2, 0.3], "rpy": [0.0, 0.1, 0.0]}
+    # A named axis plus a rotated frame: the diagonal lives in origin.rpy.
+    assert joint["axis"] == [1.0, 0.0, 0.0]
+    assert joint["origin"]["xyz"] == pytest.approx([0.1, 0.2, 0.3])
+    assert joint["origin"]["rpy"] == pytest.approx([0.0, 0.1, math.pi / 4.0])
+    assert joint["child_origin"] == {"xyz": [0.0, 0.0, 0.0], "rpy": [0.0, 0.0, 0.0]}
     limits = cast(dict[str, float], joint["motion_limits"])
     assert limits["lower"] == pytest.approx(-0.1)
     assert limits["upper"] == pytest.approx(0.2)

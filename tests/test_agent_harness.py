@@ -137,7 +137,7 @@ def test_agent_writes_compiles_and_returns_final_response(tmp_path) -> None:
     assert "<sdk_docs>" not in first_query.messages[0]["content"]
     assert [message["role"] for message in first_query.messages[:3]] == ["system", "user", "user"]
     assert first_query.messages[1]["content"].startswith("<sdk_quickstart>")
-    assert "docs/sdk/common/30_articulated_object.md" in first_query.messages[1]["content"]
+    assert "docs/sdk/common/30_assembly.md" in first_query.messages[1]["content"]
     assert first_query.messages[2]["content"].startswith("<task>")
     assert "a box" in first_query.messages[2]["content"]
     assert {tool["name"] for tool in first_query.tools} == {

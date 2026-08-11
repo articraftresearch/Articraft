@@ -224,7 +224,8 @@ def test_pose_changes_prismatic_part_transform_and_restores() -> None:
     base = model.rigid_body("base")
     add_box(base, "body")
     slider = model.rigid_body("slider")
-    add_box(slider, "body")
+    # Clear of the base at rest, so sliding back is what brings them together.
+    add_box(slider, "body", x=1.5)
     model.joint(
         "slide",
         body0=base,
@@ -236,6 +237,7 @@ def test_pose_changes_prismatic_part_transform_and_restores() -> None:
     ctx = TestContext(model)
 
     rest = ctx.part_world_position("slider")
+    assert not ctx.expect_collision("base", "slider", shape_a="body", shape_b="body")
     with ctx.pose({"slide": -1.25}):
         posed = ctx.part_world_position("slider")
         assert ctx.expect_collision("base", "slider", shape_a="body", shape_b="body")

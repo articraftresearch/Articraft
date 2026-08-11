@@ -1564,12 +1564,16 @@ def _articulation_sweep_values(articulation: Joint, samples: int) -> list[float]
     continuous or unbounded joint samples a half turn (0..pi), which is enough to
     reveal a child that separates as it rotates.
     """
-    rotational = [dof for dof in articulation.dofs if cast(JointAxis, dof.axis).is_rotational]
-    limits = rotational[0].limits if rotational else None
-    if limits is not None:
-        low, high = float(limits[0]), float(limits[1])
-    else:
+    dof = articulation.dofs[0] if articulation.dofs else None
+    if dof is None:
+        return [0.0]
+    if dof.limits is not None:
+        low, high = float(dof.limits[0]), float(dof.limits[1])
+    elif cast(JointAxis, dof.axis).is_rotational:
         low, high = 0.0, math.pi
+    else:
+        # An unbounded slide has no range to sweep; the rest pose is all there is.
+        return [0.0]
     if high <= low:
         return [low]
     return [low + (high - low) * index / (samples - 1) for index in range(samples)]
