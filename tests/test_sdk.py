@@ -433,3 +433,40 @@ def test_a_cylinder_ring_poses_when_the_closing_joint_carries_the_travel() -> No
     rigid = cylinder(sliding_closer=False).resolve()
     with pytest.raises(ValidationError, match=r"violates locked axis .* 'slide'"):
         rigid.forward_kinematics({"boom_pivot.rotY": 0.3})
+
+
+def test_a_ring_solves_the_joint_values_it_decides_for_itself() -> None:
+    """Drive the crank and the rest of the linkage follows.
+
+    A four-bar has four joints and one freedom, so three of those values are not
+    the author's to supply -- the ring decides them. Posing the tree alone tears
+    it open, which is the failure a generated excavator spent all eight of its
+    compile attempts on.
+    """
+
+    model = RigidBodyAssembly("four_bar")
+    ground = add_box(model, "ground")
+    crank = add_box(model, "crank")
+    coupler = add_box(model, "coupler")
+    rocker = add_box(model, "rocker")
+    swing = (JointDOF(JointAxis.ROT_Y, limits=(-1.2, 1.2)),)
+    # Authored in place, so each joint is one point named twice.
+    for name, a, b, xyz in (
+        ("ground_crank", ground, crank, (0.0, 0.0, 0.0)),
+        ("crank_coupler", crank, coupler, (0.0, 0.0, 0.08)),
+        ("coupler_rocker", coupler, rocker, (0.12, 0.0, 0.08)),
+        ("rocker_ground", rocker, ground, (0.12, 0.0, 0.0)),
+    ):
+        model.joint(name, body0=a, body1=b, at=xyz, dofs=swing)
+    model.articulation(
+        "main", root=ground, joints=["ground_crank", "crank_coupler", "coupler_rocker"]
+    )
+    resolved = model.resolve()
+    assert resolved.has_closed_loops
+
+    state = resolved.forward_kinematics({"ground_crank.rotY": 0.25})
+
+    assert state.dof_positions["ground_crank.rotY"] == pytest.approx(0.25)
+    # Nobody asked for these; the ring decided them.
+    assert state.dof_positions["crank_coupler.rotY"] != 0.0
+    assert state.dof_positions["coupler_rocker.rotY"] != 0.0

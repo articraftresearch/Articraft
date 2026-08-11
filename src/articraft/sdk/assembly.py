@@ -371,12 +371,13 @@ class ResolvedRigidBodyAssembly:
                         f"limits {dof.limits!r}"
                     )
 
-        transforms = _propagate_transforms(
-            self.rigid_bodies,
-            tuple(item.joint for item in self.joints),
-            self.articulations,
-            positions,
-        )
+        tree = tuple(item.joint for item in self.joints if not item.exclude_from_articulation)
+        closers = tuple(item.joint for item in self.joints if item.exclude_from_articulation)
+        if closers:
+            positions = _close_rings(
+                self.rigid_bodies, tree, closers, self.articulations, positions
+            )
+        transforms = _propagate_transforms(self.rigid_bodies, tree, self.articulations, positions)
         return self.validate_state(PhysicsState(transforms, dof_positions=positions))
 
 
@@ -757,6 +758,146 @@ def _propagate_transforms(
         if not progressed:
             raise ValidationError("assembly graph could not be placed from its root")
     return {body.name: transforms[body] for body in bodies}
+
+
+def _close_rings(
+    bodies: tuple[RigidBody, ...],
+    tree: tuple[Joint, ...],
+    closers: tuple[Joint, ...],
+    articulations: tuple[ResolvedArticulation, ...],
+    positions: dict[str, float],
+    *,
+    rounds: int = 40,
+    tolerance: float = 1e-7,
+) -> dict[str, float]:
+    """Solve the joint values a ring decides for itself.
+
+    A mechanism with a ring has fewer freedoms than joints. Drive the boom and
+    the cylinder that holds it up has no choice: its barrel swings and its rod
+    slides to whatever the geometry demands. Those values are not the author's
+    to supply, so any hinge the caller left unset is solved here.
+
+    Each end of a closer turns on its own hinge toward the other, alternating
+    until the ring shuts -- the same cyclic descent the viewer uses. Values the
+    caller did supply are left alone, so posing stays predictable.
+    """
+
+    hanging = {joint.body1: joint for joint in tree if isinstance(joint.body1, RigidBody)}
+
+    def path_to_root(body: JointEndpoint) -> list[Joint]:
+        walk: list[Joint] = []
+        seen: set[str] = set()
+        while isinstance(body, RigidBody) and body.name not in seen:
+            seen.add(body.name)
+            hinge = hanging.get(body)
+            if hinge is None:
+                break
+            walk.append(hinge)
+            body = hinge.body0
+        return walk
+
+    def inside_ring(near: JointEndpoint, far: JointEndpoint) -> list[Joint]:
+        """The tree joints a ring may move: those between its two ends.
+
+        Anything above the ends' common ancestor carries the whole ring rigidly,
+        so turning it cannot help -- and with several rings sharing an arm, it
+        breaks the ones already closed.
+        """
+
+        far_names = {joint.name for joint in path_to_root(far)}
+        walk: list[Joint] = []
+        for hinge in path_to_root(near):
+            if hinge.name in far_names:
+                break
+            walk.append(hinge)
+        return walk
+
+    solved = dict(positions)
+    solvable = any(
+        cast(JointAxis, dof.axis).is_rotational and joint.dof_id(dof) not in positions
+        for joint in tree
+        for dof in joint.dofs
+    )
+    if not solvable:
+        return solved
+
+    for _ in range(rounds):
+        transforms = _propagate_transforms(bodies, tree, articulations, solved)
+        worst = 0.0
+        for closer in closers:
+            for near, far in ((closer.body0, closer.body1), (closer.body1, closer.body0)):
+                if not isinstance(near, RigidBody) or not isinstance(far, RigidBody):
+                    continue
+                near_frame = closer.frame0 if near is closer.body0 else closer.frame1
+                far_frame = closer.frame1 if near is closer.body0 else closer.frame0
+                # Cyclic descent up the chain: turning an ancestor moves this end
+                # too, and a ring generally needs more than one joint to give.
+                for hinge in inside_ring(near, far):
+                    dof = next(
+                        (
+                            item
+                            for item in hinge.dofs
+                            if cast(JointAxis, item.axis).is_rotational
+                            and hinge.dof_id(item) not in positions
+                        ),
+                        None,
+                    )
+                    if dof is None:
+                        continue
+                    step = _turn_toward(
+                        transforms,
+                        hinge,
+                        cast(JointAxis, dof.axis),
+                        near,
+                        near_frame,
+                        far,
+                        far_frame,
+                    )
+                    if step is None:
+                        continue
+                    worst = max(worst, abs(step))
+                    value = solved.get(hinge.dof_id(dof), 0.0) + step
+                    if dof.limits is not None:
+                        value = min(max(value, dof.limits[0]), dof.limits[1])
+                    solved[hinge.dof_id(dof)] = value
+                    transforms = _propagate_transforms(bodies, tree, articulations, solved)
+        if worst <= tolerance:
+            break
+    return solved
+
+
+def _turn_toward(
+    transforms: Mapping[str, Mat4],
+    hinge: Joint,
+    axis: JointAxis,
+    near: RigidBody,
+    near_frame: JointFrame,
+    far: RigidBody,
+    far_frame: JointFrame,
+) -> float | None:
+    """How far ``near`` must turn on its hinge to point at ``far``'s end of the ring."""
+
+    parent = hinge.body0
+    if not isinstance(parent, RigidBody) or parent.name not in transforms:
+        return None
+    base = transforms[parent.name] @ _frame_matrix(hinge.frame0)
+    pivot = base[:3, 3]
+    direction = base[:3, :3] @ np.eye(3)[axis.component]
+    norm = float(np.linalg.norm(direction))
+    if norm < 1e-12:
+        return None
+    direction = direction / norm
+    tip = (transforms[near.name] @ _frame_matrix(near_frame))[:3, 3] - pivot
+    target = (transforms[far.name] @ _frame_matrix(far_frame))[:3, 3] - pivot
+    tip = tip - float(np.dot(tip, direction)) * direction
+    target = target - float(np.dot(target, direction)) * direction
+    if np.linalg.norm(tip) < 1e-9 or np.linalg.norm(target) < 1e-9:
+        return None
+    tip = tip / np.linalg.norm(tip)
+    target = target / np.linalg.norm(target)
+    return float(
+        np.arctan2(float(np.dot(np.cross(tip, target), direction)), float(np.dot(tip, target)))
+    )
 
 
 def _values_from(joint: Joint, positions: Mapping[str, float]) -> dict[JointAxis, float]:
