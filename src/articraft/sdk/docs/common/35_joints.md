@@ -47,12 +47,56 @@ model.joint(
     name: str,
     *,
     body0: RigidBody | str | WORLD,
-    frame0: JointFrame,
     body1: RigidBody | str | WORLD,
-    frame1: JointFrame,
+    at: tuple[float, float, float] | None = None,
+    frame0: JointFrame | None = None,
+    frame1: JointFrame | None = None,
     dofs: tuple[JointDOF, ...] = (),
 ) -> Joint
 ```
+
+**Use `at`.** Bodies are authored where they sit in the finished object, so a joint is one point
+and both frames are that point. Passing it once is the whole reason a joint cannot come out
+misaligned:
+
+```python
+model.joint(
+    "lid_hinge",
+    body0=base,
+    body1=lid,
+    at=base.anchor("shell", y=0, z=1),
+    dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.57)),),
+)
+```
+
+`frame0` and `frame1` are for the two cases where the ends genuinely differ: a body authored
+around its own origin, and a loop-closing joint. They cannot be combined with `at`.
+
+## `body.anchor(...)`
+
+```python
+body.anchor(
+    shape: str,
+    *,
+    x: float = 0.5,
+    y: float = 0.5,
+    z: float = 0.5,
+    offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> tuple[float, float, float]
+```
+
+A point on one of the body's named shapes, in the body's own frame. Each coordinate runs 0 to 1
+across that shape, so 0.5 is the middle.
+
+**An extreme probes the geometry, not a box.** `z=1` is the surface at the top, at whatever the
+other two coordinates say: on a dome it is the crown, where a bounding box would have given a
+corner floating in the air above the rim. That makes it usable on swept and organic shapes, not
+only boxy ones.
+
+Anchor to the piece the joint actually belongs to. A hinge lives on its lug, so
+`anchor("hinge_lug", z=1)` says what you mean and survives the lug moving or changing size.
+Naming an edge or corner sets two or three coordinates to extremes, which is exact on a boxy
+shape and approximate on a curved one.
 
 The joint kind falls out of `dofs` rather than being named:
 

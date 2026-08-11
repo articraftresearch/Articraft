@@ -2,9 +2,8 @@
 
 Work in meters and radians.
 
-Each `RigidBody` is one rigid body holding named shapes, either `build123d.Shape` or
-`MeshGeometry`. Apply build123d `Pos`, `Rot`, or `Location` before adding; there is no second
-shape transform.
+Each `RigidBody` holds named shapes, either `build123d.Shape` or `MeshGeometry`. Apply
+build123d `Pos`, `Rot`, or `Location` before adding; there is no second shape transform.
 
 ```python
 from build123d import Box, Pos
@@ -29,41 +28,42 @@ Every shape needs a unique name within its part. A color can contain RGB or RGBA
 zero through one.
 
 Within one rigid body, overlapping shapes count as connected -- `leg_1` overlaps up into `top`
-above. To attach a handle or spout, extend its end a few millimeters into the form it meets; it
-then reads as one molded piece.
+above. To attach a handle or spout, extend its end a few millimeters into the form it meets.
 
 Prefer build123d for exact solids, wall thickness, openings, bores, rims and local fillets. Use
-mesh helpers when the form is better described by freeform sections or paths. One body can hold
-both.
+mesh helpers for freeform sections or paths. One body can hold both.
 
-Motion is two steps. `model.joint(...)` connects two bodies at a frame on each, and its `dofs`
-say which axes are free: none is fixed, one rotational is a hinge, one linear is a slide, three
-rotational is a ball. `model.articulation(...)` then names the tree the simulator solves.
+Motion is two steps. `model.joint(...)` connects two bodies, and its `dofs` say which axes are
+free: none is fixed, one rotational is a hinge, one linear is a slide. `model.articulation(...)`
+then names the tree the simulator solves.
 
 ```python
-from articraft.sdk import JointAxis, JointDOF, JointFrame
+from articraft.sdk import JointAxis, JointDOF
 
 
 lid = model.rigid_body("lid")
-lid.add(Box(0.8, 0.5, 0.02), name="panel")
+lid.add(Pos(Z=0.05) * Box(0.8, 0.5, 0.02), name="panel")
 model.joint(
     "lid_hinge",
     body0=body,
-    frame0=JointFrame(xyz=(0.0, 0.25, 0.02)),
     body1=lid,
-    frame1=JointFrame(xyz=(0.0, 0.25, -0.01)),
+    at=body.anchor("top", y=1, z=1),
     dofs=(JointDOF(JointAxis.ROT_Y, limits=(0.0, 1.9)),),
 )
 model.articulation("main", root=body, joints=["lid_hinge"])
 ```
 
+**Author every body where it sits in the finished object**, then name the joint point with `at=`.
+Never offset a body's geometry to sit around its own pivot.
 
-Each frame is where the joint sits *in that body's own coordinates*, so the two coincide at rest.
-Limits are radians for rotation, meters for travel, and must contain zero.
+`body.anchor("top", y=1, z=1)` is a point on a named shape: each axis runs 0 to 1 across it, 0.5
+is the middle, and an extreme probes the geometry itself -- `z=1` is the top surface, on a dome
+the crown, not a bounding box corner. Limits are radians for rotation and meters for travel, and
+must contain zero.
 
 **Count the pivots.** A body pinned in two places takes two joints, which makes the mechanism a
 ring -- linkages, four-bars, grippers and scissors all are. Author every joint it has, then leave
-the ring-closing one out of the articulation. See `docs/sdk/common/35_joints.md`.
+the ring-closing one out of the articulation.
 
 Read only the reference that applies to the next piece of geometry:
 
@@ -94,8 +94,8 @@ algebra, `moving_objects.md` for placement, `operations.md` for solid operations
 `topology_selection.md` for selecting faces and edges. Their examples use arbitrary dimensions;
 convert every one to meters.
 
-Use the reference pages for API discovery, and short `exec_command` inspections after authoring
-to measure bounds, distances, collisions, and posed geometry.
+Use the reference pages for API discovery, and short `exec_command` inspections to measure
+bounds, distances, collisions, and posed geometry.
 
 Read only the executable example closest to the current task:
 

@@ -424,8 +424,21 @@ class RigidBodyAssembly:
         frame0: JointFrame | None = None,
         body1: JointEndpointRef,
         frame1: JointFrame | None = None,
+        at: Sequence[float] | None = None,
         dofs: Iterable[JointDOF] = (),
     ) -> Joint:
+        """Connect two rigid bodies.
+
+        Give ``at`` when both bodies are authored where they sit in the assembly,
+        which is the usual way: the joint is one point and both frames are it.
+        Give ``frame0``/``frame1`` when the two genuinely differ -- a body
+        authored around its own origin, or a joint closing a loop.
+        """
+
+        if at is not None:
+            if frame0 is not None or frame1 is not None:
+                raise ValidationError(f"joint {name!r} takes either at= or frame0/frame1, not both")
+            frame0 = frame1 = JointFrame(xyz=_as_vec3(at, field_name=f"joint {name!r} at"))
         joint = Joint(
             name=name,
             body0=self._endpoint(body0, field_name="body0"),
