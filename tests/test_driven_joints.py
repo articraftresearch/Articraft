@@ -328,3 +328,27 @@ def test_driven_joints_cannot_be_posed_in_checks() -> None:
         ctx.sample_joint("ram_extension")
     with pytest.raises(ValidationError, match="is driven"), ctx.pose({"barrel_swivel": 0.2}):
         pass
+
+
+def test_internal_motion_sweep_skips_driven_and_loop_joints() -> None:
+    """Compiler-standard checks sweep every articulation; a model with drives
+    and closures must pass through them, not explode. This guard regressed a
+    live generation: the agent authored drives, compile failed, and it stripped
+    them all out."""
+
+    from articraft.sdk import TestContext
+
+    model = _ram_model(driven=True)
+    model.articulation(
+        "rod_eye_pin",
+        ArticulationType.REVOLUTE,
+        "arm",
+        "rod",
+        origin=Origin(xyz=ARM_EYE),
+        axis=(0.0, 1.0, 0.0),
+        motion_limits=MotionLimits(lower=-3.0, upper=3.0),
+    )
+    ctx = TestContext(model)
+    ctx.fail_if_articulation_separates_child()
+    report = ctx.report()
+    assert not any("is driven" in failure.details for failure in report.failures)

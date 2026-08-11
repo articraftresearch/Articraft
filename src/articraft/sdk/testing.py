@@ -1178,11 +1178,19 @@ class TestContext:
         gap_tol = _non_negative(gap_tol, "gap_tol")
         check_name = name or f"fail_if_articulation_separates_child(gap_tol={gap_tol:.6g})"
         findings: list[str] = []
+        _tree, loop_closures = partition_articulations(self.model.articulations)
+        loop_names = {item.name for item in loop_closures}
         for articulation in self.model.articulations:
             if articulation.articulation_type not in (
                 ArticulationType.REVOLUTE,
                 ArticulationType.CONTINUOUS,
             ):
+                continue
+            # A driven joint has no value of its own to sweep, and a loop
+            # closure never places its child; both move when the joints that
+            # drive them are swept, so skipping them here loses no coverage a
+            # posable sweep could give.
+            if articulation.drive is not None or articulation.name in loop_names:
                 continue
             parent = _part_name(articulation.parent, field_name="parent")
             child = _part_name(articulation.child, field_name="child")
