@@ -327,6 +327,7 @@ def _write_assembly_usdz(
 
         world = UsdGeom.Xform.Define(stage, "/World")
         stage.SetDefaultPrim(world.GetPrim())
+        _write_scene(stage, "/World/physicsScene", resolved.scene)
         assembly_path = f"/World/{_safe_name(resolved.name)}"
         assembly_prim = UsdGeom.Xform.Define(stage, assembly_path).GetPrim()
         Usd.ModelAPI(assembly_prim).SetKind(Kind.Tokens.assembly)
@@ -385,6 +386,119 @@ def _write_parts(
         mesh_tolerance,
         textured=textured,
         asset_dir=asset_dir,
+    )
+
+
+def _write_body_geometry(
+    stage: Usd.Stage,
+    scope_path: str,
+    bodies,
+    transforms: dict[str, np.ndarray],
+    mesh_tolerance: float,
+    *,
+    textured: bool = False,
+    asset_dir: Path | None = None,
+) -> tuple[dict[str, str], TextureExportReport, dict[str, dict[str, object]]]:
+    UsdGeom.Scope.Define(stage, scope_path)
+    safe_part_names = _safe_name_map(part.name for part in bodies)
+    paths: dict[str, str] = {}
+    masses: dict[str, dict[str, object]] = {}
+    resolver = _TextureResolver() if textured else None
+    # Contact behavior is a property of the substance, so one prim per material
+    # is shared by every collider made of it.
+    # A sibling of parts and joints, not a child of parts: these are shared by the
+    # whole object rather than belonging to any one rigid body.
+    physics_materials_path = f"{scope_path.rsplit('/', 1)[0]}/physics_materials"
+    # The same Material value used by several shapes should be one prim, so a
+    # named appearance can be attached across shapes and parts.
+    appearances_path = f"{scope_path.rsplit('/', 1)[0]}/appearances"
+    shared_appearances: dict[Material, str] = {}
+    requested_shapes = 0
+    textured_shapes = 0
+
+    for part in bodies:
+        part_path = f"{scope_path}/{safe_part_names[part.name]}"
+        paths[part.name] = part_path
+        part_prim = UsdGeom.Xform.Define(stage, part_path).GetPrim()
+        _attrs(part_prim, {"name": part.name})
+        _write_body_state(UsdPhysics.RigidBodyAPI.Apply(part_prim), part.body_state)
+        resolved_mass = _resolve_part_mass(part, mesh_tolerance)
+        if resolved_mass is not None:
+            _write_mass(part_prim, resolved_mass)
+            masses[part.name] = _mass_entry(part, resolved_mass)
+        UsdGeom.Xformable(part_prim).AddTransformOp().Set(_gf_matrix(transforms[part.name]))
+
+        shapes_path = f"{part_path}/shapes"
+        UsdGeom.Scope.Define(stage, shapes_path)
+        materials_path = f"{part_path}/materials"
+        shape_entries = list(part._iter_shapes())
+        safe_shape_names = _safe_name_map(shape.name for shape in shape_entries)
+        if textured or any(shape.display_material is not None for shape in shape_entries):
+            UsdGeom.Scope.Define(stage, materials_path)
+        for shape in shape_entries:
+            safe_shape = safe_shape_names[shape.name]
+            mesh_path = f"{shapes_path}/{safe_shape}"
+            material_path = f"{materials_path}/{safe_shape}"
+
+            display = shape.display_material
+            surface = shape.surface_material
+            selection = resolver.resolve(surface) if resolver and surface else None
+            if resolver is not None and surface is not None and surface.texture is not None:
+                requested_shapes += 1
+            if selection is not None and display is not None and asset_dir is not None:
+                _write_textured_shape(
+                    stage,
+                    mesh_path,
+                    material_path,
+                    shape,
+                    selection,
+                    display,
+                    asset_dir,
+                    mesh_tolerance,
+                )
+                _write_physics_material(
+                    stage,
+                    UsdGeom.Mesh.Get(stage, mesh_path),  # pyright: ignore[reportAttributeAccessIssue]
+                    shape.surface_material,
+                    physics_materials_path,
+                )
+                textured_shapes += 1
+                continue
+
+            trimesh_obj = geometry_to_trimesh(shape.geometry, mesh_tolerance)
+            points, faces = _mesh_arrays(trimesh_obj)
+            normals, normal_interpolation = _normal_data(
+                trimesh_obj,
+                _normal_crease_angle(shape.geometry),
+            )
+            mesh = UsdGeom.Mesh.Define(stage, mesh_path)
+            mesh.CreatePointsAttr(points)
+            mesh.CreateFaceVertexCountsAttr([3] * len(faces))
+            mesh.CreateFaceVertexIndicesAttr([index for face in faces for index in face])
+            mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+            mesh.CreateExtentAttr(UsdGeom.Mesh.ComputeExtent(points))
+            mesh.CreateNormalsAttr([Gf.Vec3f(*normal) for normal in normals.tolist()])
+            mesh.SetNormalsInterpolation(normal_interpolation)
+            mesh.CreateOrientationAttr(UsdGeom.Tokens.rightHanded)
+            _attrs(mesh.GetPrim(), {"name": shape.name, **_substance_attrs(shape)})
+            _write_collision(mesh, trimesh_obj)
+            _write_physics_material(stage, mesh, shape.surface_material, physics_materials_path)
+            if display is not None:
+                # displayColor stays as a fallback for renderers that ignore
+                # UsdShade; the bound UsdPreviewSurface carries the full surface.
+                mesh.CreateDisplayColorAttr([Gf.Vec3f(*display.base_color[:3])])
+                mesh.CreateDisplayOpacityAttr([display.opacity])
+                _bind_shared_appearance(stage, mesh, display, appearances_path, shared_appearances)
+                _attrs(mesh.GetPrim(), _material_attrs(display))
+    errors = tuple(resolver.errors.values()) if resolver is not None else ()
+    return (
+        paths,
+        TextureExportReport(
+            requested_shapes=requested_shapes,
+            textured_shapes=textured_shapes,
+            errors=errors,
+        ),
+        masses,
     )
 
 
@@ -1053,10 +1167,10 @@ def _object_to_payload(
     }
 
 
-def _body_state_payload(part: Part) -> dict[str, object]:
+def _body_state_payload(body: Part | RigidBody) -> dict[str, object]:
     """The manifest view of how a part starts. Angles stay in radians here."""
 
-    state = part.body_state
+    state = body.body_state
     return {
         "enabled": state.enabled,
         "kinematic": state.kinematic,
@@ -1077,10 +1191,15 @@ def _assembly_to_payload(
         "units": "meters",
         "meters_per_unit": 1.0,
         "up_axis": "Z",
+        "scene": {
+            "gravity_direction": list(resolved.scene.direction),
+            "gravity_magnitude": resolved.scene.magnitude,
+        },
         "rigid_bodies": [
             {
                 "name": body.name,
                 "mass": masses.get(body.name),
+                "body_state": _body_state_payload(body),
                 "shapes": [
                     {
                         "name": shape.name,
