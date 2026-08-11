@@ -45,7 +45,7 @@ Image file: `docs/sdk/build123d/assets/stepper_drawing.svg`.
 
 You can modify the script to:
 
-- Replace the part with your own `Part` model
+- Replace the part with your own `RigidBody` model
 - Adjust camera angles and scale
 - Add other views (bottom, rear)
 - Enhance with more labels and dimensions

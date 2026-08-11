@@ -8,24 +8,24 @@ mesh rotations use radians. Build123d rotations use degrees.
 
 ## Create an object
 
-An `ArticulatedObject` contains rigid parts. Each part contains one or more named shapes. Put
+An `RigidBodyAssembly` contains rigid parts. Each part contains one or more named shapes. Put
 shapes in the same part if they always move together.
 
 ```python
 from build123d import Box
 
-from articraft.sdk import ArticulatedObject, TestContext
-from articraft.sdk.export import export_object
+from articraft.sdk import RigidBodyAssembly, TestContext
+from articraft.sdk.export import export_assembly
 
 
-model = ArticulatedObject("box")
-model.part("body").add(Box(0.1, 0.1, 0.1), name="shell")
+model = RigidBodyAssembly("box")
+model.rigid_body("body").add(Box(0.1, 0.1, 0.1), name="shell")
 model.validate()
 
 report = TestContext(model).report()
 assert report.passed
 
-result = export_object(model, "output")
+result = export_assembly(model, "output")
 print(result.usdz)
 ```
 
@@ -42,12 +42,12 @@ and mesh repair. The SDK has builders for common solids and curved forms. It als
 sweeps, section lofts, shells, booleans, welds, and smooth operations.
 
 ```python
-from articraft.sdk import ArticulatedObject, RoundedBoxGeometry
+from articraft.sdk import RigidBodyAssembly, RoundedBoxGeometry
 
 
-model = ArticulatedObject("housing")
+model = RigidBodyAssembly("housing")
 housing = RoundedBoxGeometry((0.12, 0.075, 0.028), radius=0.006)
-model.part("body").add(housing, name="housing", color=(0.25, 0.30, 0.36))
+model.rigid_body("body").add(housing, name="housing", color=(0.25, 0.30, 0.36))
 ```
 
 `MeshGeometry` has a list of vertices and a list of triangle faces. Its transforms change the
@@ -59,27 +59,27 @@ Build123d and mesh geometry use the same local coordinates in a part. Use
 
 ## Add motion
 
-An articulation connects one parent part to one child part. The SDK has fixed, revolute,
-continuous, and prismatic articulations.
+A joint connects two rigid bodies and says which of six axes are free. An articulation names
+the tree of joints the simulator solves.
 
 ```python
 from build123d import Box
 
-from articraft.sdk import ArticulationType, MotionLimits, Origin
+from articraft.sdk import JointAxis, JointDOF, JointFrame
 
 
-lid = model.part("lid")
+lid = model.rigid_body("lid")
 lid.add(Box(0.1, 0.1, 0.01), name="panel")
 
-model.articulation(
+model.joint(
     "body_to_lid",
-    ArticulationType.REVOLUTE,
-    "body",
-    "lid",
-    origin=Origin(xyz=(0.0, 0.05, 0.05)),
-    axis=(1.0, 0.0, 0.0),
-    motion_limits=MotionLimits(lower=0.0, upper=1.8),
+    body0="body",
+    frame0=JointFrame(xyz=(0.0, 0.05, 0.05)),
+    body1="lid",
+    frame1=JointFrame(),
+    dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.8)),),
 )
+model.articulation("main", root="body", joints=["body_to_lid"])
 ```
 
 Make child geometry in the local frame of the child part. The articulation origin puts that
@@ -105,7 +105,7 @@ Each part becomes one rigid body. Each named shape keeps its mesh and color.
 ## Reference
 
 - Start with the [SDK quickstart](../src/articraft/sdk/docs/common/00_quickstart.md).
-- Read the [object and part API](../src/articraft/sdk/docs/common/30_articulated_object.md).
+- Read the [object and part API](../src/articraft/sdk/docs/common/30_assembly.md).
 - Read the [articulation API](../src/articraft/sdk/docs/common/35_joints.md).
 - Read the [test API](../src/articraft/sdk/docs/common/40_testing.md).
 - Read the [USDZ export API](../src/articraft/sdk/docs/common/50_usdz_export.md).

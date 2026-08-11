@@ -56,7 +56,7 @@ code. It also gives each normal compile a clean Python interpreter.
 The workspace entry point must define these items:
 
 ```python
-def build_object_model() -> ArticulatedObject: ...
+def build_object_model() -> RigidBodyAssembly: ...
 
 object_model = build_object_model()
 

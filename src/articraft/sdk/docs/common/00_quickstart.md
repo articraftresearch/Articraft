@@ -2,18 +2,18 @@
 
 Work in meters. Use radians for rotations and revolute limits.
 
-Each `Part` is one rigid body. Add one or more named shapes to it. A shape can be a
+Each `RigidBody` is one rigid body. Add one or more named shapes to it. A shape can be a
 `build123d.Shape` or `MeshGeometry`. Apply build123d `Pos`, `Rot`, or `Location` before you add
 the shape. There is no second shape transform.
 
 ```python
 from build123d import Box, Pos
 
-from articraft.sdk import ArticulatedObject, TestContext, TestReport
+from articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
 
-model = ArticulatedObject("small_table")
-body = model.part("body")
+model = RigidBodyAssembly("small_table")
+body = model.rigid_body("body")
 body.add(Box(0.8, 0.5, 0.04), name="top", color=(0.45, 0.24, 0.10))
 body.add(Pos(X=0.36, Y=0.21, Z=-0.36) * Box(0.04, 0.04, 0.7), name="leg_1")
 
@@ -38,14 +38,44 @@ described by freeform sections or paths. One part can contain both. A mesh weld
 rebuilds all input surfaces on a field grid, so it is not a local fillet for an
 otherwise exact solid.
 
-Use `model.articulation(...)` for fixed, revolute, continuous, and prismatic motion. Use named
-shape arguments in exact checks when a part contains several shapes.
+Motion is two steps. `model.joint(...)` connects two bodies at a frame on each, and its `dofs`
+say which of the six axes are free -- no listed axis means a fixed joint, one rotational axis is
+a hinge, one linear axis is a slide, three rotational axes are a ball. Then
+`model.articulation(...)` names the tree the simulator solves.
+
+```python
+from articraft.sdk import JointAxis, JointDOF, JointFrame
+
+
+lid = model.rigid_body("lid")
+lid.add(Box(0.8, 0.5, 0.02), name="panel")
+model.joint(
+    "lid_hinge",
+    body0=body,
+    frame0=JointFrame(xyz=(0.0, 0.25, 0.02)),
+    body1=lid,
+    frame1=JointFrame(xyz=(0.0, 0.25, -0.01)),
+    dofs=(JointDOF(JointAxis.ROT_Y, limits=(0.0, 1.9)),),
+)
+model.articulation("main", root=body, joints=["lid_hinge"])
+```
+
+Each frame is where the joint sits *in that body's own coordinates*, so the two coincide at rest.
+Limits are radians for rotation, meters for travel, and must contain zero -- zero is the pose you
+authored.
+
+**Count the pivots before writing joints.** A body pinned in two places takes two joints, and that
+makes the mechanism a ring: linkages, four-bars, parallel grippers and scissor mechanisms all are.
+Author every joint it physically has, then leave the ring-closing one out of the articulation. See
+`docs/sdk/examples/closed_loop_linkage.py`.
+
+Use named shape arguments in exact checks when a body contains several shapes.
 
 Read only the reference that applies to the next piece of geometry:
 
 - Errors and validation: `docs/sdk/common/10_errors.md`.
 - Shared units and types: `docs/sdk/common/20_core_types.md`.
-- Named shapes and parts: `docs/sdk/common/30_articulated_object.md`.
+- Named shapes and parts: `docs/sdk/common/30_assembly.md`.
 - Articulations: `docs/sdk/common/35_joints.md`.
 - Materials and mass: `docs/sdk/common/37_materials.md`.
 - Simulation settings, gravity and initial motion:
@@ -87,6 +117,8 @@ Read only the executable example closest to the current task:
   `docs/sdk/examples/molded_mug.py`.
 - Mass properties from materials and geometry:
   `docs/sdk/examples/mass_properties.py`.
+- A closed-loop linkage, and which joint to leave out of the articulation:
+  `docs/sdk/examples/closed_loop_linkage.py`.
 - Variable profile sweep and smooth section loft:
   `docs/sdk/examples/variable_sweep_and_loft.py`.
 

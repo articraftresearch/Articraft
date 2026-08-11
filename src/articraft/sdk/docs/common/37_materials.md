@@ -11,10 +11,10 @@ Units are SI: mass in kilograms, density in kg/m^3, lengths in meters, inertia i
 ## Naming a material
 
 ```python
-from articraft.sdk import ArticulatedObject, Material
+from articraft.sdk import RigidBodyAssembly, Material
 
-model = ArticulatedObject("kettle")
-base = model.part("base")
+model = RigidBodyAssembly("kettle")
+base = model.rigid_body("base")
 base.add(shell, name="shell", material=Material.STEEL)
 ```
 
@@ -55,7 +55,7 @@ Material lives on the shape, so a part can be made of more than one thing. Each
 shape is weighed by its own material and the part's mass is the total:
 
 ```python
-box = model.part("toolbox")
+box = model.rigid_body("toolbox")
 box.add(shell, name="shell", material=Material.STEEL)      # 1.4 kg of steel
 box.add(grip, name="grip", material=Material.HARDWOOD)     # 0.2 kg of wood
 box.add(pad, name="foot", material=Material.RUBBER)        # grips the table
@@ -87,10 +87,10 @@ field is optional and anything left out is measured.
 
 ```python
 # a substance the library does not cover
-model.part("stone", mass_properties=MassProperties(density=2600.0))
+model.rigid_body("stone", mass_properties=MassProperties(density=2600.0))
 
 # geometry that stands in for something whose real weight you know
-model.part("motor", mass_properties=MassProperties(mass=0.85, center_of_mass=(0.0, 0.0, 0.04)))
+model.rigid_body("motor", mass_properties=MassProperties(mass=0.85, center_of_mass=(0.0, 0.0, 0.04)))
 ```
 
 An explicit `mass` or `density` applies to the whole part and ignores the shape

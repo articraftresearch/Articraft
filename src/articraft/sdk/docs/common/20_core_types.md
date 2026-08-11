@@ -33,14 +33,14 @@ Every shape has a unique name within its part. A shape can have a `Material`, or
 an RGB/RGBA color as shorthand for a matte material. The SDK has no separate
 visual or asset type.
 
-Read [articulated objects and parts](30_articulated_object.md) for named shape
+Read [articulated objects and parts](30_assembly.md) for named shape
 authoring and validation. Read [mesh geometry and solid
 builders](../mesh/00_mesh_geometry.md) for mesh editing, conversion, and
 procedural builders.
 
 ## Articulation values
 
-`Origin`, `MotionLimits`, `ArticulationType`, and `Articulation` describe the
+`JointFrame`, `JointDOF`, `JointAxis`, `Joint`, and `Articulation` describe the
 connection between two rigid parts. An articulation origin places a child part
 relative to its parent. It does not transform one named shape.
 
@@ -69,9 +69,9 @@ joint targets, stage units, and output numbering.
 
 Use these pages for the complete public surface:
 
-- `ArticulatedObject` and `Part` are documented in [articulated objects and
-  parts](30_articulated_object.md).
-- `Origin`, `MotionLimits`, `ArticulationType`, and `Articulation` are
+- `RigidBodyAssembly` and `RigidBody` are documented in [articulated objects and
+  parts](30_assembly.md).
+- `JointFrame`, `JointDOF`, `JointAxis`, `Joint`, and `Articulation` are
   documented in [articulations](35_joints.md).
 - `MeshGeometry` and mesh builders are documented in [mesh geometry and solid
   builders](../mesh/00_mesh_geometry.md) and the other pages in the mesh

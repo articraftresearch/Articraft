@@ -1,41 +1,41 @@
 # Articulated objects and parts
 
-`ArticulatedObject` is the root model. It owns rigid parts and the
+`RigidBodyAssembly` is the root model. It owns rigid parts and the
 articulations that connect them.
 
 ```python
-from articraft.sdk import ArticulatedObject
+from articraft.sdk import RigidBodyAssembly
 ```
 
 ## Construction
 
 ```python
-ArticulatedObject(name: str)
+RigidBodyAssembly(name: str)
 ```
 
 The name must be a nonempty string. Leading and trailing whitespace is removed.
 There is no `units` argument. The model always uses meters, and
 `model.meters_per_unit` is always `1.0`.
 
-`model.parts` and `model.articulations` are public lists for inspection. Use
+`model.rigid_bodies` and `model.joints` are public lists for inspection. Use
 the authoring helpers below instead of appending to them directly.
 
 ## The authoring order
 
 Build a model in this order:
 
-1. Create the `ArticulatedObject`.
-2. Create every rigid `Part` with `model.part(...)`.
+1. Create the `RigidBodyAssembly`.
+2. Create every rigid `RigidBody` with `model.rigid_body(...)`.
 3. Add one or more named shapes to each part.
 4. Add articulations between parts.
 5. Add design checks and call `model.validate()` before export.
 
 Parent and child parts must already exist when an articulation is added.
 
-## `model.part(...)`
+## `model.rigid_body(...)`
 
 ```python
-model.part(
+model.rigid_body(
     name: str,
     *,
     mass_properties: MassProperties | None = None,
@@ -43,18 +43,18 @@ model.part(
 ) -> Part
 ```
 
-This method creates a `Part`, appends it to `model.parts`, and returns it. Part
+This method creates a `RigidBody`, appends it to `model.rigid_bodies`, and returns it. Part
 names must be unique within the model.
 
 ```python
-body = model.part("body")
-head = model.part("head")
+body = model.rigid_body("body")
+head = model.rigid_body("head")
 ```
 
 An empty part is allowed while the model is being built. Full model validation
 requires every part to contain at least one named shape.
 
-## `Part`
+## `RigidBody`
 
 ```python
 Part(name: str)
@@ -90,7 +90,7 @@ zero through one. RGB gets an alpha value of one.
 from build123d import Box, Cylinder, Pos
 
 
-body = model.part("body")
+body = model.rigid_body("body")
 shell = Box(0.30, 0.22, 0.28)
 trim = Pos(Z=0.15) * Cylinder(0.09, 0.02)
 
@@ -131,7 +131,7 @@ body.add(handle, name="handle")
 ```
 
 The `Pos` values are treated as meters by Articraft. Build123d `Rot` uses
-degrees. There is no second per shape transform in `Part`.
+degrees. There is no second per shape transform in `RigidBody`.
 
 ### Mesh geometry
 
@@ -159,7 +159,7 @@ This method returns the named geometry object. It raises `ValidationError` when
 the name is empty or unknown.
 
 ```python
-housing = model.get_part("body").get_shape("shell")
+housing = model.get_rigid_body("body").get_shape("shell")
 ```
 
 Use the part and shape name together when a test or inspection command must
@@ -178,19 +178,19 @@ then use the articulation origin to place that frame on the parent.
 
 The transform details are in [articulations](35_joints.md).
 
-## `model.get_part(...)`
+## `model.get_rigid_body(...)`
 
 ```python
-model.get_part(part: str | Part) -> Part
+model.get_rigid_body(part: str | Part) -> Part
 ```
 
-Pass a part name or a `Part`. The method resolves the name against this model
+Pass a part name or a `RigidBody`. The method resolves the name against this model
 and returns the stored part. It raises `ValidationError` for an unknown part.
 
-## `model.get_articulation(...)`
+## `model.get_joint(...)`
 
 ```python
-model.get_articulation(name: str | Articulation) -> Articulation
+model.get_joint(name: str | Articulation) -> Articulation
 ```
 
 Pass an articulation name or an `Articulation`. The method returns the stored
@@ -208,7 +208,7 @@ raises `ValidationError` on failure.
 Validation checks all of these rules:
 
 - The model has at least one part.
-- Every entry in `model.parts` is a `Part`.
+- Every entry in `model.rigid_bodies` is a `RigidBody`.
 - Every part has a nonempty unique name.
 - Every part has at least one named nonempty shape.
 - Every build123d shape is nonempty and valid.
@@ -216,7 +216,7 @@ Validation checks all of these rules:
 - Every shape color has three or four values in the allowed range, and every
   shape material is a valid `Material`.
 - Part names are unique.
-- Every entry in `model.articulations` is an `Articulation`.
+- Every entry in `model.joints` is an `Articulation`.
 - Articulation names are unique.
 - Every articulation satisfies its type and limit rules.
 - Every parent and child name refers to a part in this model.
@@ -262,11 +262,11 @@ shape meshes. The USD stage uses meters and Z up.
 ```python
 from build123d import Box
 
-from articraft.sdk import ArticulatedObject, BoxGeometry
+from articraft.sdk import RigidBodyAssembly, BoxGeometry
 
 
-model = ArticulatedObject("mixed_body")
-body = model.part("body")
+model = RigidBodyAssembly("mixed_body")
+body = model.rigid_body("body")
 
 body.add(Box(0.30, 0.20, 0.08), name="housing", color=(0.25, 0.30, 0.36))
 

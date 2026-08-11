@@ -13,25 +13,25 @@ from __future__ import annotations
 from build123d import Box
 
 from articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
+    JointAxis,
+    JointDOF,
+    JointFrame,
     Material,
-    MotionLimits,
-    Origin,
+    RigidBodyAssembly,
     TestContext,
     TestReport,
 )
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("hinged_box")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("hinged_box")
 
-    base = model.part("base")
+    base = model.rigid_body("base")
     # Saying what a shape is made of settles its mass, how it behaves on contact,
     # and how it looks. Aluminum comes out light and metallic without asking.
     base.add(Box(0.10, 0.08, 0.04), name="body", material=Material.ALUMINUM)
 
-    lid = model.part("lid")
+    lid = model.rigid_body("lid")
     lid.add(
         # Part geometry is authored in the part's LOCAL frame; the hinge
         # origin (0, -0.04, 0.02) maps it into the parent. Local (0, 0.04,
@@ -46,17 +46,18 @@ def build_object_model() -> ArticulatedObject:
         color=(0.62, 0.45, 0.16),
     )
 
-    model.articulation(
+    # The hinge line is the lid/base contact edge: rotating around it keeps the
+    # parts touching instead of pulling the lid off the box. Both frames sit on
+    # that edge, each in its own body's coordinates, so they coincide at rest.
+    model.joint(
         "lid_hinge",
-        ArticulationType.REVOLUTE,
-        base,
-        lid,
-        # The hinge line is the lid/base contact edge: rotating around it
-        # keeps the parts touching instead of pulling the lid off the box.
-        origin=Origin(xyz=(0.0, -0.04, 0.02)),
-        axis=(1.0, 0.0, 0.0),
-        motion_limits=MotionLimits(lower=0.0, upper=1.5708),
+        body0=base,
+        frame0=JointFrame(xyz=(0.0, -0.04, 0.02)),
+        body1=lid,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.5708)),),
     )
+    model.articulation("main", root=base, joints=["lid_hinge"])
     return model
 
 

@@ -2,15 +2,15 @@
 
 The compile worker exports one USDZ package after it runs the authored tests and compiler owned
 checks. It saves the package when the object can be exported, even if a check fails. In an agent
-run, use the `compile` tool. Do not call `export_object` from generated `main.py`, because that
+run, use the `compile` tool. Do not call `export_assembly` from generated `main.py`, because that
 would bypass the compiler owned checks and publication rules.
 
 Code using articraft as a regular Python SDK can export directly:
 
 ```python
-from articraft.sdk.export import export_object
+from articraft.sdk.export import export_assembly
 
-result = export_object(object_model, "output")
+result = export_assembly(object_model, "output")
 print(result.usdz)
 ```
 

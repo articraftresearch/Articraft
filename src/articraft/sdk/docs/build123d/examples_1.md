@@ -514,7 +514,7 @@ Include options:
 
 Image file: `docs/sdk/build123d/assets/examples/stud_wall.png`.
 
-This example demonstrates creating custom `Part` objects and putting them into
+This example demonstrates creating custom `RigidBody` objects and putting them into
 assemblies. The custom object is a `Stud` used in the building industry while
 the assembly is a `StudWall` created from copies of `Stud` objects for efficiency.
 Both the `Stud` and `StudWall` objects use `RigidJoints` to define snap points which

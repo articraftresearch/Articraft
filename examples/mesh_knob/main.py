@@ -10,8 +10,8 @@ Compile it:  python -m articraft.compiler.worker <run_dir>
 from __future__ import annotations
 
 from articraft.sdk import (
-    ArticulatedObject,
     LatheGeometry,
+    RigidBodyAssembly,
     TestContext,
     TestReport,
 )
@@ -35,9 +35,9 @@ RIDGE_PROFILE = [
 ]
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("knob")
-    knob = model.part("knob")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("knob")
+    knob = model.rigid_body("knob")
 
     body = LatheGeometry(PROFILE)
     ridge = LatheGeometry(RIDGE_PROFILE)
@@ -50,6 +50,6 @@ object_model = build_object_model()
 
 def run_tests() -> TestReport:
     ctx = TestContext(object_model)
-    body = object_model.get_part("knob").get_shape("body")
+    body = object_model.get_rigid_body("knob").get_shape("body")
     ctx.check("body_is_watertight", body.is_watertight, "the union must stay watertight")
     return ctx.report()

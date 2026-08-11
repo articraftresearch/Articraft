@@ -3,35 +3,36 @@ from __future__ import annotations
 from build123d import Box
 
 from articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
     BoxGeometry,
-    MotionLimits,
-    Origin,
+    JointAxis,
+    JointDOF,
+    JointFrame,
+    RigidBodyAssembly,
     TestContext,
     TestReport,
 )
 
 
-def build_object_model() -> ArticulatedObject:
-    model = ArticulatedObject("mixed_assembly")
+def build_object_model() -> RigidBodyAssembly:
+    model = RigidBodyAssembly("mixed_assembly")
 
-    base = model.part("base")
+    base = model.rigid_body("base")
     base.add(Box(0.30, 0.22, 0.10), name="plinth", color=(0.2, 0.22, 0.25))
 
-    arm = model.part("arm")
+    arm = model.rigid_body("arm")
     arm_mesh = BoxGeometry((0.04, 0.04, 0.20)).translate(0.0, 0.0, 0.10)
     arm.add(arm_mesh, name="upright", color=(0.78, 0.48, 0.12, 1.0))
 
-    model.articulation(
+    # The frames meet: on top of the plinth, and at the arm's foot.
+    model.joint(
         "base_to_arm",
-        ArticulationType.REVOLUTE,
-        base,
-        arm,
-        origin=Origin(xyz=(0.0, 0.0, 0.05)),
-        axis=(0.0, 1.0, 0.0),
-        motion_limits=MotionLimits(lower=-0.8, upper=0.8),
+        body0=base,
+        frame0=JointFrame(xyz=(0.0, 0.0, 0.05)),
+        body1=arm,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=(-0.8, 0.8)),),
     )
+    model.articulation("main", root=base, joints=["base_to_arm"])
     return model
 
 

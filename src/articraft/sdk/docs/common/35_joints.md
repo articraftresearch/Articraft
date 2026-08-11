@@ -1,363 +1,144 @@
-# Articulations
+# Joints and articulations
 
-An articulation places one child part relative to one parent part and defines
-their allowed motion.
-
-The public articulation API uses these types:
+Motion is two steps. A **joint** connects two rigid bodies and says which
+freedoms they have. An **articulation** names the tree of joints the simulator
+solves; anything left out of it closes a loop.
 
 ```python
-from articraft.sdk import (
-    Articulation,
-    ArticulationType,
-    MotionLimits,
-    Origin,
-)
+from articraft.sdk import WORLD, JointAxis, JointDOF, JointFrame
 ```
 
-## `Origin`
+## `JointFrame`
 
 ```python
-Origin(
+JointFrame(
     xyz: tuple[float, float, float] = (0.0, 0.0, 0.0),
     rpy: tuple[float, float, float] = (0.0, 0.0, 0.0),
 )
 ```
 
-`xyz` places the articulation frame in the parent part frame. It uses meters.
-`rpy` rotates that frame with roll, pitch, and yaw in radians.
+Where the joint sits **in one body's own coordinates**, in meters and radians.
+Every joint has two: one per body. They coincide at rest, so placing them is how
+you say "these two points are pinned together."
 
-The rotation order is:
+`rpy` is roll, pitch, then yaw, applied in that order. Rotating a frame is also
+how you get an axis the six named ones do not cover: to hinge about the
+diagonal `(1, 1, 0)`, yaw the frame 45 degrees and use its own X.
 
-```text
-Rz(yaw) @ Ry(pitch) @ Rx(roll)
-```
-
-Both tuples must contain three finite numeric values. `Origin` is immutable.
-
-## Frame and direction rules
-
-Articraft evaluates a child transform with this order:
-
-```text
-world(child) = world(parent) @ origin @ motion(q)
-```
-
-This gives the following rules:
-
-1. `origin` is relative to the parent part.
-2. `axis` is expressed in the rotated articulation frame, not in world space.
-3. At `q = 0`, the child part frame is the articulation frame.
-4. Positive revolute and continuous motion follows the right hand rule around
-   `axis`.
-5. Positive prismatic motion moves the child along positive `axis`.
-
-The SDK normalizes a moving articulation axis before applying motion. Provide a
-clear unit direction anyway. A moving articulation rejects a zero axis.
-
-## `ArticulationType`
-
-There are four articulation types.
-
-| Type | Motion value | Required limits |
-| --- | --- | --- |
-| `FIXED` | No motion | No `MotionLimits` |
-| `REVOLUTE` | Rotation in radians | Finite `lower` and `upper` |
-| `CONTINUOUS` | Unbounded rotation in radians | `MotionLimits` without position bounds |
-| `PRISMATIC` | Translation in meters | Finite `lower` and `upper` |
-
-The exact lowercase strings `"fixed"`, `"revolute"`, `"continuous"`, and
-`"prismatic"` are also accepted. Prefer `ArticulationType` values.
-
-## `MotionLimits`
+## `JointDOF`
 
 ```python
-MotionLimits(
-    effort: float = 1.0,
-    velocity: float = 1.0,
-    lower: float | None = None,
-    upper: float | None = None,
-)
+JointDOF(axis: JointAxis, limits: tuple[float, float] | None = None)
 ```
 
-`effort` and `velocity` must be positive finite values. `lower` and `upper`
-must be finite when present. `lower` may equal `upper`, but it cannot be greater
-than `upper`.
+One freedom the joint allows. `JointAxis` has six members — `TRANS_X`,
+`TRANS_Y`, `TRANS_Z`, `ROT_X`, `ROT_Y`, `ROT_Z` — and any axis you do not list
+is locked.
 
-Revolute bounds use radians. Prismatic bounds use meters. Continuous
-articulations leave both bounds as `None`.
+`limits` is `(lower, upper)`, in meters for a linear axis and radians for a
+rotational one. **A range must contain zero**, because zero is the pose you
+authored the object in. Leave `limits` out for a free axis, such as a wheel that
+spins without end.
 
-Rotational velocity uses radians per second. Prismatic velocity uses meters per
-second. Effort is stored as numeric metadata for another system to interpret.
-
-The SDK stores effort and velocity and writes them to export metadata. Mini
-Articraft does not simulate force, torque, or velocity. Position bounds are not
-an automatic clamp for authored test poses. Supply pose values that make sense
-for the design.
-
-`MotionLimits` is immutable.
-
-## `Articulation`
+## `model.joint(...)`
 
 ```python
-Articulation(
+model.joint(
     name: str,
-    articulation_type: ArticulationType | str,
-    parent: str,
-    child: str,
-    origin: Origin = Origin(),
-    axis: tuple[float, float, float] = (0.0, 0.0, 1.0),
-    motion_limits: MotionLimits | None = None,
+    *,
+    body0: RigidBody | str | WORLD,
+    frame0: JointFrame,
+    body1: RigidBody | str | WORLD,
+    frame1: JointFrame,
+    dofs: tuple[JointDOF, ...] = (),
+) -> Joint
+```
+
+The joint kind falls out of `dofs` rather than being named:
+
+| `dofs` | what it is |
+| --- | --- |
+| `()` | fixed — the bodies are welded |
+| one rotational axis | a hinge |
+| one linear axis | a slide |
+| three rotational axes | a ball joint |
+| any other combination | a general joint, exported as USD D6 |
+
+```python
+lid_hinge = model.joint(
+    "lid_hinge",
+    body0=base,
+    frame0=JointFrame(xyz=(0.0, -0.04, 0.02)),
+    body1=lid,
+    frame1=JointFrame(),
+    dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.57)),),
 )
 ```
 
-The constructor validates the name, type, frame, axis, and type specific motion
-limits. It also rejects an articulation whose parent and child names are the
-same.
-
-Prefer `model.articulation(...)` for authoring. It also resolves the parent and
-child against the current model and checks articulation name uniqueness before
-appending the articulation.
+`body0` and `body1` are symmetric — neither is the parent. One of them may be
+`WORLD`, which pins a body to the ground rather than to another body.
 
 ## `model.articulation(...)`
 
 ```python
 model.articulation(
     name: str,
-    articulation_type: ArticulationType | str,
-    parent: str | Part,
-    child: str | Part,
     *,
-    origin: Origin | None = None,
-    axis: tuple[float, float, float] = (0.0, 0.0, 1.0),
-    motion_limits: MotionLimits | None = None,
+    root: RigidBody | Joint | str,
+    joints: Iterable[Joint | str] | None = None,
 ) -> Articulation
 ```
 
-`origin=None` becomes `Origin()`. The method accepts part names or the `Part`
-objects returned by `model.part(...)`. Both parts must already exist.
+Names the spanning tree the simulator solves in reduced coordinates. `root` is
+the body the tree hangs from, or a `WORLD` joint that anchors it.
 
-The returned `Articulation` is the same object stored in
-`model.articulations`.
+`joints` may be omitted when the assembly is one unambiguous tree; list them
+when there is a ring, because then you are choosing which joint is left out.
 
-## Fixed articulation
+## Closed loops
 
-A fixed articulation places a child without adding motion. Do not pass
-`motion_limits`.
+Count the pivots before writing joints. **A body pinned in two places takes two
+joints, and that makes the mechanism a ring rather than a chain.** Linkages,
+four-bars, parallel grippers, scissor mechanisms and folding braces all are.
 
-```python
-model.articulation(
-    "base_to_post",
-    ArticulationType.FIXED,
-    base,
-    post,
-    origin=Origin(xyz=(0.0, 0.0, 0.08)),
-)
-```
-
-The axis is not used for fixed motion. It still must contain three finite
-numeric values because every `Articulation` has an axis field.
-
-## Revolute articulation
-
-A revolute articulation rotates the child around a bounded axis. Both position
-bounds are required and use radians.
+Author every joint the mechanism physically has, then leave the ring-closing one
+out of the articulation:
 
 ```python
-model.articulation(
-    "post_to_arm",
-    ArticulationType.REVOLUTE,
-    post,
-    arm,
-    origin=Origin(xyz=(0.0, 0.0, 0.22)),
-    axis=(0.0, 1.0, 0.0),
-    motion_limits=MotionLimits(
-        effort=5.0,
-        velocity=2.0,
-        lower=-0.8,
-        upper=0.8,
-    ),
-)
+model.joint("ground_left", body0=ground, frame0=JointFrame(), body1=left, frame1=JointFrame(), dofs=swing)
+model.joint("left_coupler", body0=left, frame0=JointFrame(xyz=(0.0, 0.0, RISE)), body1=coupler, frame1=JointFrame(), dofs=swing)
+model.joint("coupler_right", body0=coupler, frame0=JointFrame(xyz=(SPAN, 0.0, 0.0)), body1=right, frame1=JointFrame(xyz=(0.0, 0.0, RISE)), dofs=swing)
+model.joint("ground_right", body0=ground, frame0=JointFrame(xyz=(SPAN, 0.0, 0.0)), body1=right, frame1=JointFrame(), dofs=swing)
+
+model.articulation("main", root=ground, joints=["ground_left", "left_coupler", "coupler_right"])
 ```
 
-If positive motion turns the child the wrong way, reverse the axis. Keep lower
-and upper in their numeric order.
+`ground_right` still exports, as a regular USD joint marked
+`physics:excludeFromArticulation`, which a physics engine enforces as the pin it
+is. `resolved.has_closed_loops` reports whether a ring was found.
 
-## Continuous articulation
+Authoring a ring as a chain is a modelling error: the parts export and then flap
+loose the moment the object is simulated. See
+`docs/sdk/examples/closed_loop_linkage.py`.
 
-A continuous articulation rotates without lower or upper position bounds. It
-still requires `MotionLimits` for positive effort and velocity values.
+**A loop-closing joint cannot be posed.** Its value is decided by the rest of
+the mechanism, so `ctx.pose({...})` rejects it — pose the tree joints instead.
+Posing a closed loop from joint values is not supported at all; supply body
+poses or let a physics engine solve it.
 
-```python
-model.articulation(
-    "housing_to_rotor",
-    ArticulationType.CONTINUOUS,
-    housing,
-    rotor,
-    axis=(0.0, 0.0, 1.0),
-    motion_limits=MotionLimits(effort=2.0, velocity=10.0),
-)
+## Frames must meet
+
+The two frames of a joint coincide at rest. If they do not, validation says so
+against the axis that disagrees:
+
+```
+physics state violates locked axis 'transX' on joint 'crank_coupler': value=-0.3
 ```
 
-Passing `lower` or `upper` to a continuous articulation raises
-`ValidationError`.
+That means the bodies are 0.3 m apart along X where the joint says they are
+pinned. Move a frame, or the geometry, until they meet.
 
-## Prismatic articulation
+## Units
 
-A prismatic articulation moves the child along an axis. Both position bounds
-are required and use meters.
-
-```python
-model.articulation(
-    "cabinet_to_drawer",
-    ArticulationType.PRISMATIC,
-    cabinet,
-    drawer,
-    origin=Origin(xyz=(0.0, 0.0, 0.12)),
-    axis=(1.0, 0.0, 0.0),
-    motion_limits=MotionLimits(
-        effort=40.0,
-        velocity=0.25,
-        lower=0.0,
-        upper=0.28,
-    ),
-)
-```
-
-Model a sliding member with enough hidden length to remain inside its guide at
-maximum travel. Put the articulation origin at the seating plane or guide
-entry. Set the upper bound to the usable travel after the required insertion
-length is kept.
-
-## Rotated articulation frames
-
-`Origin.rpy` rotates the meaning of `axis` because the axis is local to the
-articulation frame.
-
-```python
-model.articulation(
-    "base_to_tilted_arm",
-    ArticulationType.REVOLUTE,
-    base,
-    arm,
-    origin=Origin(
-        xyz=(0.0, 0.0, 0.16),
-        rpy=(0.0, 0.0, 0.5),
-    ),
-    axis=(0.0, 1.0, 0.0),
-    motion_limits=MotionLimits(lower=-0.6, upper=0.9),
-)
-```
-
-The `0.5` yaw value is in radians. Build123d `Rot` is unrelated and uses
-degrees.
-
-## The articulation tree
-
-Full model validation requires one rooted tree.
-
-- Each child part may have only one parent articulation.
-- Parent and child must be different parts.
-- Exactly one part must have no parent articulation.
-- Every other part must be reachable from that root along tree edges.
-- Detached branches are invalid.
-
-A single part model needs no articulation and is its own root.
-
-## Closing a loop
-
-A mechanism may pin two parts that already both have parents: a four bar
-linkage, or a hydraulic ram whose rod pushes on the boom it came from. Declare
-that pin as one more articulation. The first articulation declared for each
-child owns the tree edge; a later articulation reaching the same child closes
-the loop.
-
-- Declare the main chains first, then the closing pins, with the already
-  parented part as the child.
-- A loop closing joint is exported as a regular USD joint marked
-  `physics:excludeFromArticulation`, so physics engines enforce the pin.
-- It does not place its child and cannot be posed. To keep the linkage
-  assembled while posing, give the loop members a `drive` (below).
-
-The tree rule describes rigid ownership and motion. It does not prove that
-parts touch. Compile time geometry checks report physically isolated parts and
-unintended overlaps separately.
-
-## Lookup and inspection
-
-```python
-hinge = model.get_articulation("post_to_arm")
-```
-
-The returned object exposes these fields:
-
-- `name`
-- `articulation_type`
-- `parent` and `child`
-- `origin`
-- `axis`
-- `motion_limits`
-
-Call `articulation.validate()` to validate one articulation again. Call
-`model.validate()` to check its part references and its place in the complete
-tree.
-
-## Joints the mechanism decides: `SpanTo` and `AimAt`
-
-Some joints do not have a value of their own. A hydraulic ram is however long
-the gap between its two eyes happens to be, and its barrel points wherever that
-far eye has moved to. Posing such a joint by hand is what pulls a linkage apart:
-swing the boom, and a ram that was told to hold still tears off its pin.
-
-Give the joint a `drive` and it is solved from the rest of the model instead of
-posed. A `drive` reads a point on a part the joint does not move.
-
-- `SpanTo(part, point, rest_length)` on a `PRISMATIC` joint. The value becomes
-  the distance from the joint frame to that anchor, less `rest_length`. Use
-  `rest_length` for the length the joint already spans at its zero value.
-- `AimAt(part, point, reference)` on a `REVOLUTE` joint. The value becomes the
-  rotation about the joint axis that swings `reference` onto that anchor.
-
-A hydraulic ram uses both: the barrel aims at the far eye and the rod spans to
-it.
-
-```python
-model.articulation(
-    "boom_ram_pivot",
-    ArticulationType.REVOLUTE,
-    mount,
-    barrel,
-    origin=Origin(xyz=BARREL_PIVOT, rpy=(0.0, rest_angle, 0.0)),
-    axis=(0.0, 1.0, 0.0),
-    motion_limits=MotionLimits(lower=-0.6, upper=0.6),
-    drive=AimAt("boom", BOOM_EYE),
-)
-model.articulation(
-    "boom_ram_stroke",
-    ArticulationType.PRISMATIC,
-    barrel,
-    rod,
-    axis=(1.0, 0.0, 0.0),
-    motion_limits=MotionLimits(lower=-0.45, upper=0.58),
-    drive=SpanTo("boom", BOOM_EYE, rest_length=rest_distance),
-)
-```
-
-Now posing `boom_hinge` alone keeps both rams assembled. A value passed for a
-driven joint is ignored, because the mechanism owns it.
-
-Rules worth knowing:
-
-- The drive type must match the joint: `SpanTo` for prismatic, `AimAt` for
-  revolute. `Drive` is the union of the two.
-- A drive reads a part that no drive influences: not the joint's own parent or
-  child, nothing in its own subtree, and nothing placed by another driven
-  joint. Drives resolve in one pass, so anchor them on posed structure.
-- Author zero as the assembled pose. At the rest pose every drive must solve to
-  zero: fold the rest angle into the joint origin's `rpy` and the rest gap into
-  `rest_length`. Export refuses anything else, because simulators assemble the
-  mechanism from the baked rest pose.
-- Give the joint honest `motion_limits`. A drive solves the value; it does not
-  check that the mechanism stays inside its travel.
-- Drives are kinematic. They keep the model assembled for posing, rendering, and
-  geometry checks. They are not exported as physics constraints, so a simulator
-  still sees independent joints.
+Meters and radians throughout. Rotational limits are radians here and exported
+to USD as degrees; the exporter converts. Linear limits are meters both ways.

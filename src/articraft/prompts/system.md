@@ -111,7 +111,7 @@ are met.
 
 <authoring_contract>
 `main.py` must define `build_object_model()`, `object_model`, and `run_tests()`.
-`object_model` must be a `articraft.sdk.ArticulatedObject`. `run_tests()`
+`object_model` must be a `articraft.sdk.RigidBodyAssembly`. `run_tests()`
 must return a `articraft.sdk.TestReport`.
 
 Import build123d authoring names from `build123d`. Import public object, mesh,
@@ -134,8 +134,8 @@ cleanly. Do not rely on nearly tangent or coincident booleans.
 Create geometry through parts. The exact API is:
 
 ```python
-model = ArticulatedObject("object_name")
-base = model.part("base")
+model = RigidBodyAssembly("object_name")
+base = model.rigid_body("base")
 base.add(shape, name="body", material=Material.STEEL)
 ```
 
@@ -150,17 +150,27 @@ grippy like rubber. Add `color=` to tint one shape. For anything more, derive a
 variant with `Material.STEEL.but(roughness=0.75)` and give it a name to reuse.
 Build a new one only when the library has nothing close: `Material(name="ceramic",
 density=2400.0)`. Never encode material semantics in the shape name.
-Use `part.get_shape(name)` when a named shape is needed later. Do not invent a
-`GeometryElement` API, and do not pass geometry to `model.part(...)`.
+Use `body.get_shape(name)` when a named shape is needed later. Do not invent a
+`GeometryElement` API, and do not pass geometry to `model.rigid_body(...)`.
 
-Create joints with `model.articulation(...)` and the documented
-`ArticulationType`, `Origin`, and `MotionLimits` values. Use `FIXED` for mounted
-parts, `REVOLUTE` for bounded hinges and pivots, `CONTINUOUS` for free rotation,
-and `PRISMATIC` for linear travel. Use the exact signatures in the current SDK
-docs. Do not use build123d joints to describe articraft motion.
+Motion is two steps. `model.joint(...)` connects two bodies at a `JointFrame` on
+each, and its `dofs` say which axes are free: no `JointDOF` is a fixed joint, one
+rotational axis is a hinge, one linear axis is a slide, three rotational axes are
+a ball. Then `model.articulation(root=..., joints=[...])` names the spanning tree
+the simulator solves. Use the exact signatures in the current SDK docs. Do not
+use build123d joints to describe articraft motion.
 
-All linear values are meters. Use radians for `Origin.rpy` and revolute motion
-limits. Use the same meter scale for build123d coordinates, mesh helper inputs,
+Count the pivots before writing joints. A body pinned in two places takes two
+joints, and that makes the mechanism a ring rather than a chain -- linkages,
+four-bars, parallel grippers, scissor mechanisms and folding braces all are.
+Author every joint the mechanism physically has, then leave the ring-closing one
+out of the articulation. Authoring a ring as a chain is a modelling error: the
+parts export and then flap loose under simulation.
+
+The two frames of a joint coincide at rest, so place each in its own body's
+coordinates. All linear values are meters. Use radians for `JointFrame.rpy` and
+rotational limits, and make every limit range contain zero, because zero is the
+pose you authored. Use the same meter scale for build123d coordinates, mesh helper inputs,
 prismatic travel, and test distances.
 </authoring_contract>
 

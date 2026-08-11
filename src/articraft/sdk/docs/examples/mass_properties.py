@@ -19,12 +19,12 @@ from __future__ import annotations
 import math
 
 from articraft.sdk import (
-    ArticulatedObject,
-    ArticulationType,
     CylinderGeometry,
+    JointAxis,
+    JointDOF,
+    JointFrame,
     Material,
-    MotionLimits,
-    Origin,
+    RigidBodyAssembly,
     RoundedBoxGeometry,
     TestContext,
     TestReport,
@@ -37,13 +37,13 @@ HEIGHT = 0.10
 HINGE_Y = -RADIUS  # the pivot sits on the rear rim
 
 
-def build_object_model() -> ArticulatedObject:
+def build_object_model() -> RigidBodyAssembly:
     """A round tin: a steel base, a hollow steel body, and a hardwood lid."""
 
-    model = ArticulatedObject("weighted_tin")
+    model = RigidBodyAssembly("weighted_tin")
 
     # Steel base disc. Mass is the material's density times the measured volume.
-    base = model.part("base")
+    base = model.rigid_body("base")
     base.add(
         CylinderGeometry(RADIUS + 0.006, 0.006, radial_segments=64).translate(0.0, 0.0, 0.003),
         name="base_disc",
@@ -52,7 +52,7 @@ def build_object_model() -> ArticulatedObject:
 
     # Hollow steel body: the cavity is cut away, so the measured volume is the
     # wall rather than a solid cylinder, and the mass follows automatically.
-    body_part = model.part("body")
+    body_part = model.rigid_body("body")
     # Weld the hinge lug onto the solid cylinder first, then cut the cavity. Welding
     # into an already-hollow shell makes the bead negotiate the thin wall and the
     # curved inner surface at once, which is where slivers and degenerate faces come
@@ -76,7 +76,7 @@ def build_object_model() -> ArticulatedObject:
 
     # A hardwood lid, authored in the hinge frame: the disc reaches forward from
     # the pivot so it covers the mouth, and the barrel sits on the pivot itself.
-    lid = model.part("lid")
+    lid = model.rigid_body("lid")
     disc = CylinderGeometry(RADIUS, 0.008, radial_segments=64).translate(0.0, RADIUS, 0.004)
     barrel = CylinderGeometry(0.006, 0.024, radial_segments=32).rotate_y(math.pi / 2)
     lid.add(
@@ -85,22 +85,23 @@ def build_object_model() -> ArticulatedObject:
         material=Material.HARDWOOD,
     )
 
-    model.articulation(
+    # No free axes is a fixed joint: the body is welded to its base.
+    model.joint(
         "body_to_base",
-        ArticulationType.FIXED,
-        base,
-        body_part,
-        origin=Origin(xyz=(0.0, 0.0, 0.006)),
+        body0=base,
+        frame0=JointFrame(xyz=(0.0, 0.0, 0.006)),
+        body1=body_part,
+        frame1=JointFrame(),
     )
-    model.articulation(
+    model.joint(
         "lid_hinge",
-        ArticulationType.REVOLUTE,
-        body_part,
-        lid,
-        origin=Origin(xyz=(0.0, HINGE_Y, HEIGHT)),
-        axis=(1.0, 0.0, 0.0),
-        motion_limits=MotionLimits(effort=4.0, velocity=2.0, lower=0.0, upper=1.9),
+        body0=body_part,
+        frame0=JointFrame(xyz=(0.0, HINGE_Y, HEIGHT)),
+        body1=lid,
+        frame1=JointFrame(),
+        dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.9)),),
     )
+    model.articulation("main", root=base, joints=["body_to_base", "lid_hinge"])
     return model
 
 

@@ -37,7 +37,7 @@ c = Circle(diam / 2) - holes
 ```
 
 Another way to leverage the vectorized algebra operations is to add a list comprehension of objects to
-an empty `Part`, `Sketch` or `Curve`:
+an empty `RigidBody`, `Sketch` or `Curve`:
 
 ```python
 polygons = Sketch() + [
