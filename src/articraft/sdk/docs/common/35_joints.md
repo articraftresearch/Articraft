@@ -134,7 +134,45 @@ fail instead, naming the joint and the axis that no longer meets:
 physics state violates locked axis 'transZ' on joint 'ground_coupler': value=0.08
 ```
 
-That means posing the tree pulled the loop apart. Supply a full `PhysicsState`,
+That means posing the tree pulled the loop apart.
+
+## Choosing which joint closes the ring
+
+**Close the ring on the joint that gives, and give it those axes.** A ring holds
+together while you pose the tree only if the closing joint is free along the
+directions the mechanism actually takes up. Close on a rigid joint and any
+residual lands on a locked axis and fails.
+
+A hydraulic cylinder is the clearest case. Both eyes are pinned, so barrel, rod
+and the two links form a ring, and what gives is the rod sliding in the barrel:
+
+```python
+# The two eye pins go in the tree; they stay on their pins at every pose.
+model.joint("boom_base_eye", body0=mount, frame0=..., body1=barrel, frame1=..., dofs=hinge)
+model.joint("boom_rod_eye", body0=rod, frame0=..., body1=boom, frame1=..., dofs=hinge)
+
+# The barrel/rod interface closes the ring, and carries the freedom that absorbs
+# the motion: X is extension, Z and rotation let the planar linkage converge.
+model.joint(
+    "boom_slide",
+    body0=barrel,
+    frame0=JointFrame(xyz=(barrel_length, 0.0, 0.0)),
+    body1=rod,
+    frame1=JointFrame(),
+    dofs=(
+        JointDOF(JointAxis.TRANS_X, limits=(-0.4, 0.4)),
+        JointDOF(JointAxis.TRANS_Z, limits=(-0.05, 0.05)),
+        JointDOF(JointAxis.ROT_Y, limits=(-0.3, 0.3)),
+    ),
+)
+model.articulation("main", root=mount, joints=[..., "boom_base_eye", "boom_rod_eye"])
+```
+
+The same rule covers the other linkages. In a four-bar, close on a pivot and
+leave the axis the coupler swings through free. If nothing in the ring gives,
+the mechanism has no motion to model and the joints should be fixed.
+
+When the ring truly cannot be satisfied this way, supply a full `PhysicsState`
 or let a physics engine solve it.
 
 ## `PhysicsState`

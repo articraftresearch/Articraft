@@ -155,7 +155,7 @@ def test_closed_loop_joints_are_derived_as_regular_excluded_constraints(
 
     # A four-bar is a real constraint, not a redundant pivot pair: turning the
     # crank pulls the closing joint apart, and the error says which one.
-    with pytest.raises(ValidationError, match="violates locked axis .* 'rocker_ground'"):
+    with pytest.raises(ValidationError, match=r"violates locked axis .* 'rocker_ground'"):
         resolved.forward_kinematics({"ground_crank.rotZ": 0.2})
 
 

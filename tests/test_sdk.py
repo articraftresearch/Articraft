@@ -368,3 +368,68 @@ def test_a_ring_the_tree_cannot_satisfy_names_the_joint_that_broke() -> None:
 
     with pytest.raises(ValidationError, match="ground_coupler"):
         resolved.forward_kinematics({"ground_left.rotY": 0.4})
+
+
+def test_a_cylinder_ring_poses_when_the_closing_joint_carries_the_travel() -> None:
+    """A hydraulic cylinder is a ring whose rod slides to take up the motion.
+
+    Both eyes are pinned, so barrel, rod and the links form a loop. Closing on
+    the barrel/rod slide keeps every residual on a free axis, which is what lets
+    the tree be posed at all. A rigid closer fails instead -- that difference is
+    the whole modelling rule, so both halves are checked here.
+    """
+
+    def cylinder(*, sliding_closer: bool) -> RigidBodyAssembly:
+        model = RigidBodyAssembly("boom")
+        mount = add_box(model, "mount")
+        boom = add_box(model, "boom")
+        barrel = add_box(model, "barrel")
+        rod = add_box(model, "rod")
+        model.joint(
+            "boom_pivot",
+            body0=mount,
+            frame0=JointFrame(),
+            body1=boom,
+            frame1=JointFrame(),
+            dofs=(JointDOF(JointAxis.ROT_Y, limits=(-0.5, 0.5)),),
+        )
+        model.joint(
+            "base_eye",
+            body0=mount,
+            frame0=JointFrame(xyz=(0.1, 0.0, -0.1)),
+            body1=barrel,
+            frame1=JointFrame(),
+            dofs=(JointDOF(JointAxis.ROT_Y, limits=(-0.9, 0.9)),),
+        )
+        model.joint(
+            "rod_eye",
+            body0=rod,
+            frame0=JointFrame(xyz=(0.3, 0.0, 0.0)),
+            body1=boom,
+            frame1=JointFrame(xyz=(0.4, 0.0, -0.1)),
+            dofs=(JointDOF(JointAxis.ROT_Y, limits=(-1.2, 1.2)),),
+        )
+        travel = (
+            ()
+            if sliding_closer is False
+            else (
+                JointDOF(JointAxis.TRANS_X, limits=(-0.4, 0.4)),
+                JointDOF(JointAxis.TRANS_Z, limits=(-0.1, 0.1)),
+                JointDOF(JointAxis.ROT_Y, limits=(-0.4, 0.4)),
+            )
+        )
+        model.joint(
+            "slide", body0=barrel, frame0=JointFrame(), body1=rod, frame1=JointFrame(), dofs=travel
+        )
+        model.articulation("main", root=mount, joints=["boom_pivot", "base_eye", "rod_eye"])
+        return model
+
+    posable = cylinder(sliding_closer=True).resolve()
+    assert posable.has_closed_loops
+    state = posable.forward_kinematics({"boom_pivot.rotY": 0.3})
+    # The rod took up the swing rather than the ring tearing.
+    assert state.dof_positions["slide.transX"] != 0.0
+
+    rigid = cylinder(sliding_closer=False).resolve()
+    with pytest.raises(ValidationError, match=r"violates locked axis .* 'slide'"):
+        rigid.forward_kinematics({"boom_pivot.rotY": 0.3})
