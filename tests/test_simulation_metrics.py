@@ -84,8 +84,13 @@ def test_the_shipped_loop_example_stands_up() -> None:
         data = mujoco.MjData(model)
         mujoco.mj_forward(model, data)
         # The loop closure became an equality constraint, shut at the start pose.
-        assert _loop_pin_anchors(model, data)
-        assert _loop_pin_gap(data, _loop_pin_anchors(model, data)) < 1e-9
+        anchors = _loop_pin_anchors(
+            model,
+            data,
+            connect_type=mujoco.mjtEq.mjEQ_CONNECT,  # pyright: ignore[reportAttributeAccessIssue]
+        )
+        assert anchors
+        assert _loop_pin_gap(data, anchors) < 1e-9
 
         outcome = simulate_usdz(result.usdz, Path(work) / "sim")
 

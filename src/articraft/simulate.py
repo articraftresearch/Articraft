@@ -326,16 +326,19 @@ def simulate_usdz(
     separations = _tracked_body_separations(
         model,
         data.xpos,
-        movable_joint_types=(
-            mujoco.mjtJoint.mjJNT_SLIDE,
-            mujoco.mjtJoint.mjJNT_HINGE,
-            mujoco.mjtJoint.mjJNT_BALL,
-        ),
+        # Hinge and slide are the only kinds this MJCF writer emits: a joint
+        # with several degrees of freedom becomes one axis per freedom.
+        movable_joint_types=(mujoco.mjtJoint.mjJNT_SLIDE, mujoco.mjtJoint.mjJNT_HINGE),
     )
     # A tree joint holds its bodies together exactly, so the only thing that can
     # genuinely come apart is a loop pin: it is a constraint the solver pulls
     # shut rather than a coordinate it cannot violate.
-    pins = _loop_pin_anchors(model, data)
+    pins = _loop_pin_anchors(
+        model,
+        data,
+        # The mujoco stubs omit mjtEq, though the enum is there at runtime.
+        connect_type=mujoco.mjtEq.mjEQ_CONNECT,  # pyright: ignore[reportAttributeAccessIssue]
+    )
     worst_pin = 0.0
 
     root_body = 1  # the free body; MuJoCo orders bodies from the world outward
@@ -510,17 +513,25 @@ def _tracked_body_separations(
     }
 
 
-def _loop_pin_anchors(model: Any, data: Any) -> list[tuple[int, int, Any, Any]]:
+def _loop_pin_anchors(
+    model: Any, data: Any, *, connect_type: Any
+) -> list[tuple[int, int, Any, Any]]:
     """Where each loop pin sits in both of the bodies it holds together.
 
     Read once at the assembled start pose: the pin is a single physical point,
     so its coordinates in either body are fixed facts. Watching those two points
     drift apart is what "did the mechanism stay assembled" actually means, now
     that ordinary joint motion no longer counts.
+
+    Only ``connect`` constraints are read. A weld closure stores a relative pose
+    rather than a single anchor in the same slots, so a shared point is not the
+    right question to ask of it.
     """
 
     anchors: list[tuple[int, int, Any, Any]] = []
     for index in range(model.neq):
+        if model.eq_type[index] != connect_type:
+            continue
         first, second = int(model.eq_obj1id[index]), int(model.eq_obj2id[index])
         if first == 0 or second == 0:
             continue
