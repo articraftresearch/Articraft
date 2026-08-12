@@ -109,7 +109,7 @@
     function resetBodies(){state.parts.forEach(entry=>applyMatrix(entry.node,entry.rest));}
     function jointFrame(frame){const position=new THREE.Vector3(...frame.xyz),quaternion=new THREE.Quaternion().setFromEuler(new THREE.Euler(...frame.rpy,"ZYX"));return new THREE.Matrix4().compose(position,quaternion,new THREE.Vector3(1,1,1));}
     function jointMotion(spec,value){const axis=new THREE.Vector3(...spec.axis).normalize(),position=new THREE.Vector3(),quaternion=new THREE.Quaternion();if(spec.type==="prismatic")position.copy(axis.multiplyScalar(value));else if(spec.type!=="fixed")quaternion.setFromAxisAngle(axis,value);return new THREE.Matrix4().compose(position,quaternion,new THREE.Vector3(1,1,1));}
-    function poseTree(){resetBodies();if(!state.version?.model.can_pose)return;const byParent=new Map(),children=new Set();for(const spec of state.version.model.articulations){if(spec.closes_loop||spec.parent==="WORLD"||spec.child==="WORLD")continue;if(!byParent.has(spec.parent))byParent.set(spec.parent,[]);byParent.get(spec.parent).push(spec);children.add(spec.child);}const visit=(name,matrix,seen)=>{if(seen.has(name))return;const next=new Set(seen).add(name),entry=state.parts.get(name);if(!entry)return;applyMatrix(entry.node,matrix);for(const spec of byParent.get(name)??[]){const joint=state.joints.get(spec.name),child=matrix.clone().multiply(jointFrame(spec.origin)).multiply(jointMotion(spec,joint?.value??0)).multiply(jointFrame(spec.child_origin).invert());visit(spec.child,child,next);}};for(const part of state.version.model.parts)if(!children.has(part.name)){const entry=state.parts.get(part.name);if(entry)visit(part.name,entry.rest.clone(),new Set());}}
+    function poseTree(){resetBodies();if(!state.version?.model.can_pose)return;if(state.version.model.solver==="server")return;const byParent=new Map(),children=new Set();for(const spec of state.version.model.articulations){if(spec.closes_loop||spec.parent==="WORLD"||spec.child==="WORLD")continue;if(!byParent.has(spec.parent))byParent.set(spec.parent,[]);byParent.get(spec.parent).push(spec);children.add(spec.child);}const visit=(name,matrix,seen)=>{if(seen.has(name))return;const next=new Set(seen).add(name),entry=state.parts.get(name);if(!entry)return;applyMatrix(entry.node,matrix);for(const spec of byParent.get(name)??[]){const joint=state.joints.get(spec.name),child=matrix.clone().multiply(jointFrame(spec.origin)).multiply(jointMotion(spec,joint?.value??0)).multiply(jointFrame(spec.child_origin).invert());visit(spec.child,child,next);}};for(const part of state.version.model.parts)if(!children.has(part.name)){const entry=state.parts.get(part.name);if(entry)visit(part.name,entry.rest.clone(),new Set());}}
 
     function applyMaterials(meshes,shapes){const specs=(shapes||[]).filter(shape=>shape.appearance);if(!specs.length)return;const byName=new Map(specs.map(shape=>[shape.usd_name,shape.appearance])),only=specs.length===1?specs[0].appearance:null;for(const mesh of meshes){const material=byName.get(mesh.name)??only;if(!material)continue;for(const target of materials(mesh)){const[r,g,b]=material.base_color;if(target.color)target.color.setRGB(r,g,b,THREE.SRGBColorSpace);if("metalness"in target)target.metalness=material.metallic;if("roughness"in target)target.roughness=material.roughness;if(target.emissive&&material.emissive)target.emissive.setRGB(...material.emissive,THREE.SRGBColorSpace);const opacity=material.opacity??1;if(opacity<1){target.transparent=true;target.opacity=opacity;target.depthWrite=false;}target.needsUpdate=true;}}}
 
@@ -122,7 +122,46 @@
     function renderTree(){const model=state.version.model,byParent=new Map(),children=new Set();model.articulations.forEach(joint=>{if(joint.closes_loop||joint.parent==="WORLD"||joint.child==="WORLD")return;if(!byParent.has(joint.parent))byParent.set(joint.parent,[]);byParent.get(joint.parent).push(joint);children.add(joint.child);});const branch=(name,seen=new Set())=>{if(seen.has(name))return"";const next=new Set(seen).add(name);return`<div class="link"><div class="link-name">${esc(name)}</div><div class="children">${(byParent.get(name)??[]).map(joint=>jointCard(joint)+branch(joint.child,next)).join("")}</div></div>`;};document.querySelector("#tree").innerHTML=model.parts.filter(part=>!children.has(part.name)).map(part=>branch(part.name)).join("");document.querySelectorAll("input[data-joint]").forEach(input=>{const joint=state.joints.get(input.dataset.joint);joint.input=input;joint.current=input.parentElement.querySelector(".current");input.disabled=state.previewMotion;input.addEventListener("input",()=>{joint.value=Number(input.value);move(input.dataset.joint,joint.value);joint.current.textContent=format(joint.spec,joint.value);});});}
 
     function jointCard(joint){const entry=state.joints.get(joint.name),value=entry?.value??0,movable=state.version.model.can_pose&&joint.type!=="fixed"&&!joint.closes_loop&&joint.previewable,limits=joint.motion_limits;let min=0,max=0;if(joint.type==="continuous")[min,max]=[-Math.PI,Math.PI];else if(movable)[min,max]=[limits?.lower??0,limits?.upper??0];return`<div class="joint"><div class="joint-top"><span class="joint-name">${esc(joint.name)}</span><span class="type ${movable?"":"fixed"}">${esc(joint.closes_loop?joint.type+" (loop)":joint.type)}</span></div>${movable?`<input type="range" aria-label="${esc(joint.name)}" data-joint="${esc(joint.name)}" min="${min}" max="${max}" step="any" value="${value}"><div class="values"><span>${format(joint,min)}</span><span class="current">${format(joint,value)}</span><span>${format(joint,max)}</span></div>`:""}</div>`;}
-    function move(name,value){const joint=state.joints.get(name);if(!joint)return;joint.value=value;poseTree();}
+    // A closed loop cannot be posed by walking the tree: driving one joint
+    // decides the others, and only the solver knows what they become. The
+    // server runs the SDK's own solver so this page cannot drift from it.
+    async function poseOnServer(){
+      if(state.solving){state.queued=true;return;}
+      state.solving=true;state.queued=false;
+      const values={};state.joints.forEach((joint,name)=>{values[name]=joint.value;});
+      try{
+        const response=await fetch(`/api/pose/${state.version.id}`,{method:"POST",body:JSON.stringify(values)});
+        if(response.ok){
+          const solved=await response.json();
+          for(const[name,flat]of Object.entries(solved.bodies)){
+            const entry=state.parts.get(name);
+            // set() takes row major, which is how the server flattens them.
+            if(entry)applyMatrix(entry.node,new THREE.Matrix4().set(...flat));
+          }
+          // Followers moved too, so their sliders must say so.
+          for(const[dof,value]of Object.entries(solved.dofs)){
+            const joint=state.joints.get(dof.slice(0,dof.lastIndexOf(".")));
+            if(!joint||joint===state.dragging)continue;
+            joint.value=value;
+            if(joint.input)joint.input.value=value;
+            if(joint.current)joint.current.textContent=format(joint.spec,value);
+          }
+          state.lastGood=values;
+        }else if(state.lastGood){
+          // The mechanism cannot reach this pose. Keep the last one it could.
+          for(const[name,value]of Object.entries(state.lastGood)){
+            const joint=state.joints.get(name);
+            if(!joint)continue;
+            joint.value=value;
+            if(joint.input)joint.input.value=value;
+            if(joint.current)joint.current.textContent=format(joint.spec,value);
+          }
+        }
+      }catch(error){/* the server went away; leave the last pose on screen */}
+      state.solving=false;
+      if(state.queued)poseOnServer();
+    }
+    function move(name,value){const joint=state.joints.get(name);if(!joint)return;joint.value=value;if(state.version?.model.solver==="server"){state.dragging=joint;poseOnServer();}else poseTree();}
     function phaseOffset(name,index){let hash=0;for(const character of name)hash=(hash*33+character.charCodeAt(0))%4096;return THREE.MathUtils.euclideanModulo(hash/4096+index*.61803398875,1);}
     function motionValue(joint,elapsed,index){const limits=joint.spec.motion_limits,lower=limits?.lower,upper=limits?.upper;if(joint.spec.type==="continuous"){const phase=elapsed*preview.continuousSpeed/(Math.PI*2)+phaseOffset(joint.spec.name,index);return THREE.MathUtils.euclideanModulo(phase*Math.PI*2+Math.PI,Math.PI*2)-Math.PI;}const hasRange=Number.isFinite(lower)&&Number.isFinite(upper)&&upper>lower,span=hasRange?upper-lower:joint.spec.type==="prismatic"?.24:Math.PI*2/3,speed=joint.spec.type==="prismatic"?preview.linearSpeed:preview.angularSpeed,cycle=Math.max(preview.minimumCycle,span*2/speed),phase=THREE.MathUtils.euclideanModulo(elapsed/cycle+phaseOffset(joint.spec.name,index),1),wave=.5-.5*Math.cos(phase*Math.PI*2);return hasRange?THREE.MathUtils.lerp(lower,upper,wave):(wave*2-1)*span/2;}
     function animateMotion(elapsed){let index=0;state.joints.forEach(joint=>{if(joint.spec.type==="fixed")return;const value=motionValue(joint,elapsed,index++);joint.value=value;if(joint.input)joint.input.value=String(value);if(joint.current)joint.current.textContent=format(joint.spec,value);});poseTree();}

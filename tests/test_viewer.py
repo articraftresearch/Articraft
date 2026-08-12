@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import runpy
 import threading
 import urllib.error
 import urllib.request
@@ -88,7 +89,14 @@ def test_load_viewer_run_rejects_empty_and_invalid_runs(tmp_path) -> None:
         load_viewer_run(invalid_run)
 
 
-def test_viewer_disables_direct_posing_for_closed_loops(tmp_path) -> None:
+def test_a_closed_loop_is_never_posed_along_the_tree(tmp_path) -> None:
+    """The loop is routed to the solver rather than walked.
+
+    This used to disable posing outright, which left a linkage frozen. The
+    contract that mattered is unchanged -- a closure is not a tree edge -- but
+    it is now met by asking the SDK instead of by refusing.
+    """
+
     model = RigidBodyAssembly("loop")
     base = model.rigid_body("base")
     base.add(Box(0.2, 0.2, 0.1), name="body")
@@ -112,7 +120,10 @@ def test_viewer_disables_direct_posing_for_closed_loops(tmp_path) -> None:
 
     graph = cast(dict[str, Any], load_viewer_run(run_dir).versions[0]["model"])
 
-    assert graph["can_pose"] is False
+    assert graph["solver"] == "server"
+    assert [joint["name"] for joint in graph["articulations"] if joint["closes_loop"]] == [
+        "closure"
+    ]
 
 
 def test_viewer_orients_symmetric_joint_from_the_articulation_root(tmp_path) -> None:
@@ -253,3 +264,92 @@ def test_sdk_rpy_matrix_is_extrinsic_xyz() -> None:
     # A leg yawed off a pitched frame keeps a level hinge axis; the reversed
     # order tilts it out of plane, which is the bug this guards.
     assert abs(float(hinge[2])) < 1e-9
+
+
+def _loop_model() -> RigidBodyAssembly:
+    """The shipped four-bar, which the viewer could not pose at all before."""
+
+    values = runpy.run_path(
+        str(package_dir / "sdk" / "docs" / "examples" / "closed_loop_linkage.py")
+    )
+    return cast(RigidBodyAssembly, values["object_model"])
+
+
+def _serve(run):
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _handler(b"", json.dumps(run.bootstrap()).encode(), run.files),
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def _post(server, path: str, payload: dict) -> tuple[int, Any]:
+    url = f"http://127.0.0.1:{server.server_port}{path}"
+    request = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode()
+
+
+def test_a_looped_model_is_posed_by_the_solver_not_the_tree(tmp_path) -> None:
+    """A loop makes tree posing wrong, so those models are marked for the server."""
+
+    run_dir = tmp_path / "loop-run"
+    export_assembly(_loop_model(), run_dir / "result")
+
+    model = cast(dict[str, Any], load_viewer_run(run_dir).versions[0]["model"])
+
+    # Before this, any closure forced can_pose False and the model was frozen.
+    assert model["can_pose"] is True
+    assert model["solver"] == "server"
+
+
+def test_posing_a_loop_matches_the_sdk_exactly(tmp_path) -> None:
+    """The viewer must agree with compile checks and render_view, to the bit."""
+
+    run_dir = tmp_path / "loop-run"
+    assembly = _loop_model()
+    export_assembly(assembly, run_dir / "result")
+    run = load_viewer_run(run_dir)
+    resolved = assembly.resolve()
+    server = _serve(run)
+    try:
+        for angle in (-0.5, 0.0, 0.5):
+            status, solved = _post(server, "/api/pose/0000", {"ground_left": angle})
+            assert status == 200
+            truth = resolved.forward_kinematics({"ground_left.rotZ": angle}).body_poses
+            for name, matrix in truth.items():
+                served = [round(value, 9) for value in solved["bodies"][name]]
+                expected = [round(float(value), 9) for row in matrix for value in row]
+                assert served == expected, name
+            # The followers moved, so the sliders must be told.
+            assert solved["dofs"]["coupler_right.rotZ"] == pytest.approx(angle, abs=1e-6)
+    finally:
+        server.shutdown()
+
+
+def test_an_unreachable_pose_is_reported_not_raised(tmp_path) -> None:
+    run_dir = tmp_path / "loop-run"
+    export_assembly(_loop_model(), run_dir / "result")
+    server = _serve(load_viewer_run(run_dir))
+    try:
+        status, body = _post(server, "/api/pose/0000", {"ground_left": 99.0})
+        assert status == 409
+        assert "outside limits" in body
+    finally:
+        server.shutdown()
+
+
+def test_a_tree_model_still_poses_in_the_browser(tmp_path) -> None:
+    """No loop means no round trip: the tree walk is exact and free."""
+
+    run_dir = tmp_path / "tree-run"
+    export_assembly(_revolute_model(), run_dir / "result")
+
+    model = cast(dict[str, Any], load_viewer_run(run_dir).versions[0]["model"])
+
+    assert model["can_pose"] is True
+    assert model["solver"] == "tree"

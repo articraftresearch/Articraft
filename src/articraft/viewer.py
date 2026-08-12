@@ -10,9 +10,20 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
+import numpy as np
 from pxr import Usd, UsdPhysics
 
 from articraft import package_dir
+from articraft.sdk import JointAxis, JointDOF, PhysicsState, RigidBodyAssembly
+from articraft.sdk.assembly import (
+    Joint,
+    ResolvedArticulation,
+    ResolvedJoint,
+    ResolvedRigidBodyAssembly,
+)
+from articraft.sdk.errors import LoopClosureError, ValidationError
+from articraft.sdk.frames import JointFrame
+from articraft.sdk.physics import PhysicsScene
 
 
 @dataclass(frozen=True)
@@ -113,7 +124,13 @@ def _read_version(path: Path) -> dict[str, object]:
             if isinstance(endpoint, str) and endpoint != "WORLD":
                 roots.add(endpoint)
     _orient_joints(articulations, roots)
-    can_pose = all(
+    # A loop makes tree posing wrong rather than merely incomplete, so those
+    # models are posed by asking the SDK. Everything else stays on the tree
+    # walk, which needs no round trip per frame.
+    solves_on_server = any(joint["closes_loop"] for joint in articulations) and (
+        kinematics_from_usdz(path) is not None
+    )
+    can_pose = solves_on_server or all(
         not joint["closes_loop"] and bool(joint["previewable"]) for joint in articulations
     )
 
@@ -125,6 +142,7 @@ def _read_version(path: Path) -> dict[str, object]:
             "parts": parts,
             "articulations": articulations,
             "can_pose": can_pose,
+            "solver": "server" if solves_on_server else "tree",
         },
     }
 
@@ -291,6 +309,150 @@ def _read_appearance(shape: Usd.Prim) -> dict[str, object] | None:
     }
 
 
+def kinematics_from_usdz(path: Path) -> ResolvedRigidBodyAssembly | None:
+    """Rebuild an export's joint graph so the SDK can pose it.
+
+    A closed loop cannot be posed by walking a tree: driving one joint decides
+    the rest, and only a solver knows what they become. The SDK has that solver,
+    so the viewer asks it rather than carrying a second implementation that
+    would drift. Geometry is not rebuilt -- forward kinematics only reads names,
+    frames, and degrees of freedom -- so this stays cheap.
+
+    Returns ``None`` for stages written before the graph attributes existed,
+    which leaves those runs on the tree walk they have always used.
+    """
+
+    stage = Usd.Stage.Open(str(path.resolve()))
+    if stage is None:
+        return None
+    world = stage.GetDefaultPrim()
+    scoped = [prim for prim in world.GetChildren() if _bodies_scope(prim)]
+    if len(scoped) != 1:
+        return None
+    obj = scoped[0]
+    joints_scope = obj.GetChild("joints")
+    if not joints_scope:
+        return None
+    try:
+        return _rebuild_kinematics(obj, joints_scope)
+    except (ValidationError, KeyError, TypeError, ValueError):
+        # A stage we cannot rebuild is not a failure: the viewer falls back to
+        # posing along the tree, exactly as it did before.
+        return None
+
+
+def _bodies_scope(prim: Usd.Prim) -> Usd.Prim | None:
+    return prim.GetChild("rigid_bodies") or prim.GetChild("parts") or None
+
+
+def _triple(prim: Usd.Prim, name: str) -> tuple[float, float, float]:
+    """A three-component attribute, or the origin when it was never authored."""
+
+    value = _attribute(prim, name)
+    if not isinstance(value, list) or len(value) != 3:
+        return (0.0, 0.0, 0.0)
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def _rebuild_kinematics(obj: Usd.Prim, joints_scope: Usd.Prim) -> ResolvedRigidBodyAssembly:
+    scope = _bodies_scope(obj)
+    assert scope is not None
+    assembly = RigidBodyAssembly(str(_attribute(obj, "name", obj.GetName())))
+    bodies = {
+        str(_attribute(prim, "name", prim.GetName())): assembly.rigid_body(
+            str(_attribute(prim, "name", prim.GetName()))
+        )
+        for prim in scope.GetChildren()
+    }
+
+    resolved: list[ResolvedJoint] = []
+    tree_joints: dict[str, list[Joint]] = {}
+    for prim in joints_scope.GetChildren():
+        if not prim.GetAttribute("articraft:jointType"):
+            raise ValueError("stage predates the rigid body graph")
+        name = str(_attribute(prim, "name", prim.GetName()))
+        frames = [
+            JointFrame(
+                xyz=_triple(prim, f"frame{end}:xyz"),
+                rpy=_triple(prim, f"frame{end}:rpy"),
+            )
+            for end in (0, 1)
+        ]
+        endpoints = [str(_attribute(prim, f"body{end}")) for end in (0, 1)]
+        if any(endpoint == "WORLD" for endpoint in endpoints):
+            raise ValueError("world joints are not rebuilt")
+        dofs = tuple(
+            JointDOF(
+                JointAxis(entry["axis"]),
+                limits=tuple(entry["limits"]) if entry.get("limits") else None,
+            )
+            for entry in json.loads(str(_attribute(prim, "dofs", "[]")))
+        )
+        joint = assembly.joint(
+            name,
+            bodies[endpoints[0]].at(frames[0]),
+            bodies[endpoints[1]].at(frames[1]),
+            dofs=dofs,
+        )
+        excluded = bool(_attribute(prim, "excludeFromArticulation", False))
+        articulation = str(_attribute(prim, "articulation", "")) or None
+        resolved.append(
+            ResolvedJoint(
+                joint=joint, articulation=articulation, exclude_from_articulation=excluded
+            )
+        )
+        if articulation and not excluded:
+            tree_joints.setdefault(articulation, []).append(joint)
+
+    articulations: list[ResolvedArticulation] = []
+    for prim in (
+        obj.GetChild("articulations").GetChildren() if obj.GetChild("articulations") else []
+    ):
+        name = str(_attribute(prim, "name", prim.GetName()))
+        joints = tuple(tree_joints.get(name, ()))
+        articulations.append(
+            ResolvedArticulation(
+                articulation=assembly.articulation(
+                    name,
+                    root=bodies[str(_attribute(prim, "root"))],
+                    joints=[item.name for item in joints],
+                ),
+                rigid_bodies=tuple(bodies.values()),
+                joints=joints,
+            )
+        )
+
+    return ResolvedRigidBodyAssembly(
+        name=assembly.name,
+        rigid_bodies=tuple(bodies.values()),
+        joints=tuple(resolved),
+        articulations=tuple(articulations),
+        reference_state=PhysicsState({name: np.identity(4) for name in bodies}, dof_positions={}),
+        has_closed_loops=any(item.exclude_from_articulation for item in resolved),
+        scene=PhysicsScene(),
+    )
+
+
+def _solve_pose(model: ResolvedRigidBodyAssembly, values: dict[str, float]) -> dict[str, object]:
+    """Place every body for the joint values a slider produced."""
+
+    positions: dict[str, float] = {}
+    for item in model.joints:
+        if item.exclude_from_articulation:
+            continue  # a closure's value is derived, never driven
+        for dof in item.joint.dofs:
+            if item.joint.name in values:
+                positions[item.joint.dof_id(dof)] = float(values[item.joint.name])
+    state = model.forward_kinematics(positions)
+    return {
+        "bodies": {
+            name: [float(value) for value in np.asarray(matrix, dtype=float).flatten()]
+            for name, matrix in state.body_poses.items()
+        },
+        "dofs": {name: float(value) for name, value in state.dof_positions.items()},
+    }
+
+
 def _usd_attribute(prim: Usd.Prim, name: str, default=None):
     """Read a schema attribute by its full USD name, no articraft prefix."""
     attribute = prim.GetAttribute(name)
@@ -313,7 +475,37 @@ def _handler(
     bootstrap: bytes,
     files: dict[str, Path],
 ) -> type[BaseHTTPRequestHandler]:
+    solvers: dict[str, ResolvedRigidBodyAssembly | None] = {}
+
+    def solver(version: str) -> ResolvedRigidBodyAssembly | None:
+        # Rebuilt once per version and kept: the graph does not change, and a
+        # slider drag asks for a pose many times a second.
+        if version not in solvers:
+            path = files.get(version)
+            solvers[version] = kinematics_from_usdz(path) if path is not None else None
+        return solvers[version]
+
     class ViewerHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            match = re.fullmatch(r"/api/pose/(\d+)", urlsplit(self.path).path)
+            model = solver(match.group(1)) if match else None
+            if model is None:
+                self._send(404, "text/plain; charset=utf-8", b"Not found\n")
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                values = json.loads(self.rfile.read(length) or b"{}")
+                body = _solve_pose(model, {str(k): float(v) for k, v in values.items()})
+            except (ValidationError, LoopClosureError) as exc:
+                # A pose the mechanism cannot reach is an answer, not a crash:
+                # the viewer keeps the last good one and says why.
+                self._send(409, "application/json", json.dumps({"error": str(exc)}).encode())
+                return
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                self._send(400, "application/json", json.dumps({"error": str(exc)}).encode())
+                return
+            self._send(200, "application/json", json.dumps(body, separators=(",", ":")).encode())
+
         def do_GET(self) -> None:
             route = urlsplit(self.path).path
             if route in {"/", "/index.html"}:
