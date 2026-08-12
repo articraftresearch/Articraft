@@ -99,6 +99,9 @@ class SimulationResult:
     end_height: float
     contacts: int
     deepest_penetration: float
+    """The worst instant, which for a drop is the landing impact."""
+    resting_penetration: float
+    """How far the object sinks once it has settled, which is what a verdict wants."""
     largest_separation_change: float
     residual_velocity: float
     diverged: bool = False
@@ -115,7 +118,15 @@ class SimulationResult:
 
     @property
     def fell_through_floor(self) -> bool:
-        return self.end_height < -0.05
+        """Whether the object passed through the floor instead of landing on it.
+
+        Height alone cannot say: ``end_height`` is the lowest body *origin*, and
+        a part's origin sits wherever its author put it -- a tripod leg's frame
+        is up at its hinge while the leg hangs below. An object resting on the
+        floor is in contact with it, so contact is what settles the question.
+        """
+
+        return self.end_height < -0.05 and self.contacts == 0
 
     @property
     def parts_stayed_together(self) -> bool:
@@ -133,14 +144,15 @@ class SimulationResult:
             return False
         if self.scenario != "drop":
             return True
-        return not self.fell_through_floor and self.deepest_penetration > -0.01
+        return not self.fell_through_floor and self.resting_penetration > -0.01
 
     def summary(self) -> str:
         lines = [
             f"{len(self.bodies)} bodies, {self.total_mass:.3f} kg total",
             _headline(self.scenario, self.start_height, self.end_height),
             f"  contacts at rest: {self.contacts}",
-            f"  deepest penetration: {self.deepest_penetration * 1000:+.2f} mm",
+            f"  deepest penetration: {self.deepest_penetration * 1000:+.2f} mm"
+            f" on impact, {self.resting_penetration * 1000:+.2f} mm at rest",
             f"  largest part separation change: {self.largest_separation_change * 1000:+.2f} mm",
             f"  residual velocity: {self.residual_velocity:.4f}",
         ]
@@ -314,8 +326,17 @@ def simulate_usdz(
     separations = _tracked_body_separations(
         model,
         data.xpos,
-        slide_joint_type=mujoco.mjtJoint.mjJNT_SLIDE,
+        movable_joint_types=(
+            mujoco.mjtJoint.mjJNT_SLIDE,
+            mujoco.mjtJoint.mjJNT_HINGE,
+            mujoco.mjtJoint.mjJNT_BALL,
+        ),
     )
+    # A tree joint holds its bodies together exactly, so the only thing that can
+    # genuinely come apart is a loop pin: it is a constraint the solver pulls
+    # shut rather than a coordinate it cannot violate.
+    pins = _loop_pin_anchors(model, data)
+    worst_pin = 0.0
 
     root_body = 1  # the free body; MuJoCo orders bodies from the world outward
     movable = [
@@ -368,6 +389,11 @@ def simulate_usdz(
         }
 
     deepest = 0.0
+    # Landing is not resting. A dropped object squashes its contacts for an
+    # instant on impact, and judging it on that instant fails every object that
+    # lands at all, however quietly it then sits.
+    settled_from = int(int(seconds / model.opt.timestep) * 0.6)
+    resting_depth = 0.0
     diverged = False
     peak_joint_speed = 0.0
     frames = [frame(0.0)]
@@ -396,8 +422,12 @@ def simulate_usdz(
                     slip_angle = degrees
 
         mujoco.mj_step(model, data)
-        if data.ncon:
-            deepest = min(deepest, float(data.contact.dist[: data.ncon].min()))
+        worst_pin = max(worst_pin, _loop_pin_gap(data, pins))
+        floor_depth = _floor_contact_depth(data)
+        if floor_depth is not None:
+            deepest = min(deepest, floor_depth)
+            if step >= settled_from:
+                resting_depth = min(resting_depth, floor_depth)
         for index in movable:
             speed = abs(float(data.qvel[model.jnt_dofadr[index]]))
             peak_joint_speed = max(peak_joint_speed, speed)
@@ -415,6 +445,7 @@ def simulate_usdz(
         ),
         default=0.0,
     )
+    drift = max(drift, worst_pin)
     return SimulationResult(
         bodies=names,
         total_mass=float(sum(model.body_mass)),
@@ -422,6 +453,7 @@ def simulate_usdz(
         end_height=float(end[:, 2].min()),
         contacts=int(data.ncon),
         deepest_penetration=deepest,
+        resting_penetration=resting_depth,
         largest_separation_change=drift,
         residual_velocity=float(np.abs(data.qvel).max()) if model.nv else 0.0,
         diverged=diverged,
@@ -441,34 +473,90 @@ def _tracked_body_separations(
     model: Any,
     positions: Any,
     *,
-    slide_joint_type: Any,
+    movable_joint_types: tuple[Any, ...],
 ) -> dict[tuple[int, int], float]:
     """Body distances that should stay fixed while joints move.
 
-    A slide joint moves its whole child subtree relative to the rest of the
-    object. Distances that cross that joint are expected to change, while
-    distances within either side still catch parts that come apart.
+    Any movable joint moves its whole child subtree relative to the rest of the
+    object, so a distance that crosses one is expected to change: a slider
+    translates what hangs below it, and a hinge swings it through an arc just as
+    legitimately. Only pairs with no movable joint between them are rigidly
+    related, and those are the ones worth watching -- a distance that changes
+    there means parts really did come apart.
+
+    Watching only sliders used to fail every multi link object: releasing a two
+    hinge arm read as 24 mm of "separation" and an excavator boom as 448 mm,
+    purely because rotating a joint moves everything downstream of it.
     """
 
-    slide_roots = {
+    movable_roots = {
         int(model.jnt_bodyid[index])
         for index in range(model.njnt)
-        if model.jnt_type[index] == slide_joint_type
+        if model.jnt_type[index] in movable_joint_types
     }
     parents = model.body_parentid
 
-    def crosses_slide(first: int, second: int) -> bool:
+    def crosses_a_joint(first: int, second: int) -> bool:
         return any(
             _is_descendant(first, root, parents) != _is_descendant(second, root, parents)
-            for root in slide_roots
+            for root in movable_roots
         )
 
     return {
         (first, second): float(np.linalg.norm(positions[first] - positions[second]))
         for first in range(1, model.nbody)
         for second in range(first + 1, model.nbody)
-        if not crosses_slide(first, second)
+        if not crosses_a_joint(first, second)
     }
+
+
+def _loop_pin_anchors(model: Any, data: Any) -> list[tuple[int, int, Any, Any]]:
+    """Where each loop pin sits in both of the bodies it holds together.
+
+    Read once at the assembled start pose: the pin is a single physical point,
+    so its coordinates in either body are fixed facts. Watching those two points
+    drift apart is what "did the mechanism stay assembled" actually means, now
+    that ordinary joint motion no longer counts.
+    """
+
+    anchors: list[tuple[int, int, Any, Any]] = []
+    for index in range(model.neq):
+        first, second = int(model.eq_obj1id[index]), int(model.eq_obj2id[index])
+        if first == 0 or second == 0:
+            continue
+        local_first = np.asarray(model.eq_data[index][:3], dtype=float)
+        world = data.xmat[first].reshape(3, 3) @ local_first + data.xpos[first]
+        local_second = data.xmat[second].reshape(3, 3).T @ (world - data.xpos[second])
+        anchors.append((first, second, local_first, local_second))
+    return anchors
+
+
+def _loop_pin_gap(data: Any, anchors: list[tuple[int, int, Any, Any]]) -> float:
+    """How far the worst loop pin is currently pulled open."""
+
+    worst = 0.0
+    for first, second, local_first, local_second in anchors:
+        here = data.xmat[first].reshape(3, 3) @ local_first + data.xpos[first]
+        there = data.xmat[second].reshape(3, 3) @ local_second + data.xpos[second]
+        worst = max(worst, float(np.linalg.norm(here - there)))
+    return worst
+
+
+def _floor_contact_depth(data: Any) -> float | None:
+    """The deepest contact against the floor, ignoring the object's own parts.
+
+    Geom 0 is the floor plane, so a contact naming it is the object meeting the
+    ground. Everything else is the object touching itself, which is ordinary
+    construction -- a rod inside its barrel, a pin inside its bore -- rather
+    than a defect.
+    """
+
+    depths = [
+        float(data.contact.dist[index])
+        for index in range(data.ncon)
+        if 0 in (int(data.contact.geom1[index]), int(data.contact.geom2[index]))
+    ]
+    return min(depths) if depths else None
 
 
 def _is_descendant(body: int, root: int, parents: Any) -> bool:
@@ -794,7 +882,13 @@ def _add_body(
             # UsdPhysics states revolute limits in degrees and prismatic limits in
             # stage units. MJCF is written here in radians and metres.
             scale = math.pi / 180.0 if joint.kind == "hinge" else 1.0
-            attributes["range"] = f"{joint.lower * scale:.6f} {joint.upper * scale:.6f}"
+            lower, upper = joint.lower * scale, joint.upper * scale
+            if not _representable_range(lower, upper):
+                raise ValueError(
+                    f"joint {joint.name!r} has a range too narrow to simulate "
+                    f"({lower} to {upper}); a joint that cannot move is a fixed joint"
+                )
+            attributes["range"] = f"{lower:.9g} {upper:.9g}"
             attributes["limited"] = "true"
         ET.SubElement(body, "joint", attributes)
         for index, (kind, axis, _parent_axis, low, high) in enumerate(joint.extra_axes, start=2):
@@ -806,7 +900,7 @@ def _add_body(
             }
             if low is not None and high is not None:
                 scale = math.pi / 180.0 if kind == "hinge" else 1.0
-                extra["range"] = f"{low * scale:.6f} {high * scale:.6f}"
+                extra["range"] = f"{low * scale:.9g} {high * scale:.9g}"
                 extra["limited"] = "true"
             ET.SubElement(body, "joint", extra)
 
@@ -913,5 +1007,14 @@ def _triple(value: Any) -> tuple[float, float, float]:
     return (x, y, z)
 
 
+def _representable_range(lower: float, upper: float) -> bool:
+    """Whether the two ends still differ once written into the MJCF text."""
+
+    return f"{lower:.9g}" != f"{upper:.9g}"
+
+
 def _vector(value: Any) -> str:
-    return " ".join(f"{float(component):.6f}" for component in value)
+    # Nine significant figures, not six decimals: a joint range or an anchor
+    # offset can legitimately be far smaller than a micron, and rounding it to
+    # zero here turns a real range into a degenerate one MuJoCo refuses to load.
+    return " ".join(f"{float(component):.9g}" for component in value)
