@@ -14,7 +14,7 @@ from articraft.sdk import RigidBodyAssembly, TestContext, TestReport
 
 model = RigidBodyAssembly("small_table")
 body = model.rigid_body("body")
-body.add(Box(0.8, 0.5, 0.04), name="top", color=(0.45, 0.24, 0.10))
+top = body.add(Box(0.8, 0.5, 0.04), name="top", color=(0.45, 0.24, 0.10))
 body.add(Pos(X=0.36, Y=0.21, Z=-0.36) * Box(0.04, 0.04, 0.7), name="leg_1")
 
 object_model = model
@@ -29,16 +29,14 @@ Every shape needs a unique name within its body. A color can contain RGB or RGBA
 zero through one.
 
 Within one rigid body, overlapping shapes count as connected -- `leg_1` overlaps up into `top`
-above. To attach a handle or spout, extend its end a few millimeters into the form it meets; it
-then reads as one molded piece.
+above. To attach a handle or spout, extend its end a few millimeters into the form it meets.
 
 Prefer build123d for exact solids, wall thickness, openings, bores, rims and local fillets. Use
 mesh helpers when the form is better described by freeform sections or paths. One body can hold
 both.
 
 Motion is two steps. `model.joint(...)` connects two bodies at a frame on each, and its `dofs`
-say which axes are free: none is fixed, one rotational is a hinge, one linear is a slide, three
-rotational is a ball. `model.articulation(...)` then names the tree the simulator solves.
+say which axes are free. `model.articulation(...)` names the tree the simulator solves.
 
 ```python
 from articraft.sdk import JointAxis, JointDOF
@@ -46,19 +44,21 @@ from articraft.sdk import JointAxis, JointDOF
 
 lid = model.rigid_body("lid")
 lid.add(Box(0.8, 0.5, 0.02), name="panel")
+# The edge's direction becomes the frame's own Z.
+hinge = top.edges().filter_by(Axis.X).sort_by(Axis.Z)[-1]
 model.joint(
     "lid_hinge",
-    body.at((0.0, 0.25, 0.02)),
-    lid.at((0.0, 0.25, -0.01)),
-    # The hinge edge runs along X, so ROT_X; negative angles open the lid.
-    dofs=(JointDOF(JointAxis.ROT_X, limits=(-1.9, 0.0)),),
+    body.at(hinge),
+    lid.at(hinge),
+    dofs=(JointDOF(JointAxis.ROT_Z, limits=(-1.9, 0.0)),),
 )
 model.articulation("main", root=body, joints=["lid_hinge"])
 ```
 
 `body.at(...)` accepts a point or build123d location, plane, axis, face, edge,
-or vertex. Prefer a feature over a copied coordinate. Endpoint frames coincide
-at rest. Limits use radians or meters and must contain zero.
+or vertex. Prefer a feature over a copied coordinate, and pass one feature to
+both endpoints so the frames cannot disagree. Endpoint frames coincide at rest.
+Limits use radians or meters and must contain zero.
 
 **Count the pivots.** A body pinned in two places takes two joints, making the mechanism a
 ring -- linkages, four-bars, grippers, scissors. Author every joint it has, then leave
