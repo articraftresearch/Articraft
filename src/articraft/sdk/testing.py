@@ -24,6 +24,8 @@ from articraft.sdk._collision import (
 )
 from articraft.sdk._mesh.core import geometry_to_trimesh
 from articraft.sdk._mesh.health import MeshHealthIssue, analyze_mesh_health
+from articraft.sdk._values import _as_vec3 as _vec3
+from articraft.sdk._values import _finite, _non_negative
 from articraft.sdk.assembly import (
     WORLD,
     Joint,
@@ -1665,18 +1667,6 @@ def _artifact_kind(path: Path) -> str:
     )
 
 
-def _vec3(value: Sequence[float], field_name: str) -> Vec3:
-    if isinstance(value, str | bytes):
-        raise ValidationError(f"{field_name} must contain 3 numeric values")
-    try:
-        values = tuple(_finite(item, field_name) for item in value)
-    except TypeError as exc:
-        raise ValidationError(f"{field_name} must contain 3 numeric values") from exc
-    if len(values) != 3:
-        raise ValidationError(f"{field_name} must contain 3 numeric values")
-    return cast(Vec3, values)
-
-
 def _geometry_selector(part: RigidBodyRef | None, shape: str | None) -> str:
     if part is None:
         return "model"
@@ -1777,23 +1767,6 @@ def _axis_names(axes: str | Sequence[str]) -> tuple[str, ...]:
 
 def _axis_index(axis: str) -> int:
     return {"x": 0, "y": 1, "z": 2}[axis]
-
-
-def _finite(value: object, field_name: str) -> float:
-    try:
-        result = float(cast(str, value))
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(f"{field_name} must be numeric") from exc
-    if not math.isfinite(result):
-        raise ValidationError(f"{field_name} must be finite")
-    return result
-
-
-def _non_negative(value: object, field_name: str) -> float:
-    result = _finite(value, field_name)
-    if result < 0.0:
-        raise ValidationError(f"{field_name} must be non-negative")
-    return result
 
 
 def _collision_details(query: CollisionQuery) -> str:

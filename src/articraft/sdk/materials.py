@@ -29,6 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import ClassVar, TypeAlias
 
+from articraft.sdk._values import _positive
 from articraft.sdk.errors import ValidationError
 
 Color: TypeAlias = tuple[float, float, float, float]
@@ -181,16 +182,6 @@ def _as_friction(value: object, *, name: str) -> Friction:
         if not math.isfinite(coefficient) or coefficient < 0.0:
             raise ValidationError(f"material {name!r} friction must be non-negative and finite")
     return (numbers[0], numbers[1])
-
-
-def _positive(value: object, *, field_name: str) -> float:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(f"{field_name} must be a number") from exc
-    if not math.isfinite(number) or number <= 0.0:
-        raise ValidationError(f"{field_name} must be a positive, finite number")
-    return number
 
 
 def _as_color(value: Sequence[float], *, field_name: str) -> Color:

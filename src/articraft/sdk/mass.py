@@ -15,13 +15,12 @@ a mass, centre of mass, and inertia out. It lives beside the override so that
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import numpy as np
 import trimesh
 
-from articraft.sdk._values import Vec3, _as_vec3
+from articraft.sdk._values import Vec3, _as_vec3, _positive
 from articraft.sdk.errors import ValidationError
 from articraft.sdk.materials import Material
 
@@ -77,16 +76,6 @@ class MassProperties:
             object.__setattr__(self, "diagonal_inertia", inertia)
         if self.principal_axes is not None:
             object.__setattr__(self, "principal_axes", _as_quat(self.principal_axes))
-
-
-def _positive(value: object, *, field_name: str) -> float:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError) as exc:
-        raise ValidationError(f"{field_name} must be a number") from exc
-    if not math.isfinite(number) or number <= 0.0:
-        raise ValidationError(f"{field_name} must be a positive, finite number")
-    return number
 
 
 def _as_quat(value: object) -> tuple[float, float, float, float]:

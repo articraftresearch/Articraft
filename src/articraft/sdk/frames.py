@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, TypeAlias, cast
+from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 import trimesh
@@ -11,6 +10,7 @@ from build123d import Axis, Location, Plane, Vector
 from build123d.topology import Edge, Face, Shape, Vertex
 
 from articraft.sdk._mesh.core import MeshGeometry
+from articraft.sdk._values import _as_vec3 as _vec3
 from articraft.sdk.errors import ValidationError
 
 if TYPE_CHECKING:
@@ -152,18 +152,6 @@ def _location_frame(location: Location) -> JointFrame:
             float(orientation[2]),
         ),
     )
-
-
-def _vec3(value: Iterable[float], *, field_name: str) -> Vec3:
-    if isinstance(value, (str, bytes)):
-        raise ValidationError(f"{field_name} must have 3 numeric values")
-    try:
-        values = tuple(float(component) for component in value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValidationError(f"{field_name} must have 3 numeric values") from exc
-    if len(values) != 3 or any(not math.isfinite(component) for component in values):
-        raise ValidationError(f"{field_name} must have 3 finite numeric values")
-    return cast(Vec3, values)
 
 
 __all__ = ["WORLD", "BodyFrame", "FrameSource", "JointFrame"]

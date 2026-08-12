@@ -10,7 +10,7 @@ from typing import TypeAlias, cast
 import numpy as np
 import trimesh
 
-from articraft.sdk._values import _as_identifier, _as_name
+from articraft.sdk._values import _as_identifier, _as_name, _finite, _positive
 from articraft.sdk.bodies import RigidBody, RigidBodyRef
 from articraft.sdk.errors import LoopClosureError, ValidationError
 from articraft.sdk.frames import WORLD, BodyFrame, JointFrame, _WorldEndpoint
@@ -275,8 +275,8 @@ class ResolvedRigidBodyAssembly:
                 f"physics state rigid bodies do not match the assembly: "
                 f"missing={missing!r} unexpected={unexpected!r}"
             )
-        linear_tolerance = _positive_tolerance(linear_tolerance, "linear tolerance")
-        angular_tolerance = _positive_tolerance(angular_tolerance, "angular tolerance")
+        linear_tolerance = _positive(linear_tolerance, "linear tolerance")
+        angular_tolerance = _positive(angular_tolerance, "angular tolerance")
         matrices = {
             body.name: _as_matrix4(
                 state.body_poses[body.name], field_name=f"physics state pose for {body.name!r}"
@@ -548,7 +548,7 @@ class RigidBodyAssembly:
             )
             for joint in self.joints
         )
-        has_closed_loops = _graph_has_cycle(tuple(self.rigid_bodies), tuple(self.joints))
+        has_closed_loops = _graph_has_cycle(tuple(self.joints))
         transforms = _propagate_transforms(
             tuple(self.rigid_bodies),
             tuple(self.joints),
@@ -667,9 +667,7 @@ def _resolve_articulations(
     for articulation in assembly.articulations:
         selected = articulation.joints
         if selected is None:
-            if len(assembly.articulations) != 1 or _graph_has_cycle(
-                tuple(assembly.rigid_bodies), tuple(assembly.joints)
-            ):
+            if len(assembly.articulations) != 1 or _graph_has_cycle(tuple(assembly.joints)):
                 raise ValidationError(
                     f"articulation {articulation.name!r} requires explicit joints because "
                     "the assembly topology is not one unambiguous tree"
@@ -1176,8 +1174,9 @@ def _nodes_connected(nodes: set[JointEndpoint], joints: Iterable[Joint]) -> bool
     return nodes <= visited
 
 
-def _graph_has_cycle(bodies: tuple[RigidBody, ...], joints: tuple[Joint, ...]) -> bool:
-    del bodies
+def _graph_has_cycle(joints: tuple[Joint, ...]) -> bool:
+    """A cycle is a property of the edges; the body list never mattered."""
+
     return _edge_graph_has_cycle(joints)
 
 
@@ -1202,23 +1201,6 @@ def _edge_graph_has_cycle(joints: Iterable[Joint]) -> bool:
 
 def _body_name(value: RigidBodyRef, *, field_name: str) -> str:
     return _as_name(value if isinstance(value, str) else value.name, field_name=field_name)
-
-
-def _finite(value: object, *, field_name: str) -> float:
-    try:
-        result = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValidationError(f"{field_name} must be numeric") from exc
-    if not math.isfinite(result):
-        raise ValidationError(f"{field_name} must be finite")
-    return result
-
-
-def _positive_tolerance(value: object, field_name: str) -> float:
-    result = _finite(value, field_name=field_name)
-    if result <= 0.0:
-        raise ValidationError(f"{field_name} must be positive")
-    return result
 
 
 def _as_matrix4(value: object, *, field_name: str) -> Mat4:
