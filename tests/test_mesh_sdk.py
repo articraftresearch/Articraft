@@ -215,6 +215,57 @@ def test_lathe_loft_and_extrusions_build_expected_solids() -> None:
     assert with_hole.to_trimesh().volume == pytest.approx((0.04 - 0.0036) * 0.02)
 
 
+def test_hollow_loft_builds_one_watertight_wall_without_booleans() -> None:
+    def ring(center: tuple[float, float, float], radius: float) -> list[tuple[float, float, float]]:
+        return [
+            (
+                center[0] + radius * math.cos(angle),
+                center[1] + radius * math.sin(angle),
+                center[2],
+            )
+            for angle in np.linspace(0.0, 2.0 * math.pi, 16, endpoint=False)
+        ]
+
+    centers = ((0.0, 0.0, 0.0), (0.015, 0.0, 0.08), (0.045, 0.0, 0.16))
+    shell = LoftGeometry.from_shell_profiles(
+        [ring(center, radius) for center, radius in zip(centers, (0.04, 0.035, 0.03), strict=True)],
+        [
+            ring(center, radius)
+            for center, radius in zip(centers, (0.032, 0.027, 0.022), strict=True)
+        ],
+        interpolation="catmull_rom",
+        samples_per_span=3,
+        parameterization="centripetal",
+    )
+
+    report = analyze_mesh_health(shell)
+    assert isinstance(shell, LoftGeometry)
+    assert shell.is_watertight
+    assert report.watertight
+    assert report.winding_consistent
+    assert report.component_count == 1
+    assert report.signed_volume > 0.0
+    assert not report.findings
+
+
+def test_hollow_loft_rejects_mismatched_or_touching_profiles() -> None:
+    square = [
+        (-0.1, -0.1, 0.0),
+        (0.1, -0.1, 0.0),
+        (0.1, 0.1, 0.0),
+        (-0.1, 0.1, 0.0),
+    ]
+    upper = [(x, y, 0.2) for x, y, _z in square]
+    inner = [[(x * 0.8, y * 0.8, z) for x, y, z in ring] for ring in (square, upper)]
+
+    with pytest.raises(ValueError, match="section count"):
+        LoftGeometry.from_shell_profiles((square, upper), (inner[0],))
+    with pytest.raises(ValueError, match="point count"):
+        LoftGeometry.from_shell_profiles((square, upper), (inner[0][:-1], inner[1][:-1]))
+    with pytest.raises(ValueError, match="must not touch"):
+        LoftGeometry.from_shell_profiles((square, upper), (square, upper))
+
+
 def test_sweep_pipe_wire_and_spline_builders() -> None:
     square = rounded_rect_profile(0.01, 0.006, 0.001)
     path = [(0.0, 0.0, 0.0), (0.04, 0.0, 0.04), (0.08, 0.0, 0.0)]

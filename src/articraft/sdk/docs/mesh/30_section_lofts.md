@@ -23,6 +23,10 @@ Use `LoftGeometry` instead when all profiles already have the same point count
 and need only a direct connection. Read [mesh geometry and solid
 builders](00_mesh_geometry.md) for that lower level builder.
 
+Use `LoftGeometry.from_shell_profiles(...)` when corresponding outer and inner sections
+should form one hollow wall. It builds the wall directly and joins the two end rings, so a
+boolean difference is not needed.
+
 ## LoftSection
 
 ```python

@@ -1146,6 +1146,62 @@ def _add_rounded_loft_cap(
 
 
 class LoftGeometry(MeshGeometry):
+    @classmethod
+    def from_shell_profiles(
+        cls,
+        outer_profiles: Iterable[Iterable[Sequence[float]]],
+        inner_profiles: Iterable[Iterable[Sequence[float]]],
+        *,
+        interpolation: str = "linear",
+        samples_per_span: int = 1,
+        parameterization: str = "uniform",
+        tension: float = 0.0,
+    ) -> LoftGeometry:
+        """Build a hollow loft directly from corresponding outer and inner profiles."""
+        outer_rings = [_profile_3d(profile, minimum=3) for profile in outer_profiles]
+        inner_rings = [_profile_3d(profile, minimum=3) for profile in inner_profiles]
+        if len(outer_rings) != len(inner_rings):
+            raise ValueError("outer and inner loft profiles must have the same section count")
+        if len(outer_rings) < 2:
+            raise ValueError("a hollow loft requires at least two outer and inner profiles")
+        count = len(outer_rings[0])
+        if any(len(ring) != count for ring in (*outer_rings, *inner_rings)):
+            raise ValueError("outer and inner loft profiles must have the same point count")
+        if any(
+            _v_norm(_v_sub(outer, inner)) <= _EPS
+            for outer_ring, inner_ring in zip(outer_rings, inner_rings, strict=True)
+            for outer, inner in zip(outer_ring, inner_ring, strict=True)
+        ):
+            raise ValueError("outer and inner loft profiles must not touch")
+
+        options = {
+            "cap": False,
+            "closed": True,
+            "interpolation": interpolation,
+            "samples_per_span": samples_per_span,
+            "parameterization": parameterization,
+            "tension": tension,
+        }
+        outer_loft = cls(outer_rings, **options)
+        inner_loft = cls(inner_rings, **options)
+        if len(outer_loft.vertices) != len(inner_loft.vertices):
+            raise ValueError("outer and inner loft interpolation produced different ring counts")
+
+        inner_offset = len(outer_loft.vertices)
+        vertices = [*outer_loft.vertices, *inner_loft.vertices]
+        faces = [*outer_loft.faces]
+        faces.extend(
+            (inner_offset + c, inner_offset + b, inner_offset + a) for a, b, c in inner_loft.faces
+        )
+        outer_end = len(outer_loft.vertices) - count
+        inner_end = inner_offset + len(inner_loft.vertices) - count
+        _connect_loft_rings(faces, inner_offset, 0, count)
+        _connect_loft_rings(faces, outer_end, inner_end, count)
+
+        result = cls.__new__(cls)
+        MeshGeometry.__init__(result, vertices=vertices, faces=faces)
+        return result
+
     def __init__(
         self,
         profiles: Iterable[Iterable[Sequence[float]]],

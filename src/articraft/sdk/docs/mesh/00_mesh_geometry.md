@@ -466,6 +466,34 @@ LoftGeometry(
 This is the direct mesh loft. Use `section_loft(...)` when sections have
 different point counts, need path offsets, need symmetry, or need repair.
 
+Use `from_shell_profiles(...)` for a hollow loft with open ends and a solid wall:
+
+```python
+LoftGeometry.from_shell_profiles(
+    outer_profiles: Iterable[Iterable[tuple[float, float, float]]],
+    inner_profiles: Iterable[Iterable[tuple[float, float, float]]],
+    *,
+    interpolation: str = "linear",
+    samples_per_span: int = 1,
+    parameterization: str = "uniform",
+    tension: float = 0.0,
+) -> LoftGeometry
+```
+
+The outer and inner inputs must have the same section count and point count. Corresponding
+points should describe the same position around each section. The helper builds both wall
+surfaces and joins them with an annular face at each end. It does not use a mesh boolean.
+
+```python
+spout = LoftGeometry.from_shell_profiles(
+    outer_profiles=[outer_root, outer_middle, outer_tip],
+    inner_profiles=[inner_root, inner_middle, inner_tip],
+    interpolation="catmull_rom",
+    samples_per_span=3,
+    parameterization="centripetal",
+)
+```
+
 At least two profiles are required. Every profile must have the same point
 count. With `closed=True`, each profile needs at least three distinct points
 and must enclose a nonzero planar area. Adjacent profile centers must be
