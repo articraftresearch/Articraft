@@ -152,6 +152,7 @@ class MeridionalSectionView:
 class MotionStripView:
     articulation: str | Joint
     positions: tuple[float, ...] = ()
+    dof: JointAxis | str | None = None
     samples: int = 5
     view: ModelView = field(
         default_factory=lambda: ModelView.three_quarter(width=320, height=280, show_joints=True)
@@ -400,8 +401,11 @@ def _render_motion_strip(
         raise ValidationError(
             f"motion strip joint {joint.name!r} is fixed; it has no motion to sweep"
         )
-    rotational = [dof for dof in joint.dofs if cast(JointAxis, dof.axis).is_rotational]
-    swept = rotational[0] if rotational else joint.dofs[0]
+    if view.dof is not None:
+        swept = joint.get_dof(view.dof)
+    else:
+        rotational = [dof for dof in joint.dofs if cast(JointAxis, dof.axis).is_rotational]
+        swept = rotational[0] if rotational else joint.dofs[0]
     # Pose by the swept DOF's qualified id: a bare joint name resolves only
     # for single-DOF joints, and this one may carry several.
     dof_id = joint.dof_id(swept)

@@ -126,6 +126,27 @@ class Joint:
     def dof_id(self, dof: JointDOF) -> str:
         return f"{self.name}.{cast(JointAxis, dof.axis).value}"
 
+    def get_dof(self, dof: JointAxis | str) -> JointDOF:
+        """Return one authored degree of freedom by axis or qualified id."""
+        value = str(dof).strip()
+        if "." in value:
+            joint_name, value = value.rsplit(".", 1)
+            if joint_name != self.name:
+                raise ValidationError(
+                    f"DOF {dof!r} belongs to joint {joint_name!r}, not {self.name!r}"
+                )
+        try:
+            axis = JointAxis(value)
+        except ValueError as exc:
+            raise ValidationError(f"unknown joint axis: {value!r}") from exc
+        for authored in self.dofs:
+            if authored.axis == axis:
+                return authored
+        available = [cast(JointAxis, authored.axis).value for authored in self.dofs]
+        raise ValidationError(
+            f"joint {self.name!r} has no {axis.value!r} DOF; available axes are {available!r}"
+        )
+
 
 JointRef: TypeAlias = str | Joint
 ArticulationRootRef: TypeAlias = RigidBodyRef | Joint

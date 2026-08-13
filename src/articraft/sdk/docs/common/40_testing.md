@@ -317,6 +317,19 @@ poses = ctx.sample_joint("lid_hinge", samples=5)
 poses = ctx.sample_joint("lid_hinge", positions=(0.0, 0.4, 0.8))
 ```
 
+Use `sample_dof(...)` when a joint has several degrees of freedom. Pass an axis name or the
+qualified DOF identifier:
+
+```python
+lift_poses = ctx.sample_dof(
+    "removable_lid",
+    "removable_lid.transZ",
+    positions=(0.0, 0.04, 0.10),
+)
+```
+
+The other degrees of freedom keep their current values during the sweep.
+
 Use these records with:
 
 ```python

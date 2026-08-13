@@ -572,6 +572,39 @@ def test_pose_sweeps_record_unreachable_loop_poses() -> None:
     assert failures and "unreachable" in failures[0].details
 
 
+def test_sample_dof_selects_one_axis_on_multi_dof_joint() -> None:
+    model = RigidBodyAssembly("removable_lid")
+    pot = model.rigid_body("pot")
+    add_box(pot, "body")
+    lid = model.rigid_body("lid")
+    add_box(lid, "body")
+    model.joint(
+        "lid_free",
+        pot.at(),
+        lid.at(),
+        dofs=tuple(JointDOF(axis) for axis in JointAxis),
+    )
+    model.articulation("main", root=pot, joints=("lid_free",))
+    context = TestContext(model)
+
+    poses = context.sample_dof(
+        "lid_free",
+        "lid_free.transZ",
+        positions=(0.0, 0.04, 0.1),
+    )
+
+    assert [pose.as_dict() for pose in poses] == [
+        {"lid_free.transZ": 0.0},
+        {"lid_free.transZ": 0.04},
+        {"lid_free.transZ": 0.1},
+    ]
+    assert poses[-1].label == "lid_free.transZ=0.1"
+    with pytest.raises(ValidationError, match="belongs to joint"):
+        context.sample_dof("lid_free", "other.transZ", positions=(0.0,))
+    with pytest.raises(ValidationError, match="unknown joint axis"):
+        context.sample_dof("lid_free", "scaleX", positions=(0.0,))
+
+
 def test_separation_check_handles_multi_dof_joints() -> None:
     model = RigidBodyAssembly("multi_dof_baseline")
     base = model.rigid_body("base")

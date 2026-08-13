@@ -206,6 +206,18 @@ MotionStripView(
 )
 ```
 
+Set `dof` when the joint has several degrees of freedom. It accepts an axis name or the
+qualified DOF identifier:
+
+```python
+MotionStripView(
+    articulation="removable_lid",
+    dof="removable_lid.transZ",
+    positions=(0.0, 0.04, 0.10),
+    view=ModelView.side(width=320, height=280),
+)
+```
+
 Omit `positions` to sample the authored motion limits. A continuous joint uses a half turn.
 
 ## Render directly

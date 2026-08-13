@@ -570,18 +570,55 @@ class TestContext:
         self._reject_unposable(joint.name)
         if len(joint.dofs) != 1:
             raise ValidationError("sample_joint requires a joint with exactly one DOF")
+        return self._sample_dof_values(
+            joint,
+            joint.dofs[0],
+            positions,
+            samples=samples,
+            label=joint.name,
+        )
+
+    def sample_dof(
+        self,
+        articulation: str | Joint,
+        dof: JointAxis | str,
+        positions: Sequence[float] | None = None,
+        *,
+        samples: int = 5,
+    ) -> tuple[PoseSample, ...]:
+        """Sample one explicit degree of freedom on a joint."""
+        joint = self.model.get_joint(articulation)
+        self._reject_unposable(joint.name)
+        selected = joint.get_dof(dof)
+        return self._sample_dof_values(
+            joint,
+            selected,
+            positions,
+            samples=samples,
+            label=joint.dof_id(selected),
+        )
+
+    def _sample_dof_values(
+        self,
+        joint: Joint,
+        dof: JointDOF,
+        positions: Sequence[float] | None,
+        *,
+        samples: int,
+        label: str,
+    ) -> tuple[PoseSample, ...]:
         values = (
-            _articulation_sweep_values(joint, max(2, int(samples)))
+            _articulation_sweep_values(joint, max(2, int(samples)), dof)
             if positions is None
             else [_finite(value, "joint sample") for value in positions]
         )
         if not values:
             raise ValidationError("positions must contain at least one joint value")
-        dof_id = joint.dof_id(joint.dofs[0])
+        dof_id = joint.dof_id(dof)
         return tuple(
             PoseSample(
                 positions=tuple(sorted({**self._pose, dof_id: value}.items())),
-                label=f"{joint.name}={value:.6g}",
+                label=f"{label}={value:.6g}",
             )
             for value in values
         )

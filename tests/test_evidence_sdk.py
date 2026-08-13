@@ -215,6 +215,38 @@ def test_model_section_meridional_and_motion_views_render(monkeypatch, tmp_path:
     assert Path(artifact.path).is_file()
 
 
+def test_motion_strip_uses_an_explicit_dof_on_a_multi_dof_joint(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    model = RigidBodyAssembly("free_part")
+    base = model.rigid_body("base")
+    base.add(BoxGeometry((0.4, 0.4, 0.2)), name="base")
+    moving = model.rigid_body("moving")
+    moving.add(BoxGeometry((0.2, 0.2, 0.1)), name="body")
+    model.joint(
+        "free",
+        base.at(),
+        moving.at(),
+        dofs=(JointDOF(JointAxis.TRANS_Z), JointDOF(JointAxis.ROT_Z)),
+    )
+    model.articulation("main", root=base, joints=("free",))
+
+    output = render_view(
+        model,
+        MotionStripView(
+            "free",
+            positions=(0.0, 0.1),
+            dof="free.transZ",
+            view=ModelView.side(width=160, height=140),
+        ),
+        "explicit_dof.png",
+    )
+
+    assert output == Path("explicit_dof.png")
+    assert Image.open(output).width == 160 * 2 + 12
+
+
 def test_reference_reticles_use_normalized_coordinates(tmp_path: Path) -> None:
     source = tmp_path / "reference.webp"
     Image.new("RGB", (200, 100), (240, 240, 240)).save(source)
