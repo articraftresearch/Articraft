@@ -52,7 +52,12 @@ def test_tool_schemas_include_prompting_guidance() -> None:
         stdin_props["chars"]["description"]
         == "Bytes to write to stdin. Defaults to empty, which polls without writing."
     )
-    assert "appears exactly once" in edit_props["old_text"]["description"]
+    assert "old_text" not in edit_props
+    assert edit_props["edits"]["minItems"] == 1
+    assert (
+        "appear exactly once"
+        in edit_props["edits"]["items"]["properties"]["old_text"]["description"]
+    )
     assert get("read").supports_parallel is True
     assert get("view_image").supports_parallel is False
     assert get("exec_command").supports_parallel is False
@@ -88,7 +93,10 @@ def test_workspace_tools_handle_default_relative_run_dir(monkeypatch, tmp_path) 
     write_result = run(get("write").run(ctx, {"path": "main.py", "content": "old\n"}))
     read_result = run(get("read").run(ctx, {"path": "main.py"}))
     edit_result = run(
-        get("edit").run(ctx, {"path": "main.py", "old_text": "old", "new_text": "new"})
+        get("edit").run(
+            ctx,
+            {"path": "main.py", "edits": [{"old_text": "old", "new_text": "new"}]},
+        )
     )
 
     assert write_result == {"path": "main.py", "bytes": 4}
@@ -249,7 +257,12 @@ def test_edit_replaces_unique_text(tmp_path) -> None:
     path = ctx.workspace / "main.py"
     path.write_text("old\n", encoding="utf-8")
 
-    result = run(get("edit").run(ctx, {"path": "main.py", "old_text": "old", "new_text": "new"}))
+    result = run(
+        get("edit").run(
+            ctx,
+            {"path": "main.py", "edits": [{"old_text": "old", "new_text": "new"}]},
+        )
+    )
 
     assert result == {"path": "main.py", "replaced": 1}
     assert path.read_text(encoding="utf-8") == "new\n"
@@ -260,7 +273,100 @@ def test_edit_fails_when_text_is_not_unique(tmp_path) -> None:
     ctx.workspace.joinpath("main.py").write_text("x\nx\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="2 times"):
-        run(get("edit").run(ctx, {"path": "main.py", "old_text": "x", "new_text": "y"}))
+        run(
+            get("edit").run(
+                ctx,
+                {"path": "main.py", "edits": [{"old_text": "x", "new_text": "y"}]},
+            )
+        )
+
+
+def test_edit_applies_disjoint_replacements_atomically(tmp_path) -> None:
+    ctx = context(tmp_path)
+    path = ctx.workspace / "main.py"
+    path.write_text("alpha\nmiddle\nomega\n", encoding="utf-8")
+
+    result = run(
+        get("edit").run(
+            ctx,
+            {
+                "path": "main.py",
+                "edits": [
+                    {"old_text": "alpha", "new_text": "first"},
+                    {"old_text": "omega", "new_text": "last"},
+                ],
+            },
+        )
+    )
+
+    assert result == {"path": "main.py", "replaced": 2}
+    assert path.read_text(encoding="utf-8") == "first\nmiddle\nlast\n"
+
+
+def test_edit_does_not_write_when_one_replacement_fails(tmp_path) -> None:
+    ctx = context(tmp_path)
+    path = ctx.workspace / "main.py"
+    original = "alpha\nomega\n"
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"edits\[1\].*matched 0 times"):
+        run(
+            get("edit").run(
+                ctx,
+                {
+                    "path": "main.py",
+                    "edits": [
+                        {"old_text": "alpha", "new_text": "first"},
+                        {"old_text": "missing", "new_text": "last"},
+                    ],
+                },
+            )
+        )
+
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_edit_rejects_overlapping_and_noop_replacements(tmp_path) -> None:
+    ctx = context(tmp_path)
+    path = ctx.workspace / "main.py"
+    path.write_text("alpha beta\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="overlap"):
+        run(
+            get("edit").run(
+                ctx,
+                {
+                    "path": "main.py",
+                    "edits": [
+                        {"old_text": "alpha beta", "new_text": "whole"},
+                        {"old_text": "beta", "new_text": "tail"},
+                    ],
+                },
+            )
+        )
+    with pytest.raises(ValueError, match="would not change"):
+        run(
+            get("edit").run(
+                ctx,
+                {
+                    "path": "main.py",
+                    "edits": [{"old_text": "alpha", "new_text": "alpha"}],
+                },
+            )
+        )
+
+    assert path.read_text(encoding="utf-8") == "alpha beta\n"
+
+
+def test_edit_accepts_the_legacy_single_replacement_shape(tmp_path) -> None:
+    ctx = context(tmp_path)
+    path = ctx.workspace / "main.py"
+    path.write_text("old\n", encoding="utf-8")
+
+    result = run(get("edit").run(ctx, {"path": "main.py", "old_text": "old", "new_text": "new"}))
+
+    assert result == {"path": "main.py", "replaced": 1}
+    assert path.read_text(encoding="utf-8") == "new\n"
 
 
 def test_edit_rejects_symlinked_sdk_docs(tmp_path) -> None:
@@ -272,8 +378,7 @@ def test_edit_rejects_symlinked_sdk_docs(tmp_path) -> None:
                 ctx,
                 {
                     "path": "docs/sdk/common/20_core_types.md",
-                    "old_text": "Core Types",
-                    "new_text": "Core Values",
+                    "edits": [{"old_text": "Core Types", "new_text": "Core Values"}],
                 },
             )
         )

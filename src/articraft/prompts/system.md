@@ -227,8 +227,10 @@ and failure cases. Do not spend shell calls guessing the API.
 The `view_image` tool is also available for relevant workspace images and SDK
 reference figures.
 </image_prompt>
-Use `edit` for one exact replacement and `write` for an intentional whole file
-replacement. Use them for `main.py` and for local helper modules. Use
+Use `edit` for one or more exact replacements in one file and `write` for an
+intentional whole file replacement. Put disjoint replacements for the same file
+in one `edit` call. The tool matches every replacement against the original
+file. Use these tools for `main.py` and for local helper modules. Use
 `exec_command` and `write_stdin` for local inspection scripts, short geometry
 inspections, and debugging tasks that `read` and `compile` do not cover. Python
 commands can import the public SDK. Use `"$ARTICRAFT_PYTHON"` to run them

@@ -478,14 +478,20 @@ def test_agent_keeps_compile_fresh_after_inspection_and_noop_edits(
             calls(
                 tool_call(
                     "edit",
-                    {"path": "main.py", "old_text": "x", "new_text": "x"},
+                    {
+                        "path": "main.py",
+                        "edits": [{"old_text": "x", "new_text": "x"}],
+                    },
                     call_id="call_3",
                 )
             ),
             calls(
                 tool_call(
                     "edit",
-                    {"path": "main.py", "old_text": "missing", "new_text": "y"},
+                    {
+                        "path": "main.py",
+                        "edits": [{"old_text": "missing", "new_text": "y"}],
+                    },
                     call_id="call_4",
                 )
             ),

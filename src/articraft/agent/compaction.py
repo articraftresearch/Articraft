@@ -195,6 +195,7 @@ def _tool_call(call: dict[str, Any]) -> str:
     elif name == "edit":
         arguments.pop("old_text", None)
         arguments.pop("new_text", None)
+        arguments.pop("edits", None)
         arguments["text"] = "[edit text omitted]"
     return f"{name}({_truncate(json.dumps(arguments, sort_keys=True))})"
 

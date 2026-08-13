@@ -65,6 +65,22 @@ def test_summary_input_omits_large_payloads() -> None:
     messages[3]["tool_calls"][0]["arguments"] = json.dumps(
         {"path": "main.py", "content": "SECRET_FILE_BODY" * 200}
     )
+    messages[3]["tool_calls"].append(
+        {
+            "name": "edit",
+            "arguments": json.dumps(
+                {
+                    "path": "main.py",
+                    "edits": [
+                        {
+                            "old_text": "SECRET_OLD_TEXT" * 200,
+                            "new_text": "SECRET_NEW_TEXT" * 200,
+                        }
+                    ],
+                }
+            ),
+        }
+    )
     messages[4]["output"] = [
         {"type": "input_text", "text": "x" * 3_000},
         {
@@ -77,8 +93,11 @@ def test_summary_input_omits_large_payloads() -> None:
     assert plan is not None
     summary_input = plan.summary_messages[1]["content"]
     assert "SECRET_FILE_BODY" not in summary_input
+    assert "SECRET_OLD_TEXT" not in summary_input
+    assert "SECRET_NEW_TEXT" not in summary_input
     assert "SECRET_IMAGE_DATA" not in summary_input
     assert "[file content omitted]" in summary_input
+    assert "[edit text omitted]" in summary_input
     assert "more characters omitted" in summary_input
     assert "image payload omitted" in summary_input
 
