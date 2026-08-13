@@ -376,8 +376,8 @@ def test_prompt_and_docs_state_the_new_authoring_contract() -> None:
         "JointFrame",
         "JointDOF",
         "realistic geometry",
-        "primary mechanisms",
-        "floating parts",
+        "intentional motion",
+        "removable part",
         "unintended overlaps",
     ]:
         assert required.lower() in text.lower()
@@ -410,8 +410,39 @@ def test_prompts_encourage_research_and_mesh_without_a_usage_quota() -> None:
         "jet engine",
         "stand mixer",
         "desk lamp",
+        "realistic articulated 3d object",
+        "model the primary mechanism",
+        "lid_hinge",
     ]:
         assert forbidden.lower() not in normalized
+
+
+def test_prompts_do_not_force_articulation_or_invent_retention() -> None:
+    system = (package_dir / "prompts" / "system.md").read_text(encoding="utf-8")
+    task = (package_dir / "prompts" / "task.md").read_text(encoding="utf-8")
+    quickstart = (package_dir / "sdk" / "docs" / "common" / "00_quickstart.md").read_text(
+        encoding="utf-8"
+    )
+    text = " ".join(f"{system}\n{task}\n{quickstart}".split()).lower()
+
+    for required in [
+        "3d object or assembly",
+        "model only the motion the design requires",
+        "a removable part may be a separate seated body",
+        "do not invent a hinge",
+        "a loose teapot or saucepan lid is a separate seated part",
+        "name the main motion only when independent motion is part of the design",
+        "blocking threshold only for an explicit requirement or a clear defect",
+    ]:
+        assert required in text
+
+    for forbidden in [
+        "turn the user's request into a realistic articulated 3d object",
+        "model the primary mechanism",
+        "state what you built and name the main motion",
+        "lid_hinge",
+    ]:
+        assert forbidden not in text
 
 
 def test_prompt_requires_agent_driven_visual_review() -> None:

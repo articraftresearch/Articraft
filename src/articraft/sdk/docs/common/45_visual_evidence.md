@@ -200,7 +200,7 @@ The axis and radial direction must be perpendicular.
 
 ```python
 MotionStripView(
-    articulation="lid_hinge",
+    articulation="door_hinge",
     positions=(0.0, 0.6, 1.2),
     view=ModelView.side(width=320, height=280, show_joints=True),
 )
@@ -217,7 +217,7 @@ render_view(
     object_model,
     ModelView.three_quarter(),
     "qa/three_quarter.png",
-    pose={"lid_hinge": 0.8},
+    pose={"door_hinge": 0.8},
 )
 ```
 

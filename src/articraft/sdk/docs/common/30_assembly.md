@@ -124,7 +124,7 @@ from build123d import Axis
 
 top = housing_shape.faces().sort_by(Axis.Z)[-1]
 top_frame = housing_body.at(top)
-hinge_axis = lid_body.at(lid_shape.edges().filter_by(Axis.X)[0])
+hinge_axis = door_body.at(door_shape.edges().filter_by(Axis.X)[0])
 ```
 
 Use `WORLD.at(...)` to create a world endpoint. Use a raw `JointFrame` when exact numbers are

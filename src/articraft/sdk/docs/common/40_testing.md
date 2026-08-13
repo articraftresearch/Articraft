@@ -313,8 +313,8 @@ The default sweep spans the authored limits. A closed loop can have a smaller re
 so sweep checks record unreachable samples as failures.
 
 ```python
-poses = ctx.sample_joint("lid_hinge", samples=5)
-poses = ctx.sample_joint("lid_hinge", positions=(0.0, 0.4, 0.8))
+poses = ctx.sample_joint("door_hinge", samples=5)
+poses = ctx.sample_joint("door_hinge", positions=(0.0, 0.4, 0.8))
 ```
 
 Use these records with:

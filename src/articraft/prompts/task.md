@@ -4,8 +4,9 @@ User request:
 {{ prompt }}
 
 Edit `main.py` in the run workspace and build the requested object. Meet the four
-quality requirements from the system prompt. Use realistic geometry, model the
-primary mechanism, support every part, and avoid unintended overlap.
+quality requirements from the system prompt. Use realistic geometry, model only
+the motion the design requires, support retained parts, seat removable parts,
+and avoid unintended overlap.
 
 Start with the preloaded SDK quickstart. Before choosing a representation, use
 `read` to survey the relevant SDK references and compare plausible build123d and
@@ -21,5 +22,6 @@ After a successful compile, review the visual representation separately and
 improve any major form that uses a crude substitute when a public authoring
 method would fit it better.
 </image_prompt>
-Then return a short visible summary of the object and its main motion.
+Then return a short visible summary of the object. Include its main motion only
+when independent motion is part of the design.
 </task>

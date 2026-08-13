@@ -78,13 +78,32 @@ A joint cannot connect `WORLD` to itself.
 | Another combination | Generic D6 |
 
 ```python
-lid_hinge = model.joint(
-    "lid_hinge",
+door_hinge = model.joint(
+    "door_hinge",
     base.at((0.0, -0.04, 0.02)),
-    lid.at((0.0, -0.04, 0.0)),
+    door.at((0.0, -0.04, 0.0)),
     dofs=(JointDOF(JointAxis.ROT_X, limits=(0.0, 1.57)),),
 )
 ```
+
+## Removable bodies
+
+A separate body does not always need retained hardware. A teapot lid can sit on its mating
+rim and lift away freely. Use a generic D6 relation with all six axes free when the body must
+remain in the assembly graph:
+
+```python
+free_motion = tuple(JointDOF(axis) for axis in JointAxis)
+removable_lid = model.joint(
+    "removable_lid",
+    pot.at((0.0, 0.0, 0.12)),
+    lid.at((0.0, 0.0, 0.0)),
+    dofs=free_motion,
+)
+```
+
+This relation describes the possible poses. It does not imply a physical hinge, latch, or
+other retention hardware. Model the seated rim and clearance in the geometry.
 
 ## `model.articulation(...)`
 

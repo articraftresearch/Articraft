@@ -36,7 +36,13 @@ top by a few millimeters.
 Use build123d for exact boundaries, wall thickness, openings, bores, rims, and local fillets.
 Use mesh helpers for freeform sections or paths.
 
-## Add motion
+## Decide whether the object moves
+
+Many objects have no independent motion. A loose teapot or saucepan lid is a separate seated
+part, not a reason to invent a hinge. Add a retained mechanism only when the request,
+reference, or ordinary construction calls for one.
+
+## Add retained motion
 
 First, use `model.joint(...)` to connect two bodies. Then use `model.articulation(...)` to
 select the solver tree.
@@ -44,18 +50,19 @@ select the solver tree.
 ```python
 from articraft.sdk import JointAxis, JointDOF
 
-lid = model.rigid_body("lid")
-lid.add(Box(0.8, 0.5, 0.02), name="panel")
+moving_model = RigidBodyAssembly("wall_cabinet")
+frame = moving_model.rigid_body("cabinet_frame")
+frame.add(Box(0.8, 0.08, 0.6), name="frame")
+door = moving_model.rigid_body("cabinet_door")
+door.add(Box(0.8, 0.02, 0.6), name="panel")
 
-# The edge direction becomes the local Z axis of the frame.
-hinge = top.edges().filter_by(Axis.X).sort_by(Axis.Z)[-1]
-model.joint(
-    "lid_hinge",
-    body.at(hinge),
-    lid.at(hinge),
-    dofs=(JointDOF(JointAxis.ROT_Z, limits=(-1.9, 0.0)),),
+moving_model.joint(
+    "door_hinge",
+    frame.at((-0.4, 0.0, 0.0)),
+    door.at((-0.4, 0.0, 0.0)),
+    dofs=(JointDOF(JointAxis.ROT_Z, limits=(0.0, 1.9)),),
 )
-model.articulation("main", root=body, joints=["lid_hinge"])
+moving_model.articulation("main", root=frame, joints=["door_hinge"])
 ```
 
 Use `body.at(...)` to bind a point or build123d feature to its body. Pass the same feature to
