@@ -801,3 +801,37 @@ def test_shell_partition_and_face_opening_helpers() -> None:
 def test_wire_polyline_rejects_invalid_options(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         WirePolylineGeometry([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)], **kwargs)
+
+
+def test_extrude_rejects_a_hole_that_leaves_the_outer_profile() -> None:
+    """A hole straddling the boundary used to pass and build a broken solid.
+
+    The old check tested the hole's averaged point, which sits inside the
+    square here even though a third of the hole hangs off the right edge. The
+    mesh that came back was watertight -- so mesh health passed it -- but was
+    two components with the wrong volume.
+    """
+
+    outer = [(0.0, 0.0), (0.04, 0.0), (0.04, 0.04), (0.0, 0.04)]
+    escaping = [(0.025, 0.01), (0.054, 0.01), (0.054, 0.03), (0.025, 0.03)]
+    assert np.allclose(np.mean(escaping, axis=0), (0.0395, 0.02))  # inside the square
+    with pytest.raises(ValueError, match="must lie inside the outer profile"):
+        ExtrudeWithHolesGeometry(outer, [escaping], 0.01)
+
+
+def test_extrude_rejects_overlapping_holes() -> None:
+    outer = [(0.0, 0.0), (0.06, 0.0), (0.06, 0.06), (0.0, 0.06)]
+    first = [(0.01, 0.01), (0.03, 0.01), (0.03, 0.03), (0.01, 0.03)]
+    second = [(0.02, 0.02), (0.04, 0.02), (0.04, 0.04), (0.02, 0.04)]
+    with pytest.raises(ValueError, match="must not overlap"):
+        ExtrudeWithHolesGeometry(outer, [first, second], 0.01)
+
+
+def test_extrude_still_accepts_holes_that_fit() -> None:
+    outer = [(0.0, 0.0), (0.06, 0.0), (0.06, 0.06), (0.0, 0.06)]
+    first = [(0.01, 0.01), (0.02, 0.01), (0.02, 0.02), (0.01, 0.02)]
+    second = [(0.04, 0.04), (0.05, 0.04), (0.05, 0.05), (0.04, 0.05)]
+    solid = ExtrudeWithHolesGeometry(outer, [first, second], 0.01).to_trimesh()
+    assert solid.is_watertight
+    assert solid.euler_number == -2  # one solid, genus two: 2 - 2 * holes
+    assert solid.volume == pytest.approx((0.0036 - 2 * 0.0001) * 0.01)

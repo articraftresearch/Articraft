@@ -3,10 +3,11 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from itertools import pairwise
+from itertools import combinations, pairwise
 from numbers import Integral
 from typing import TYPE_CHECKING, Any, ClassVar, SupportsIndex, TypeAlias, cast
 
+import manifold3d
 import numpy as np
 import trimesh
 from scipy.interpolate import CubicHermiteSpline  # pyright: ignore[reportMissingTypeStubs]
@@ -281,23 +282,43 @@ def _ensure_ccw(points: list[Vec2]) -> list[Vec2]:
     return points if area > 0.0 else list(reversed(points))
 
 
-def _point_in_polygon(point: Vec2, polygon: Sequence[Vec2]) -> bool:
-    inside = False
-    for start, end in pairwise([*polygon, polygon[0]]):
-        cross = (end[0] - start[0]) * (point[1] - start[1]) - (end[1] - start[1]) * (
-            point[0] - start[0]
-        )
-        if (
-            abs(cross) <= 1e-9
-            and min(start[0], end[0]) - 1e-9 <= point[0] <= max(start[0], end[0]) + 1e-9
-            and min(start[1], end[1]) - 1e-9 <= point[1] <= max(start[1], end[1]) + 1e-9
-        ):
-            return True
-        if (start[1] > point[1]) != (end[1] > point[1]):
-            crossing = start[0] + (point[1] - start[1]) * (end[0] - start[0]) / (end[1] - start[1])
-            if crossing >= point[0]:
-                inside = not inside
-    return inside
+def _check_holes_fit(outer: list[Vec2], holes: list[list[Vec2]]) -> None:
+    """Reject holes that leave the outer profile or overlap each other.
+
+    Asked as an area question rather than by testing one averaged point. A hole
+    that straddles the boundary can have its mean comfortably inside, and the
+    cap is then triangulated against a hole the walls do not enclose: the mesh
+    that comes back is watertight, so mesh health passes it, while actually
+    being two components with the wrong volume.
+    """
+
+    if not holes:
+        return
+
+    def section(ring: list[Vec2]) -> manifold3d.CrossSection:
+        return manifold3d.CrossSection([np.asarray(ring, dtype=np.float64)])
+
+    outline = section(outer)
+    # Scale the tolerance to the profile, so the same check reads a millimetre
+    # bracket and a two metre panel.
+    slack = max(outline.area(), _EPS) * 1e-9
+    cuts = [section(hole) for hole in holes]
+    for index, cut in enumerate(cuts):
+        # `-` is difference: whatever of the hole is not covered by the outline.
+        escaped = (cut - outline).area()
+        if escaped > slack:
+            raise ValueError(
+                f"hole profile {index} must lie inside the outer profile; "
+                f"{escaped:.6g} of its area falls outside"
+            )
+    for first, second in combinations(range(len(cuts)), 2):
+        # `^` is intersection: two holes sharing area cut the same material twice.
+        shared = (cuts[first] ^ cuts[second]).area()
+        if shared > slack:
+            raise ValueError(
+                f"hole profiles {first} and {second} must not overlap; "
+                f"they share {shared:.6g} of area"
+            )
 
 
 def _triangulate_simple(points: list[Vec2]) -> list[Face]:
@@ -309,18 +330,10 @@ def _triangulate_with_holes(
 ) -> tuple[list[Vec2], list[Face]]:
     outer = _ensure_ccw(outer)
     holes = [_ensure_ccw(hole) for hole in holes]
-    for hole in holes:
-        center = (
-            sum(point[0] for point in hole) / len(hole),
-            sum(point[1] for point in hole) / len(hole),
-        )
-        if not _point_in_polygon(center, outer):
-            raise ValueError("hole profile must lie inside the outer profile")
+    _check_holes_fit(outer, holes)
     rings = [outer, *(list(reversed(hole)) for hole in holes)]
     flat = [point for ring in rings for point in ring]
     try:
-        import manifold3d
-
         polygons = cast(
             "list[DoubleNx2[int]]",
             [np.asarray(ring, dtype=np.float64) for ring in rings],
