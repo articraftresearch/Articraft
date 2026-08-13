@@ -876,6 +876,15 @@ class LatheGeometry(MeshGeometry):
     ) -> LatheGeometry:
         outer = _profile_2d(outer_profile, minimum=2)
         inner = _profile_2d(inner_profile, minimum=2)
+        for name, first, second, mode in (
+            ("start_cap", inner[0], outer[0], start_cap),
+            ("end_cap", outer[-1], inner[-1], end_cap),
+        ):
+            if mode == "round" and abs(first[0]) <= _EPS and abs(second[0]) <= _EPS:
+                raise ValueError(
+                    f"lathe shell {name}='round' cannot connect two points on the rotation "
+                    "axis; use a flat cap or give one endpoint a positive radius"
+                )
         axis_direction = 1.0 if outer[-1][1] + inner[-1][1] >= outer[0][1] + inner[0][1] else -1.0
         end = _cap_connector(outer[-1], inner[-1], end_cap, lip_samples, outward_z=axis_direction)
         start = _cap_connector(

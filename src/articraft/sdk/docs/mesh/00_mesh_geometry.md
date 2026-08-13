@@ -435,6 +435,10 @@ order defines the start and end. Cap modes are `"flat"` and `"round"`.
 `lip_samples` controls the curved connector used by a round cap and is clamped
 to at least 2.
 
+A round cap needs at least one endpoint with a positive radius. It cannot connect two points
+on the rotation axis because that would create a ring of collapsed faces. Use a flat cap when
+both endpoints lie on the axis.
+
 ```python
 cup = LatheGeometry.from_shell_profiles(
     outer_profile=[(0.045, 0.0), (0.050, 0.09)],

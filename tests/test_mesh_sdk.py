@@ -189,6 +189,17 @@ def test_profile_and_spline_helpers_are_deterministic() -> None:
     assert arc[-1] == pytest.approx((0.0, 1.0, 0.0), abs=1e-8)
 
 
+def test_lathe_shell_rejects_round_cap_between_axis_points() -> None:
+    outer = [(0.0, -0.12), (0.08, -0.08), (0.09, 0.1)]
+    inner = [(0.0, -0.09), (0.06, -0.06), (0.07, 0.08)]
+
+    flat = LatheGeometry.from_shell_profiles(outer, inner, start_cap="flat")
+
+    assert flat.is_watertight
+    with pytest.raises(ValueError, match="cannot connect two points on the rotation axis"):
+        LatheGeometry.from_shell_profiles(outer, inner, start_cap="round")
+
+
 def test_lathe_loft_and_extrusions_build_expected_solids() -> None:
     lathe = LatheGeometry([(0.0, -0.1), (0.08, -0.1), (0.08, 0.1), (0.0, 0.1)])
     shell = LatheGeometry.from_shell_profiles(
