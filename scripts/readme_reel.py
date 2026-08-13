@@ -26,6 +26,7 @@ import typer
 from PIL import Image, ImageChops
 
 from articraft.sdk import JointAxis
+from articraft.sdk.assembly import _frame_matrix
 from articraft.viewer import load_viewer_run
 
 BACKGROUND = "#f7f8fa"
@@ -149,11 +150,31 @@ def _poses(run: Path, version: dict, frames: int) -> list[dict[str, list[float]]
         keep = usable[0] if usable else None
         followers.update(j.name for j in group if keep is None or j.name != keep.name)
 
-    driven = [
-        (joint, joint.dofs[0])
-        for joint in tree
-        if len(joint.dofs) == 1 and joint.name not in followers
+    def turns_about_vertical(joint) -> bool:
+        """Does this joint spin the object the way the reel already does?
+
+        Every panel rotates a full turn about world up. A joint on that same
+        axis -- an excavator's slew ring -- adds to the camera instead of
+        showing anything new, and the panel appears to judder while the others
+        look smooth.
+        """
+        dof = joint.dofs[0]
+        axis = cast(JointAxis, dof.axis)
+        if not axis.is_rotational:
+            return False
+        direction = np.zeros(3)
+        direction[axis.component] = 1.0
+        world = _frame_matrix(joint.frame0)[:3, :3] @ direction
+        return abs(float(world[2])) > 0.99
+
+    candidates = [
+        joint for joint in tree if len(joint.dofs) == 1 and joint.name not in followers
     ]
+    # Dropping the turntable only helps while something else still moves. A tool
+    # that lies flat -- a pair of pliers -- has its one hinge on that axis too,
+    # and skipping it would leave the panel standing still.
+    upright = [joint for joint in candidates if not turns_about_vertical(joint)]
+    driven = [(joint, joint.dofs[0]) for joint in (upright or candidates)]
 
     def wanted(blend: float, turn: float, scale: float) -> dict[str, float]:
         asked: dict[str, float] = {}
