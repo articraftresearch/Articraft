@@ -114,6 +114,11 @@ class Settings(BaseSettings):
         gt=0.0,
         validation_alias="ARTICRAFT_OPENROUTER_REQUEST_TIMEOUT_SECONDS",
     )
+    openrouter_context_window_tokens: int = Field(
+        default=0,
+        ge=0,
+        validation_alias="ARTICRAFT_OPENROUTER_CONTEXT_WINDOW_TOKENS",
+    )
     openrouter_http_referer: str | None = Field(
         default=None,
         validation_alias="OPENROUTER_HTTP_REFERER",

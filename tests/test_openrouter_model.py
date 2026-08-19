@@ -12,6 +12,7 @@ from harness import GOOD_MAIN_PY
 from articraft.agent import Agent
 from articraft.agent.provider import create_model
 from articraft.agent.provider.openrouter import OpenRouterModel
+from articraft.agent.record import read_conversation
 from articraft.agent.workspace import LocalWorkspace
 from articraft.errors import ModelError
 from articraft.settings import DEFAULT_OPENROUTER_MODEL, Settings, get_settings
@@ -291,6 +292,209 @@ def test_openrouter_model_runs_full_generate_compile_loop(tmp_path: Path) -> Non
     assert request_json(requests[1])["messages"][-1]["role"] == "tool"
     assert request_json(requests[2])["messages"][-1]["role"] == "tool"
     assert client.is_closed
+
+
+def test_openrouter_model_summarizes_context_without_tools() -> None:
+    model, _client, requests = model_with_responses(
+        [
+            response(
+                text="checkpoint",
+                usage={"prompt_tokens": 900, "completion_tokens": 40, "cost": 0.004},
+            )
+        ]
+    )
+
+    result = run(
+        model.summarize_context(
+            [
+                {"role": "system", "content": "summarize"},
+                {"role": "user", "content": "<task>a box</task>"},
+            ],
+            max_output_tokens=8_192,
+        )
+    )
+
+    body = request_json(requests[0])
+    assert body["max_tokens"] == 8_192
+    assert "tools" not in body
+    assert body["messages"][0] == {"role": "system", "content": "summarize"}
+    assert result == {
+        "text": "checkpoint",
+        "token_usage": {
+            "input_tokens": 900,
+            "cached_input_tokens": 0,
+            "output_tokens": 40,
+            "total_tokens": 940,
+        },
+        "cost": 0.004,
+    }
+    run(model.close())
+
+
+def test_openrouter_model_rejects_summary_without_text() -> None:
+    model, _client, _requests = model_with_responses([response(text=None)])
+
+    with pytest.raises(ModelError, match="summary response did not contain text"):
+        run(
+            model.summarize_context(
+                [{"role": "user", "content": "summarize"}],
+                max_output_tokens=100,
+            )
+        )
+    run(model.close())
+
+
+def test_openrouter_model_compacts_when_run_exceeds_configured_window(tmp_path: Path) -> None:
+    old_text = "old work " * 2_000
+    recent_text = "recent work " * 8_000
+    model, client, requests = model_with_responses(
+        [
+            response(
+                text=old_text,
+                tool_calls=[
+                    function_call(
+                        "write",
+                        {"path": "main.py", "content": GOOD_MAIN_PY},
+                        call_id="call_write",
+                    )
+                ],
+                usage={"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.001},
+            ),
+            response(
+                text=recent_text,
+                tool_calls=[function_call("compile", {}, call_id="call_compile")],
+                usage={"prompt_tokens": 23_000, "completion_tokens": 1_000, "cost": 0.002},
+            ),
+            response(
+                text="checkpoint",
+                usage={"prompt_tokens": 900, "completion_tokens": 40, "cost": 0.004},
+            ),
+            response(
+                text="done",
+                usage={"prompt_tokens": 300, "completion_tokens": 5, "cost": 0.003},
+            ),
+        ],
+        openrouter_context_window_tokens=25_000,
+    )
+    agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3)
+
+    result = run(agent.run("a box", run_id="openrouter-compact"))
+
+    assert result["status"] == "success"
+    assert result["message"] == "done"
+    assert result["cost"] == 0.01
+    assert result["token_usage"]["total_tokens"] == 25_365
+    assert len(requests) == 4
+
+    summary = request_json(requests[2])
+    assert "tools" not in summary
+    assert summary["max_tokens"] == 8_192
+
+    final = request_json(requests[3])["messages"]
+    checkpoint = next(
+        message for message in final if "<compaction-checkpoint>" in str(message.get("content"))
+    )
+    assert checkpoint["role"] == "user"
+    assert final[-2]["role"] == "assistant"
+    assert final[-2]["tool_calls"][0]["id"] == "call_compile"
+    assert final[-1]["role"] == "tool"
+    assert final[-1]["tool_call_id"] == "call_compile"
+
+    conversation = read_conversation(tmp_path / "openrouter-compact" / "conversation.jsonl")
+    compaction = next(row for row in conversation if row.get("type") == "compaction")
+    assert compaction["summary"] == "checkpoint"
+    assert any(
+        row.get("role") == "assistant" and row.get("content") == old_text for row in conversation
+    )
+    assert client.is_closed
+
+
+def test_openrouter_model_never_compacts_without_configured_window(tmp_path: Path) -> None:
+    old_text = "old work " * 2_000
+    recent_text = "recent work " * 8_000
+    model, _client, requests = model_with_responses(
+        [
+            response(
+                text=old_text,
+                tool_calls=[
+                    function_call(
+                        "write",
+                        {"path": "main.py", "content": GOOD_MAIN_PY},
+                        call_id="call_write",
+                    )
+                ],
+                usage={"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.001},
+            ),
+            response(
+                text=recent_text,
+                tool_calls=[function_call("compile", {}, call_id="call_compile")],
+                usage={"prompt_tokens": 23_000, "completion_tokens": 1_000, "cost": 0.002},
+            ),
+            response(
+                text="done",
+                usage={"prompt_tokens": 300, "completion_tokens": 5, "cost": 0.003},
+            ),
+        ]
+    )
+    agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3)
+
+    result = run(agent.run("a box", run_id="openrouter-no-window"))
+
+    assert result["status"] == "success"
+    assert model.context_window_tokens == 0
+    assert len(requests) == 3
+    assert all("max_tokens" not in request_json(request) for request in requests)
+
+    conversation = read_conversation(tmp_path / "openrouter-no-window" / "conversation.jsonl")
+    assert not any(row.get("type") == "compaction" for row in conversation)
+
+
+def test_openrouter_model_reports_compaction_failure_and_keeps_history(tmp_path: Path) -> None:
+    old_text = "old work " * 2_000
+    recent_text = "recent work " * 8_000
+    model, _client, requests = model_with_responses(
+        [
+            response(
+                text=old_text,
+                tool_calls=[
+                    function_call(
+                        "write",
+                        {"path": "main.py", "content": GOOD_MAIN_PY},
+                        call_id="call_write",
+                    )
+                ],
+                usage={"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.001},
+            ),
+            response(
+                text=recent_text,
+                tool_calls=[function_call("compile", {}, call_id="call_compile")],
+                usage={"prompt_tokens": 23_000, "completion_tokens": 1_000, "cost": 0.002},
+            ),
+            httpx.Response(400, json={"error": {"message": "no free capacity", "code": 400}}),
+        ],
+        openrouter_context_window_tokens=25_000,
+    )
+    agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3)
+
+    result = run(agent.run("a box", run_id="openrouter-compact-fail"))
+
+    assert result["status"] == "error"
+    assert result["error"].startswith("context compaction failed")
+    assert "no free capacity" in result["error"]
+    assert len(requests) == 3
+
+    conversation = read_conversation(tmp_path / "openrouter-compact-fail" / "conversation.jsonl")
+    assert not any(row.get("type") == "compaction" for row in conversation)
+    assert any(
+        row.get("role") == "assistant" and row.get("content") == old_text for row in conversation
+    )
+
+
+def test_openrouter_model_reads_context_window_from_settings() -> None:
+    model, _client, _requests = model_with_responses([], openrouter_context_window_tokens=131_072)
+
+    assert model.context_window_tokens == 131_072
+    run(model.close())
 
 
 def test_openrouter_model_accepts_unknown_model_and_has_unknown_context() -> None:
