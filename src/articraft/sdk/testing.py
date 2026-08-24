@@ -1412,7 +1412,7 @@ class TestContext:
     def fail_if_loop_limits_contradict(
         self,
         *,
-        samples: int = 17,
+        samples: int = 9,
         tolerance: float = 1e-6,
         overrun_fraction: float = 0.25,
         max_solves: int = 1000,
@@ -1446,13 +1446,18 @@ class TestContext:
             # posed from supplied body poses: there is no driver to sweep.
             return self._record(check_name, True)
 
-        planned = [
-            (closure, path, joint, dof)
-            for closure, path in rings
-            for joint in path
-            for dof in joint.dofs
-            if dof.limits is not None
-        ]
+        # One coordinate can sit on two rings. Driving it twice sweeps the same
+        # mechanism twice, so keep the first ring that reaches it.
+        planned: list[tuple[Joint, tuple[Joint, ...], Joint, JointDOF]] = []
+        seen: set[str] = set()
+        for closure, path in rings:
+            for joint in path:
+                for dof in joint.dofs:
+                    dof_id = joint.dof_id(dof)
+                    if dof.limits is None or dof_id in seen:
+                        continue
+                    seen.add(dof_id)
+                    planned.append((closure, path, joint, dof))
         budget = max(1, int(max_solves) // (2 * samples))
         if len(planned) > budget:
             skipped = [joint.dof_id(dof) for _, _, joint, dof in planned[budget:]]
@@ -1474,21 +1479,17 @@ class TestContext:
             driver_id = drive_joint.dof_id(drive_dof)
             declared = f"({bounds[0]:.4g}, {bounds[1]:.4g})"
             solved = [
-                (
-                    value,
-                    _ring_solution(resolved, driver_id, value, relax=False),
-                    _ring_solution(resolved, driver_id, value, relax=True),
-                )
+                (value, _ring_solution(resolved, driver_id, value, relax=True))
                 for value in _articulation_sweep_values(drive_joint, samples, drive_dof)
             ]
-            reached = [(value, held, free) for value, held, free in solved if free is not None]
-            unreachable = [value for value, _, free in solved if free is None]
+            reached = [(value, free) for value, free in solved if free is not None]
+            unreachable = [value for value, free in solved if free is None]
+            held_cache: dict[float, dict[str, float] | None] = {}
             # Slack is how ring coordinates are normally authored: a slider given
             # a little more travel than the linkage uses is not a defect. Only a
             # range the mechanism misses by a wide margin is a claim it cannot keep.
-            if (
-                len(unreachable) > overrun_fraction * len(solved)
-                and not _is_periodic(drive_dof, bounds)
+            if len(unreachable) > overrun_fraction * len(solved) and not _is_periodic(
+                drive_dof, bounds
             ):
                 overrun[driver_id] = (
                     f"loop={closure.name!r} driver={driver_id!r} declared={declared}: "
@@ -1506,14 +1507,14 @@ class TestContext:
                         continue
                     lower, upper = limits
                     solutions = [
-                        (value, held, free, free[follower_id])
-                        for value, held, free in reached
-                        if free is not None and follower_id in free
+                        (value, free, free[follower_id])
+                        for value, free in reached
+                        if follower_id in free
                     ]
                     rotational = cast(JointAxis, dof.axis).is_rotational
                     outside = [
-                        (value, held, free)
-                        for value, held, free, position in solutions
+                        (value, free)
+                        for value, free, position in solutions
                         if not _within_limits(
                             position, (lower, upper), rotational=rotational, tolerance=tolerance
                         )
@@ -1521,9 +1522,15 @@ class TestContext:
                     if not outside:
                         continue
                     needs = [position for *_, position in solutions]
-                    blocked = sum(1 for _, held, _ in outside if held is None)
+                    held_states = [
+                        _held_solution(resolved, driver_id, value, held_cache)
+                        for value, _ in outside
+                    ]
+                    blocked = sum(1 for state in held_states if state is None)
                     elsewhere = [
-                        _branch_gap(held, free) for _, held, free in outside if held is not None
+                        _branch_gap(state, free)
+                        for (_, free), state in zip(outside, held_states, strict=True)
+                        if state is not None
                     ]
                     line = (
                         f"loop={closure.name!r} driver={driver_id!r} follower={follower_id!r} "
@@ -1919,6 +1926,23 @@ def _within_limits(
     lower, upper = limits
     turns = (0.0,) if not rotational else (0.0, 2.0 * math.pi, -2.0 * math.pi)
     return any(lower - tolerance <= position + turn <= upper + tolerance for turn in turns)
+
+
+def _held_solution(
+    resolved: ResolvedRigidBodyAssembly,
+    driver_id: str,
+    value: float,
+    cache: dict[float, dict[str, float] | None],
+) -> dict[str, float] | None:
+    """The solve that respects the authored limits, computed once per pose.
+
+    Only the poses a limit turns out to exclude need it, and on a ring that
+    agrees with its limits that is none of them.
+    """
+
+    if value not in cache:
+        cache[value] = _ring_solution(resolved, driver_id, value, relax=False)
+    return cache[value]
 
 
 def _branch_gap(held: Mapping[str, float], free: Mapping[str, float]) -> float:

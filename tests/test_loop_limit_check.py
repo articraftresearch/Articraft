@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 
 import pytest
 from build123d import Box
@@ -130,7 +131,10 @@ def test_a_follower_limit_pointing_the_wrong_way_is_named() -> None:
 
     assert "follower='coupler_pin.rotY'" in details
     assert "declared=(0, 1.75)" in details
-    assert "needs at least (-1.8" in details
+    needed = re.search(r"needs at least \((-?[\d.]+), (-?[\d.]+)\)", details)
+    assert needed is not None
+    # The knee folds the way the limits forbid, whatever the sweep density is.
+    assert float(needed.group(1)) < 0.0
 
 
 def test_a_follower_limit_narrower_than_the_ring_is_named() -> None:

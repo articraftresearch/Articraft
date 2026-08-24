@@ -559,7 +559,7 @@ Nested closed solids with positive volume intersection count as connected geomet
 
 ### Loop limits
 
-`fail_if_loop_limits_contradict(*, samples=17, tolerance=1e-6, overrun_fraction=0.25,
+`fail_if_loop_limits_contradict(*, samples=9, tolerance=1e-6, overrun_fraction=0.25,
 max_solves=1000, name=None)` sweeps every bounded coordinate on a closed loop. Each sample is
 solved twice. One solve stays inside the authored limits. The other leaves the coordinates the
 solver derives unbounded, so it reports where the linkage reaches. The difference between the two
@@ -576,7 +576,7 @@ A full-circle coordinate is never reported. A hinge authored `(-pi, pi)` says un
 does not claim that every angle is reachable. A revolute coordinate also satisfies its limits when
 any whole turn of the required pose fits inside them.
 
-The sweep costs two loop solves per sample per coordinate. `max_solves` bounds that budget. When a
+The sweep costs one loop solve per sample per coordinate, plus a second solve for the poses a limit turns out to exclude. A coordinate on two rings is driven once. `max_solves` bounds that budget. When a
 ring has more bounded coordinates than fit, the check warns and names the ones it did not drive.
 
 ### Scale warnings
