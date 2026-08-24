@@ -32,8 +32,11 @@ from articraft.sdk.assembly import (
     JointAxis,
     JointDOF,
     PhysicsState,
+    ResolvedRigidBodyAssembly,
     RigidBodyAssembly,
     _frame_matrix,
+    _is_periodic,
+    _joint_path,
 )
 from articraft.sdk.bodies import RigidBody, RigidBodyRef
 from articraft.sdk.errors import LoopClosureError, ValidationError
@@ -63,6 +66,7 @@ class FailureKind(StrEnum):
     OVERLAP = "overlap"
     CONTACT = "contact"
     ARTICULATION_SEPARATION = "articulation_separation"
+    LOOP_LIMITS = "loop_limits"
     MISSING_MASS = "missing_mass"
     AUTHORED = "authored"
 
@@ -1405,6 +1409,153 @@ class TestContext:
         )
         return self._record(check_name, False, details, kind=FailureKind.ARTICULATION_SEPARATION)
 
+    def fail_if_loop_limits_contradict(
+        self,
+        *,
+        samples: int = 17,
+        tolerance: float = 1e-6,
+        overrun_fraction: float = 0.25,
+        max_solves: int = 1000,
+        name: str | None = None,
+    ) -> bool:
+        """Report joint limits that a closed loop's own motion contradicts.
+
+        `validate()` reads one joint at a time, so a limit pointing the wrong
+        way is legal on its own -- the ring is what makes it a lie, and the ring
+        is never sampled as a mechanism. Each sweep sample is solved twice, once
+        inside the authored limits and once with the derived coordinates
+        unbounded, which separates the two ways a ring is mis-authored: a
+        follower whose limits exclude the motion the linkage requires, and a
+        driver whose range is wider than the linkage can follow. A full-circle
+        coordinate is neither -- it declares no wall, so it makes no claim a
+        mechanism can contradict.
+        """
+        samples = max(2, int(samples))
+        tolerance = _non_negative(tolerance, "tolerance")
+        check_name = name or f"fail_if_loop_limits_contradict(samples={samples})"
+        resolved = self.model.resolve()
+        tree = tuple(item.joint for item in resolved.joints if not item.exclude_from_articulation)
+        closures = tuple(item.joint for item in resolved.joints if item.exclude_from_articulation)
+        rings = [
+            (closure, path)
+            for closure in closures
+            if (path := _joint_path(tree, closure.body0, closure.body1)) is not None
+        ]
+        if not rings:
+            # Either no ring the tree spans, or a maximal-coordinate assembly
+            # posed from supplied body poses: there is no driver to sweep.
+            return self._record(check_name, True)
+
+        planned = [
+            (closure, path, joint, dof)
+            for closure, path in rings
+            for joint in path
+            for dof in joint.dofs
+            if dof.limits is not None
+        ]
+        budget = max(1, int(max_solves) // (2 * samples))
+        if len(planned) > budget:
+            skipped = [joint.dof_id(dof) for _, _, joint, dof in planned[budget:]]
+            self.warn(
+                f"loop limit sweep covered {budget} of {len(planned)} ring coordinates at "
+                f"samples={samples}; these were not swept as drivers: {skipped!r}"
+            )
+            planned = planned[:budget]
+
+        # One line per defect, not per (driver, defect) pair: every coordinate on
+        # the ring drives the same mechanism, so the same bad limit is found
+        # again from each of them. Keep the sweep that shows the widest motion.
+        overrun: dict[str, str] = {}
+        contradicted: dict[str, tuple[float, str]] = {}
+        for closure, path, drive_joint, drive_dof in planned:
+            bounds = drive_dof.limits
+            if bounds is None:
+                continue
+            driver_id = drive_joint.dof_id(drive_dof)
+            declared = f"({bounds[0]:.4g}, {bounds[1]:.4g})"
+            solved = [
+                (
+                    value,
+                    _ring_solution(resolved, driver_id, value, relax=False),
+                    _ring_solution(resolved, driver_id, value, relax=True),
+                )
+                for value in _articulation_sweep_values(drive_joint, samples, drive_dof)
+            ]
+            reached = [(value, held, free) for value, held, free in solved if free is not None]
+            unreachable = [value for value, _, free in solved if free is None]
+            # Slack is how ring coordinates are normally authored: a slider given
+            # a little more travel than the linkage uses is not a defect. Only a
+            # range the mechanism misses by a wide margin is a claim it cannot keep.
+            if (
+                len(unreachable) > overrun_fraction * len(solved)
+                and not _is_periodic(drive_dof, bounds)
+            ):
+                overrun[driver_id] = (
+                    f"loop={closure.name!r} driver={driver_id!r} declared={declared}: "
+                    f"{len(unreachable)} of {len(solved)} sampled poses are beyond the linkage "
+                    f"itself (first at {unreachable[0]:.4g}) -- this range is wider than the "
+                    "mechanism, whatever the follower limits say"
+                )
+            for joint in path:
+                for dof in joint.dofs:
+                    follower_id = joint.dof_id(dof)
+                    limits = dof.limits
+                    if limits is None or follower_id == driver_id:
+                        continue
+                    if _is_periodic(dof, limits):
+                        continue
+                    lower, upper = limits
+                    solutions = [
+                        (value, held, free, free[follower_id])
+                        for value, held, free in reached
+                        if free is not None and follower_id in free
+                    ]
+                    rotational = cast(JointAxis, dof.axis).is_rotational
+                    outside = [
+                        (value, held, free)
+                        for value, held, free, position in solutions
+                        if not _within_limits(
+                            position, (lower, upper), rotational=rotational, tolerance=tolerance
+                        )
+                    ]
+                    if not outside:
+                        continue
+                    needs = [position for *_, position in solutions]
+                    blocked = sum(1 for _, held, _ in outside if held is None)
+                    elsewhere = [
+                        _branch_gap(held, free) for _, held, free in outside if held is not None
+                    ]
+                    line = (
+                        f"loop={closure.name!r} driver={driver_id!r} follower={follower_id!r} "
+                        f"declared=({lower:.4g}, {upper:.4g}) needs at least ({min(needs):.4g}, "
+                        f"{max(needs):.4g}) over driver {outside[0][0]:.4g}..{outside[-1][0]:.4g}; "
+                        f"the authored limits leave {blocked} of those {len(outside)} poses "
+                        "unsolvable"
+                        + (
+                            f" and answer {len(elsewhere)} from up to {max(elsewhere):.4g} away "
+                            "in joint coordinates -- a different assembly branch"
+                            if elsewhere
+                            else ""
+                        )
+                    )
+                    span = max(needs) - min(needs)
+                    if follower_id not in contradicted or span > contradicted[follower_id][0]:
+                        contradicted[follower_id] = (span, line)
+
+        findings = [overrun[key] for key in sorted(overrun)] + [
+            contradicted[key][1] for key in sorted(contradicted)
+        ]
+        if not findings:
+            return self._record(check_name, True)
+        details = (
+            "A closed loop contradicts its own joint limits. Each joint's limits are legal on "
+            "their own, but sweeping the ring as a mechanism shows it needs motion those limits "
+            "forbid -- so the linkage jams, or quietly assembles the other way round. Widen the "
+            "limits named below, or narrow the driver's range to what the linkage can follow:\n"
+            + "\n".join(findings)
+        )
+        return self._record(check_name, False, details, kind=FailureKind.LOOP_LIMITS)
+
     def warn_if_absurd_dimensions(
         self,
         *,
@@ -1741,6 +1892,46 @@ def _pose_dicts(
         )
         result.append(dict(values))
     return result
+
+
+def _ring_solution(
+    resolved: ResolvedRigidBodyAssembly, driver_id: str, value: float, *, relax: bool
+) -> dict[str, float] | None:
+    """Ring coordinates for one driver pose, or None when the loop will not close."""
+
+    try:
+        positions, _ = resolved._kinematics({driver_id: float(value)}, relax_limits=relax)
+    except LoopClosureError:
+        return None
+    return positions
+
+
+def _within_limits(
+    position: float, limits: tuple[float, float], *, rotational: bool, tolerance: float
+) -> bool:
+    """True when the pose fits the limits, for a hinge by any whole turn of it.
+
+    A revolute coordinate of 4.05 and one of -2.23 are the same pose. The
+    relaxed solve walks continuously and can report either, so a limit is only
+    contradicted when no turn of the required pose fits inside it.
+    """
+
+    lower, upper = limits
+    turns = (0.0,) if not rotational else (0.0, 2.0 * math.pi, -2.0 * math.pi)
+    return any(lower - tolerance <= position + turn <= upper + tolerance for turn in turns)
+
+
+def _branch_gap(held: Mapping[str, float], free: Mapping[str, float]) -> float:
+    """How far two solves of the same pose sit apart, in joint coordinates.
+
+    Two solves of a pose no limit binds agree to solver precision. A gap the
+    size of a joint angle means the limits routed the mechanism somewhere else.
+    """
+
+    return max(
+        (abs(held[key] - value) for key, value in free.items() if key in held),
+        default=0.0,
+    )
 
 
 def _articulation_sweep_values(

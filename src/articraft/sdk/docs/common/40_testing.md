@@ -511,6 +511,7 @@ health allowances into a new context and runs these baseline checks before expor
 6. `warn_if_absurd_dimensions()`
 7. `fail_if_parts_overlap_in_current_pose()`
 8. `fail_if_articulation_separates_child()`
+9. `fail_if_loop_limits_contradict()` (only reaches a closed loop the articulation tree spans)
 
 If model validity fails, the worker stops the rest of the baseline pass. When the object is valid
 enough to inspect, model validity, mesh health, missing mass properties, and USDZ validation can
@@ -555,6 +556,28 @@ ctx.fail_if_part_contains_disconnected_geometry_islands(contact_tol=1e-6)
 ```
 
 Nested closed solids with positive volume intersection count as connected geometry.
+
+### Loop limits
+
+`fail_if_loop_limits_contradict(*, samples=17, tolerance=1e-6, overrun_fraction=0.25,
+max_solves=1000, name=None)` sweeps every bounded coordinate on a closed loop. Each sample is
+solved twice. One solve stays inside the authored limits. The other leaves the coordinates the
+solver derives unbounded, so it reports where the linkage reaches. The difference between the two
+names two defects.
+
+A follower whose limits exclude motion the linkage requires. The check reports the range it
+declares, the range the mechanism needs, and the part of the driver travel where they disagree.
+
+A driver whose range is wider than the linkage can follow. This is reported once more than
+`overrun_fraction` of its sampled poses are out of reach. Less slack than that is normal
+authoring.
+
+A full-circle coordinate is never reported. A hinge authored `(-pi, pi)` says unconstrained. It
+does not claim that every angle is reachable. A revolute coordinate also satisfies its limits when
+any whole turn of the required pose fits inside them.
+
+The sweep costs two loop solves per sample per coordinate. `max_solves` bounds that budget. When a
+ring has more bounded coordinates than fit, the check warns and names the ones it did not drive.
 
 ### Scale warnings
 
