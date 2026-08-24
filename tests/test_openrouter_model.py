@@ -374,7 +374,7 @@ def test_openrouter_model_compacts_when_run_exceeds_configured_window(tmp_path: 
                 usage={"prompt_tokens": 300, "completion_tokens": 5, "cost": 0.003},
             ),
         ],
-        openrouter_context_window_tokens=25_000,
+        openrouter_context_window_tokens=40_000,
     )
     agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3)
 
@@ -472,7 +472,7 @@ def test_openrouter_model_reports_compaction_failure_and_keeps_history(tmp_path:
             ),
             httpx.Response(400, json={"error": {"message": "no free capacity", "code": 400}}),
         ],
-        openrouter_context_window_tokens=25_000,
+        openrouter_context_window_tokens=40_000,
     )
     agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=3)
 

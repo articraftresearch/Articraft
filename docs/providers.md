@@ -48,9 +48,11 @@ OpenRouter reports token use and request cost when its API returns them. Articra
 keep a context window catalog for OpenRouter models.
 
 Set `ARTICRAFT_OPENROUTER_CONTEXT_WINDOW_TOKENS` to the selected model's context window to
-enable conversation compaction. Articraft replaces older turns with a compact summary when
-the conversation approaches that budget, and the live interface shows context use against
-it. When the value is unset, Articraft does not know the window and never compacts.
+enable conversation compaction — the number is on the model's OpenRouter page, or in
+`GET /api/v1/models` as `context_length`. Articraft replaces older turns with a compact
+summary when the conversation approaches that budget, and the live interface shows context
+use against it. When the value is unset, Articraft does not know the window and never
+compacts. Values between 1 and 36383 are rejected.
 
 ## Use the Python API
 

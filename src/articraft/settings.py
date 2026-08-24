@@ -4,7 +4,7 @@ from functools import cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_OUTPUT_DIR = Path("runs")
@@ -119,6 +119,17 @@ class Settings(BaseSettings):
         ge=0,
         validation_alias="ARTICRAFT_OPENROUTER_CONTEXT_WINDOW_TOKENS",
     )
+
+    @field_validator("openrouter_context_window_tokens")
+    @classmethod
+    def _openrouter_window_floor(cls, value: int) -> int:
+        """Reject windows below RESERVE_TOKENS + KEEP_RECENT_TOKENS: they look set but never protect."""
+        if 0 < value < 36_384:
+            raise ValueError(
+                "ARTICRAFT_OPENROUTER_CONTEXT_WINDOW_TOKENS must be 0 (disabled) or at least 36384"
+            )
+        return value
+
     openrouter_http_referer: str | None = Field(
         default=None,
         validation_alias="OPENROUTER_HTTP_REFERER",
