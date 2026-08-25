@@ -569,7 +569,7 @@ where a follower moves fastest. The check names two defects.
 
 A follower whose limits exclude motion the linkage requires. Where the walk leaves a follower's
 authored limits, the solve that respects those limits is asked for the same pose. Only its
-failure, pinned at the limits, makes a case. When it solves every accused pose instead, the
+failure to close the ring within them makes a case. When it solves every accused pose instead, the
 limits blocked nothing. The disagreement then indicts the unbounded walk, which has no assembly
 branch guarantee near a singular fold. The report gives the declared range, the range the
 mechanism needs, and the driver poses where the two disagree. The needed range is rounded
@@ -580,8 +580,9 @@ than `overrun_fraction` of the declared travel lies past where the ring stops cl
 fraction measures travel rather than samples, so slack smaller than that stays quiet at every
 sweep density.
 
-A full-circle coordinate is never reported. A hinge authored `(-pi, pi)` says unconstrained. It
-does not claim that every angle is reachable.
+A full-circle coordinate is never reported as a defect. A hinge authored `(-pi, pi)` says
+unconstrained. It does not claim that every angle is reachable. When such a ring closes over less
+than a hundredth of its declared range, the check warns that the loop barely moves.
 
 The walk costs about one loop solve per sample per coordinate. Each unreachable edge adds its
 bisection, and each pose a limit excludes adds one bounded solve. A coordinate on two rings is

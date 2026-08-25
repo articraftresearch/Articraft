@@ -1426,7 +1426,7 @@ class TestContext:
         from the rest pose with the derived coordinates unbounded, which shows
         the motion the linkage itself asks for. Where that motion leaves a
         follower's limits, the solve that respects them is the judge, and only
-        its failure, pinned at those limits, makes a case: when it solves every
+        its failure to close the ring within them makes a case: when it solves every
         accused pose instead, the limits blocked nothing, however far the
         unbounded walk wandered to say otherwise. A driver
         whose declared travel reaches past where the ring stops closing is
@@ -1477,6 +1477,7 @@ class TestContext:
         # again from each of them. Keep the sweep that shows the widest motion.
         overrun: dict[str, str] = {}
         contradicted: dict[str, tuple[float, str]] = {}
+        barely_moving: set[str] = set()
         for closure, path, drive_joint, drive_dof in planned:
             bounds = drive_dof.limits
             if bounds is None:
@@ -1502,6 +1503,17 @@ class TestContext:
             # tip the verdict by itself.
             declared_span = bounds[1] - bounds[0]
             missing = declared_span - span_reached
+            if (
+                _is_periodic(drive_dof, bounds)
+                and span_reached < _BARELY_MOVES_FRACTION * declared_span
+                and closure.name not in barely_moving
+            ):
+                barely_moving.add(closure.name)
+                self.warn(
+                    f"loop={closure.name!r} driver={driver_id!r} is authored full circle but "
+                    f"the ring closes over only {span_reached:.4g} of it -- the loop barely "
+                    "moves"
+                )
             if missing > overrun_fraction * declared_span and not _is_periodic(drive_dof, bounds):
                 overrun[driver_id] = (
                     f"loop={closure.name!r} driver={driver_id!r} declared={declared}: the "
@@ -1931,6 +1943,11 @@ _BOUNDARY_BISECTIONS = 8
 # ~1e-1 apart. The gate lives in the decade between, and deliberately not at
 # `tolerance`, which measures limit compliance, not distance between solves.
 _BRANCH_TOLERANCE = 1e-3
+# Below this fraction of its declared range, a full-circle ring coordinate is
+# not articulating anything: the ring closes only in a sliver around rest, and
+# a structure that barely moves deserves a word even though unconstrained
+# coordinates make no range claim to contradict.
+_BARELY_MOVES_FRACTION = 0.01
 
 
 def _ring_solution(
@@ -1964,7 +1981,8 @@ def _continued_solution(
 
     A solve from rest is free to land on whichever assembly branch it finds,
     and near a limiting position it does. Continuing from the neighbour keeps
-    the walk on the branch the mechanism actually moves along. One warm solve
+    the walk close to the branch it started on -- close, not provably on it,
+    which is why no case is ever filed on the walk's word alone. One warm solve
     covers an ordinary step, judged by ``_stayed_local``: when the local
     branch has no solution at the target, the solver converges somewhere far
     instead of failing, and a whole-turn hop must not pass for continuation.

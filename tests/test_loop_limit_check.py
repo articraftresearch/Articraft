@@ -359,3 +359,58 @@ def test_needs_bounds_round_outward(value: float) -> None:
     upper = float(f"{_round_out(value, up=True):.4g}")
 
     assert lower <= value <= upper
+
+
+def locked_four_bar() -> RigidBodyAssembly:
+    """A four-bar that closes only at rest: crank plus coupler exactly reach
+    the rocker circle when stretched, so the ring is a structure, not a
+    mechanism."""
+
+    assembly = RigidBodyAssembly("locked_four_bar")
+    ground = assembly.rigid_body("ground")
+    crank = assembly.rigid_body("crank")
+    coupler = assembly.rigid_body("coupler")
+    rocker = assembly.rigid_body("rocker")
+    for body, length in ((ground, 0.5), (crank, 0.2), (coupler, 0.2), (rocker, 0.1)):
+        body.add(Box(max(length, 0.05), 0.04, 0.04), name="bar")
+    crank_pin = assembly.joint(
+        "crank_pin",
+        ground.at(JointFrame(xyz=(-0.25, 0.0, 0.0))),
+        crank.at(),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=FULL),),
+    )
+    coupler_pin = assembly.joint(
+        "coupler_pin",
+        crank.at(JointFrame(xyz=(0.2, 0.0, 0.0))),
+        coupler.at(),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=FULL),),
+    )
+    rocker_pin = assembly.joint(
+        "rocker_pin",
+        ground.at(JointFrame(xyz=(0.25, 0.0, 0.0), rpy=(0.0, math.pi, 0.0))),
+        rocker.at(),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=FULL),),
+    )
+    assembly.joint(
+        "closing_pin",
+        coupler.at(JointFrame(xyz=(0.2, 0.0, 0.0))),
+        rocker.at(JointFrame(xyz=(0.1, 0.0, 0.0))),
+        dofs=(JointDOF(JointAxis.ROT_Y, limits=FULL),),
+    )
+    assembly.articulation("main", root=ground, joints=(crank_pin, coupler_pin, rocker_pin))
+    return assembly
+
+
+def test_a_ring_that_barely_moves_warns_instead_of_failing() -> None:
+    # Full-circle coordinates make no range claim, so a structure that closes
+    # only in a sliver around rest must not fail -- but silence would read as
+    # a working mechanism, so it gets a warning.
+    context = TestContext(locked_four_bar())
+
+    assert context.fail_if_loop_limits_contradict() is True
+    warnings = context.report().warnings
+    assert any("barely moves" in warning for warning in warnings)
+
+    healthy = TestContext(four_bar())
+    healthy.fail_if_loop_limits_contradict()
+    assert not any("barely moves" in warning for warning in healthy.report().warnings)
