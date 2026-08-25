@@ -1482,20 +1482,19 @@ class TestContext:
                 (value, _ring_solution(resolved, driver_id, value, relax=True))
                 for value in _articulation_sweep_values(drive_joint, samples, drive_dof)
             ]
-            reached = [(value, free) for value, free in solved if free is not None]
-            unreachable = [value for value, free in solved if free is None]
+            reached, out_of_reach = _reachable_from_rest(solved)
             held_cache: dict[float, dict[str, float] | None] = {}
             # Slack is how ring coordinates are normally authored: a slider given
             # a little more travel than the linkage uses is not a defect. Only a
             # range the mechanism misses by a wide margin is a claim it cannot keep.
-            if len(unreachable) > overrun_fraction * len(solved) and not _is_periodic(
+            if out_of_reach > overrun_fraction * len(solved) and not _is_periodic(
                 drive_dof, bounds
             ):
                 overrun[driver_id] = (
                     f"loop={closure.name!r} driver={driver_id!r} declared={declared}: "
-                    f"{len(unreachable)} of {len(solved)} sampled poses are beyond the linkage "
-                    f"itself (first at {unreachable[0]:.4g}) -- this range is wider than the "
-                    "mechanism, whatever the follower limits say"
+                    f"{out_of_reach} of {len(solved)} sampled poses cannot be reached from the "
+                    "rest pose -- this range is wider than the mechanism, whatever the follower "
+                    "limits say"
                 )
             for joint in path:
                 for dof in joint.dofs:
@@ -1926,6 +1925,34 @@ def _within_limits(
     lower, upper = limits
     turns = (0.0,) if not rotational else (0.0, 2.0 * math.pi, -2.0 * math.pi)
     return any(lower - tolerance <= position + turn <= upper + tolerance for turn in turns)
+
+
+def _reachable_from_rest(
+    solved: list[tuple[float, dict[str, float] | None]],
+) -> tuple[list[tuple[float, dict[str, float]]], int]:
+    """The poses the mechanism can move into, and how many it cannot.
+
+    A linkage can have assembly modes that no motion connects: a four bar sits
+    elbow up or elbow down, and between them is a span of driver values with no
+    solution at all. Coordinates solved on the far side of such a gap describe a
+    machine that would have to be taken apart and rebuilt, so they say nothing
+    about the limits of the one that was authored. Keep the unbroken run of
+    solutions nearest the rest pose and count everything else out of reach.
+    """
+
+    runs: list[list[tuple[float, dict[str, float]]]] = []
+    for value, free in solved:
+        if free is None:
+            runs.append([])
+            continue
+        if not runs:
+            runs.append([])
+        runs[-1].append((value, free))
+    runs = [run for run in runs if run]
+    if not runs:
+        return [], len(solved)
+    family = min(runs, key=lambda run: min(abs(value) for value, _ in run))
+    return family, len(solved) - len(family)
 
 
 def _held_solution(

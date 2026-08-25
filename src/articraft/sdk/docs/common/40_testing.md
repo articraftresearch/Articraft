@@ -572,6 +572,11 @@ A driver whose range is wider than the linkage can follow. This is reported once
 `overrun_fraction` of its sampled poses are out of reach. Less slack than that is normal
 authoring.
 
+A linkage can have assembly modes that no motion connects. A four bar sits elbow up or elbow
+down, with a span of driver values in between that has no solution at all. The check keeps the
+unbroken run of solutions nearest the rest pose. Anything past a gap describes a machine that would
+have to be taken apart and rebuilt. It counts as out of reach, not as required motion.
+
 A full-circle coordinate is never reported. A hinge authored `(-pi, pi)` says unconstrained. It
 does not claim that every angle is reachable. A revolute coordinate also satisfies its limits when
 any whole turn of the required pose fits inside them.

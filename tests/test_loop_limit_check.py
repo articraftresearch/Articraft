@@ -8,7 +8,12 @@ from build123d import Box
 
 from articraft.sdk.assembly import JointAxis, JointDOF, JointFrame, RigidBodyAssembly
 from articraft.sdk.errors import LoopClosureError
-from articraft.sdk.testing import TestContext
+from articraft.sdk.testing import (
+    TestContext,
+    _articulation_sweep_values,
+    _reachable_from_rest,
+    _ring_solution,
+)
 
 FULL = (-math.pi, math.pi)
 GROUND_A = (-0.2, 0.0, 0.1)
@@ -204,3 +209,22 @@ def test_forward_kinematics_still_validates_what_the_solver_returns() -> None:
     assert positions["coupler_pin.rotY"] < 0.0
     with pytest.raises(LoopClosureError):
         resolved.forward_kinematics({"crank_pin.rotY": 0.25})
+
+
+def test_a_disconnected_assembly_mode_is_not_the_mechanism_that_was_authored() -> None:
+    # Driving the coupler pin, the four-bar runs out of solutions partway and
+    # picks up again on the other assembly mode, with the crank a whole turn
+    # away. No motion connects the two, so the far side says nothing about the
+    # crank's limits and must not be read as motion the linkage requires.
+    resolved = four_bar().resolve()
+    joint = resolved.get_joint("coupler_pin").joint
+    dof = joint.dofs[0]
+    solved = [
+        (value, _ring_solution(resolved, "coupler_pin.rotY", value, relax=True))
+        for value in _articulation_sweep_values(joint, 33, dof)
+    ]
+    family, out_of_reach = _reachable_from_rest(solved)
+
+    assert out_of_reach > 0
+    assert len(family) < sum(1 for _, free in solved if free is not None)
+    assert all(abs(free["crank_pin.rotY"]) < 2.5 for _, free in family)
