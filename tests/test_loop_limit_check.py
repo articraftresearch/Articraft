@@ -11,8 +11,7 @@ from articraft.sdk.errors import LoopClosureError
 from articraft.sdk.testing import (
     TestContext,
     _articulation_sweep_values,
-    _reachable_from_rest,
-    _ring_solution,
+    _swept_from_rest,
 )
 
 FULL = (-math.pi, math.pi)
@@ -179,10 +178,14 @@ def test_a_full_circle_hinge_makes_no_claim() -> None:
     assert failure_details(four_bar()) == ""
 
 
-def test_a_hinge_that_needs_the_other_turn_is_not_a_contradiction() -> None:
-    # Driving from the far side of the ring solves the crank to +4.05 rad, the
-    # same pose as -2.23 and inside its limits. One turn away is not outside.
-    assert failure_details(four_bar(crank_limits=(-2.5, 2.5))) == ""
+@pytest.mark.parametrize("samples", [5, 7, 9, 13])
+def test_a_hinge_with_slack_past_its_own_travel_is_not_a_contradiction(samples: int) -> None:
+    # Walked from the rest pose, the far side of the ring arrives with the
+    # crank at -2.23 rad, inside its limits -- not at the +4.05 a solve from
+    # rest used to report for the same pose. The slack past the crank's own
+    # travel stays quiet at every density: the overrun is a fraction of the
+    # declared travel, not of however many samples landed on the walls.
+    assert failure_details(four_bar(crank_limits=(-2.5, 2.5)), samples=samples) == ""
 
 
 def test_an_assembly_without_a_loop_is_skipped() -> None:
@@ -211,20 +214,24 @@ def test_forward_kinematics_still_validates_what_the_solver_returns() -> None:
         resolved.forward_kinematics({"crank_pin.rotY": 0.25})
 
 
-def test_a_disconnected_assembly_mode_is_not_the_mechanism_that_was_authored() -> None:
-    # Driving the coupler pin, the four-bar runs out of solutions partway and
-    # picks up again on the other assembly mode, with the crank a whole turn
-    # away. No motion connects the two, so the far side says nothing about the
-    # crank's limits and must not be read as motion the linkage requires.
+def test_the_sweep_stops_where_the_ring_stops_closing() -> None:
+    # Driving the coupler pin, the four-bar's ring stops closing partway round
+    # on one side. The walk from the rest pose ends there: the mechanism cannot
+    # pass through a pose with no solution, so everything past it is counted
+    # out of reach instead of being solved into a lifted copy of the linkage
+    # with the crank a whole turn away.
     resolved = four_bar().resolve()
     joint = resolved.get_joint("coupler_pin").joint
     dof = joint.dofs[0]
-    solved = [
-        (value, _ring_solution(resolved, "coupler_pin.rotY", value, relax=True))
-        for value in _articulation_sweep_values(joint, 33, dof)
-    ]
-    family, out_of_reach = _reachable_from_rest(solved)
+    sweep = _articulation_sweep_values(joint, 33, dof)
+    reached, _, span_reached, out_of_reach = _swept_from_rest(
+        resolved, "coupler_pin.rotY", sweep, frozenset({"crank_pin.rotY", "rocker_pin.rotY"})
+    )
 
     assert out_of_reach > 0
-    assert len(family) < sum(1 for _, free in solved if free is not None)
-    assert all(abs(free["crank_pin.rotY"]) < 2.5 for _, free in family)
+    assert span_reached < sweep[-1] - sweep[0]
+    assert all(abs(free["crank_pin.rotY"]) < 2.5 for _, free in reached)
+    # The kept poses are one unbroken stretch of driver travel around rest.
+    index_of = {value: index for index, value in enumerate(sweep)}
+    kept = sorted(index_of[value] for value, _ in reached)
+    assert kept == list(range(kept[0], kept[-1] + 1))

@@ -374,6 +374,7 @@ class ResolvedRigidBodyAssembly:
         dof_positions: Mapping[str, float] | None = None,
         *,
         relax_limits: bool = False,
+        loop_start: Mapping[str, float] | None = None,
     ) -> tuple[dict[str, float], dict[str, Mat4]]:
         """Solve the tree and its loops, before the state is validated.
 
@@ -425,6 +426,7 @@ class ResolvedRigidBodyAssembly:
                 self.articulations,
                 positions,
                 relax_limits=relax_limits,
+                start=loop_start,
             )
         try:
             transforms = _propagate_transforms(
@@ -851,6 +853,7 @@ def _solve_closed_loops(
     positions: dict[str, float],
     *,
     relax_limits: bool = False,
+    start: Mapping[str, float] | None = None,
 ) -> dict[str, float]:
     """Solve unspecified tree DOFs so every excluded constraint stays closed.
 
@@ -956,12 +959,23 @@ def _solve_closed_loops(
         )
         return project(solution.x)
 
-    values = np.zeros(len(candidates), dtype=np.float64)
-    # With no unknowns left -- every ring coordinate supplied by the caller --
-    # there is nothing to solve, but the closure residual still decides
-    # whether the supplied pose keeps the loop assembled.
-    for step in range(1, (_LOOP_STEPS if candidates else 0) + 1):
-        values = solve_toward(step / _LOOP_STEPS, values)
+    if start is not None and candidates:
+        # A warm start is already on the branch the caller is walking, so the
+        # homotopy from rest is not needed: one full-scale solve tracks it.
+        values = project(
+            np.asarray(
+                [start.get(joint.dof_id(dof), 0.0) for joint, dof in candidates],
+                dtype=np.float64,
+            )
+        )
+        values = solve_toward(1.0, values)
+    else:
+        values = np.zeros(len(candidates), dtype=np.float64)
+        # With no unknowns left -- every ring coordinate supplied by the caller --
+        # there is nothing to solve, but the closure residual still decides
+        # whether the supplied pose keeps the loop assembled.
+        for step in range(1, (_LOOP_STEPS if candidates else 0) + 1):
+            values = solve_toward(step / _LOOP_STEPS, values)
 
     # One gate, equal to validate_state's per-axis tolerance: anything
     # accepted here passes validation, anything rejected names the loop.
