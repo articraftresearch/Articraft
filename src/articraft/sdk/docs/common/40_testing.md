@@ -560,29 +560,33 @@ Nested closed solids with positive volume intersection count as connected geomet
 ### Loop limits
 
 `fail_if_loop_limits_contradict(*, samples=9, tolerance=1e-6, overrun_fraction=0.25,
-max_solves=1000, name=None)` sweeps every bounded coordinate on a closed loop. Each sample is
-solved twice. One solve stays inside the authored limits. The other leaves the coordinates the
-solver derives unbounded, so it reports where the linkage reaches. The difference between the two
-names two defects.
+max_solves=1000, name=None)` sweeps every bounded coordinate on a closed loop. The sweep walks
+outward from the rest pose. Each sample continues from its neighbour's solution, with the
+coordinates the solver derives unbounded, so the walk follows the motion the linkage asks for.
+Each side of the sweep ends at the first pose where the ring will not close. A bisection toward
+that edge measures the travel the mechanism covers. It also probes the motion close to the edge,
+where a follower moves fastest. The check names two defects.
 
-A follower whose limits exclude motion the linkage requires. The check reports the range it
-declares, the range the mechanism needs, and the part of the driver travel where they disagree.
+A follower whose limits exclude motion the linkage requires. Where the walk leaves a follower's
+authored limits, the solve that respects those limits is asked for the same pose. Only its
+failure, pinned at the limits, makes a case. When it solves every accused pose instead, the
+limits blocked nothing. The disagreement then indicts the unbounded walk, which has no assembly
+branch guarantee near a singular fold. The report gives the declared range, the range the
+mechanism needs, and the driver poses where the two disagree. The needed range is rounded
+outward, so its numbers can be copied back as the new limits.
 
-A driver whose range is wider than the linkage can follow. This is reported once more than
-`overrun_fraction` of its sampled poses are out of reach. Less slack than that is normal
-authoring.
-
-A linkage can have assembly modes that no motion connects. A four bar sits elbow up or elbow
-down, with a span of driver values in between that has no solution at all. The check keeps the
-unbroken run of solutions nearest the rest pose. Anything past a gap describes a machine that would
-have to be taken apart and rebuilt. It counts as out of reach, not as required motion.
+A driver whose declared range is wider than the linkage can follow. This is reported once more
+than `overrun_fraction` of the declared travel lies past where the ring stops closing. The
+fraction measures travel rather than samples, so slack smaller than that stays quiet at every
+sweep density.
 
 A full-circle coordinate is never reported. A hinge authored `(-pi, pi)` says unconstrained. It
-does not claim that every angle is reachable. A revolute coordinate also satisfies its limits when
-the required pose, or one whole turn of it, fits inside them.
+does not claim that every angle is reachable.
 
-The sweep costs one loop solve per sample per coordinate, plus a second solve for the poses a limit turns out to exclude. A coordinate on two rings is driven once. `max_solves` bounds that budget. When a
-ring has more bounded coordinates than fit, the check warns and names the ones it did not drive.
+The walk costs about one loop solve per sample per coordinate. Each unreachable edge adds its
+bisection, and each pose a limit excludes adds one bounded solve. A coordinate on two rings is
+driven once. `max_solves` bounds that budget. When a ring has more bounded coordinates than fit,
+the check warns and names the ones it did not drive.
 
 ### Scale warnings
 

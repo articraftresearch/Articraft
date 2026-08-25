@@ -1502,9 +1502,7 @@ class TestContext:
             # tip the verdict by itself.
             declared_span = bounds[1] - bounds[0]
             missing = declared_span - span_reached
-            if missing > overrun_fraction * declared_span and not _is_periodic(
-                drive_dof, bounds
-            ):
+            if missing > overrun_fraction * declared_span and not _is_periodic(drive_dof, bounds):
                 overrun[driver_id] = (
                     f"loop={closure.name!r} driver={driver_id!r} declared={declared}: the "
                     f"mechanism's travel covers {span_reached:.4g} of the declared "
@@ -1543,7 +1541,7 @@ class TestContext:
                     # it: the limits are answering from another assembly branch.
                     blocked: list[float] = []
                     rerouted: list[tuple[float, float]] = []
-                    for value, free, position in outside:
+                    for value, free, _ in outside:
                         held = _held_solution(resolved, driver_id, value, held_cache)
                         if held is None:
                             blocked.append(value)
@@ -2091,9 +2089,7 @@ def _reach_boundary(
     probes: list[tuple[float, dict[str, float]]] = []
     for _ in range(_BOUNDARY_BISECTIONS):
         middle = 0.5 * (good_value + bad_value)
-        free = _continued_solution(
-            resolved, driver_id, good_value, good_free, middle, rotational
-        )
+        free = _continued_solution(resolved, driver_id, good_value, good_free, middle, rotational)
         if free is None:
             bad_value = middle
         else:
@@ -2162,7 +2158,7 @@ def _articulation_sweep_values(
 ) -> list[float]:
     """Joint values to sample across an articulation's motion range.
 
-    The first value is the rest pose. A bounded joint sweeps lower..upper; a
+    A bounded joint sweeps lower..upper with both ends included; a
     continuous or unbounded joint samples a half turn (0..pi), which is enough to
     reveal a child that separates as it rotates.
     """
