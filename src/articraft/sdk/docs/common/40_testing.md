@@ -579,7 +579,7 @@ have to be taken apart and rebuilt. It counts as out of reach, not as required m
 
 A full-circle coordinate is never reported. A hinge authored `(-pi, pi)` says unconstrained. It
 does not claim that every angle is reachable. A revolute coordinate also satisfies its limits when
-any whole turn of the required pose fits inside them.
+the required pose, or one whole turn of it, fits inside them.
 
 The sweep costs one loop solve per sample per coordinate, plus a second solve for the poses a limit turns out to exclude. A coordinate on two rings is driven once. `max_solves` bounds that budget. When a
 ring has more bounded coordinates than fit, the check warns and names the ones it did not drive.

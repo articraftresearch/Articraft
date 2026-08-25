@@ -1919,7 +1919,9 @@ def _within_limits(
 
     A revolute coordinate of 4.05 and one of -2.23 are the same pose. The
     relaxed solve walks continuously and can report either, so a limit is only
-    contradicted when no turn of the required pose fits inside it.
+    contradicted when neither the required pose nor one whole turn of it fits
+    inside it. One turn each way is exhaustive here: a coordinate with a wall
+    spans less than a turn, so no second one can fit.
     """
 
     lower, upper = limits
