@@ -147,11 +147,38 @@ def test_a_follower_limit_pointing_the_wrong_way_is_named() -> None:
     assert float(needed.group(1)) < 0.0
 
 
-def test_a_follower_limit_narrower_than_the_ring_is_named() -> None:
-    details = failure_details(four_bar(coupler_limits=(-1.0, 1.0)))
+def test_a_follower_limit_narrower_than_a_bounded_drive_is_named() -> None:
+    # The crank's own range is a claim: the follower must span what honouring
+    # that claim requires.
+    details = failure_details(four_bar(coupler_limits=(-1.0, 1.0), crank_limits=(-2.5, 2.5)))
 
     assert "follower='coupler_pin.rotY'" in details
     assert "declared=(-1, 1)" in details
+
+
+def test_a_stop_narrower_than_the_free_motion_is_not_a_contradiction() -> None:
+    # With every other coordinate authored full circle, nothing claims the
+    # motion the stop forbids. The mechanism keeps its travel around rest and
+    # simply stops earlier than an unconstrained linkage would.
+    assert failure_details(four_bar(coupler_limits=(-1.75, 2.60))) == ""
+
+
+def test_a_wall_crossed_inside_a_bounded_drive_is_reported() -> None:
+    # The crank's declared range is a claim. Honouring it walks the coupler
+    # through its wall, and the bounded solve fails pinned there, so the
+    # excursion is reported even though the wrapped pose would fit.
+    details = failure_details(four_bar(coupler_limits=(-3.0, 3.0), crank_limits=(-2.31, 2.31)))
+
+    assert "follower='coupler_pin.rotY'" in details
+
+
+def test_a_sweep_endpoint_on_a_limit_does_not_raise() -> None:
+    # Substep arithmetic must land exactly on the endpoint: recomputing it in
+    # floating point can overshoot the driver's own limit by one ulp and trip
+    # the strict limit guard as a ValidationError instead of a finding.
+    context = TestContext(four_bar(rocker_limits=(-1.4, 0.2)))
+
+    assert isinstance(context.fail_if_loop_limits_contradict(), bool)
 
 
 @pytest.mark.parametrize("samples", [5, 9, 17, 33])
@@ -342,7 +369,7 @@ def test_a_branch_answer_is_reported_next_to_the_jam() -> None:
     # Poses the limits leave unsolvable make the case. Where the bounded solve
     # answers from a different assembly branch instead, that is reported with
     # them, whole turns removed before the distance is read.
-    details = failure_details(four_bar(coupler_limits=(0.0, 1.75)))
+    details = failure_details(four_bar(coupler_limits=(0.0, 1.75), crank_limits=(-2.5, 2.5)))
 
     assert "poses unsolvable" in details
     assert "away in joint coordinates -- a different assembly branch" in details
@@ -350,7 +377,7 @@ def test_a_branch_answer_is_reported_next_to_the_jam() -> None:
 
 @pytest.mark.parametrize(
     "value",
-    [3.3457, -1.8694, 0.9999999999, 1.0000000001, -0.1, 1e-5, 12345.678, -3.0],
+    [3.3457, -1.8694, 0.9999999999, 1.0000000001, -0.1, 1e-5, 12345.678, -3.0, 1e-319, -1.6e308],
 )
 def test_needs_bounds_round_outward(value: float) -> None:
     # The printed range must survive being copied back: parsing the four shown

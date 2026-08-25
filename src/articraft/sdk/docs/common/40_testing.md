@@ -569,7 +569,10 @@ where a follower moves fastest. The check names two defects.
 
 A follower whose limits exclude motion the linkage requires. Where the walk leaves a follower's
 authored limits, the solve that respects those limits is asked for the same pose. Only its
-failure to close the ring within them makes a case. When it solves every accused pose instead, the
+failure to close the ring within them makes a case. When the driver is a full-circle coordinate,
+the case must also start at the first step away from rest. A stop that leaves the mechanism its
+motion around rest is authoring, not a contradiction. A full-circle driver claims no range that a
+stop could contradict. When it solves every accused pose instead, the
 limits blocked nothing. The disagreement then indicts the unbounded walk, which has no assembly
 branch guarantee near a singular fold. The report gives the declared range, the range the
 mechanism needs, and the driver poses where the two disagree. The needed range is rounded
@@ -586,8 +589,9 @@ than a hundredth of its declared range, the check warns that the loop barely mov
 
 The walk costs about one loop solve per sample per coordinate. Each unreachable edge adds its
 bisection, and each pose a limit excludes adds one bounded solve. A coordinate on two rings is
-driven once. `max_solves` bounds that budget. When a ring has more bounded coordinates than fit,
-the check warns and names the ones it did not drive.
+driven once. `max_solves` sizes the sweep: coordinates that do not fit are not driven, and a
+warning names them. The first coordinate is always driven, and fewer than five samples are raised
+to five, since a coarser grid cannot see the travel it walks.
 
 ### Scale warnings
 

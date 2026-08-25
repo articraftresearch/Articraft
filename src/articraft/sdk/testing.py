@@ -1433,7 +1433,7 @@ class TestContext:
         reported on its own. A full-circle coordinate makes no such claims --
         it declares no wall for a mechanism to contradict.
         """
-        samples = max(2, int(samples))
+        samples = max(5, int(samples))
         tolerance = _non_negative(tolerance, "tolerance")
         overrun_fraction = _non_negative(overrun_fraction, "overrun_fraction")
         max_solves = max(1, int(_non_negative(max_solves, "max_solves")))
@@ -1494,6 +1494,14 @@ class TestContext:
             reached, probes, span_reached, out_of_reach = _swept_from_rest(
                 resolved, driver_id, sweep, rotational_ids
             )
+            doorstep = {
+                value
+                for value in (
+                    min((v for v in sweep if v > 0.0), default=None),
+                    max((v for v in sweep if v < 0.0), default=None),
+                )
+                if value is not None
+            }
             judged = sorted(reached + probes, key=lambda item: item[0])
             held_cache: dict[float, dict[str, float] | None] = {}
             # Slack is how ring coordinates are normally authored: a range a
@@ -1561,9 +1569,27 @@ class TestContext:
                         gap = _branch_gap(held, free, rotational_ids)
                         if gap > _BRANCH_TOLERANCE:
                             rerouted.append((value, gap))
+                    # A full-circle driver makes no range claim, so poses it
+                    # reaches only through a neighbour's stop are not motion
+                    # the linkage requires: a stop that leaves the mechanism
+                    # its motion around rest is authoring, not a contradiction.
+                    # A limit authored against the motion's own direction is
+                    # different -- limits must contain the zero configuration,
+                    # so such a limit jams the very first step away from rest,
+                    # and that is the signature this keeps.
+                    if (
+                        blocked
+                        and _is_periodic(drive_dof, bounds)
+                        and not any(any(abs(b - d) <= 1e-12 for d in doorstep) for b in blocked)
+                    ):
+                        blocked = []
                     if not blocked:
                         continue
-                    needs = [position for *_, position in solutions]
+                    # "At least" must not read narrower than the declaration on
+                    # either side: the walk can die early on one side and the
+                    # sampled range under-span there, and a fix has to keep what
+                    # the author already declared as wanted travel.
+                    needs = [position for *_, position in solutions] + [lower, upper]
                     named = sorted(blocked + [value for value, _ in rerouted])
                     accused = len(blocked) + len(rerouted)
                     line = (
@@ -1994,8 +2020,16 @@ def _continued_solution(
     if free is not None and _stayed_local(prev_free, free, rotational):
         return free
     stepped = prev_free
+    low, high = min(prev_value, value), max(prev_value, value)
     for step in range(1, _SWEEP_SUBSTEPS + 1):
-        target = prev_value + (value - prev_value) * step / _SWEEP_SUBSTEPS
+        if step == _SWEEP_SUBSTEPS:
+            # `prev + (value - prev)` is not `value` in floating point, and a
+            # sweep endpoint sits exactly on a driver's limit: recomputing it
+            # can land one ulp outside and trip the strict limit guard.
+            target = value
+        else:
+            target = prev_value + (value - prev_value) * (step / _SWEEP_SUBSTEPS)
+            target = min(max(target, low), high)
         moved = _ring_solution(resolved, driver_id, target, relax=True, start=stepped)
         if moved is None or not _stayed_local(stepped, moved, rotational):
             return None
@@ -2166,9 +2200,12 @@ def _round_out(value: float, *, up: bool) -> float:
     if value == 0.0 or not math.isfinite(value):
         return value
     quantum = 10.0 ** (math.floor(math.log10(abs(value))) - 3)
+    if quantum == 0.0 or not math.isfinite(quantum):
+        return value
     scaled = value / quantum
     rounded = math.ceil(scaled) if up else math.floor(scaled)
-    return rounded * quantum
+    result = rounded * quantum
+    return result if math.isfinite(result) else value
 
 
 def _articulation_sweep_values(
