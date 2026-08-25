@@ -11,6 +11,7 @@ from articraft.sdk.errors import LoopClosureError
 from articraft.sdk.testing import (
     TestContext,
     _articulation_sweep_values,
+    _round_out,
     _swept_from_rest,
 )
 
@@ -335,3 +336,26 @@ def test_a_closure_the_tree_does_not_span_is_passed_over() -> None:
     context = TestContext(assembly)
 
     assert context.fail_if_loop_limits_contradict() is True
+
+
+def test_a_branch_answer_is_reported_next_to_the_jam() -> None:
+    # Poses the limits leave unsolvable make the case. Where the bounded solve
+    # answers from a different assembly branch instead, that is reported with
+    # them, whole turns removed before the distance is read.
+    details = failure_details(four_bar(coupler_limits=(0.0, 1.75)))
+
+    assert "poses unsolvable" in details
+    assert "away in joint coordinates -- a different assembly branch" in details
+
+
+@pytest.mark.parametrize(
+    "value",
+    [3.3457, -1.8694, 0.9999999999, 1.0000000001, -0.1, 1e-5, 12345.678, -3.0],
+)
+def test_needs_bounds_round_outward(value: float) -> None:
+    # The printed range must survive being copied back: parsing the four shown
+    # digits has to give an interval that still contains the measured value.
+    lower = float(f"{_round_out(value, up=False):.4g}")
+    upper = float(f"{_round_out(value, up=True):.4g}")
+
+    assert lower <= value <= upper

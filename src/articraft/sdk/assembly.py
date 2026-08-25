@@ -382,7 +382,10 @@ class ResolvedRigidBodyAssembly:
         it derives, so a caller can ask where the mechanism reaches instead of
         where the authored limits let it reach. Those coordinates can then land
         outside their own limits, which is why this stays private:
-        ``forward_kinematics`` validates everything it hands out.
+        ``forward_kinematics`` validates everything it hands out. ``loop_start``
+        seeds the loop solver with a neighbouring solution, so a sweep can
+        continue along one assembly branch instead of solving every pose from
+        rest.
         """
 
         positions = {
@@ -861,6 +864,11 @@ def _solve_closed_loops(
     Walking from the zero configuration to the requested pose keeps linkages on
     the assembly branch they were authored in instead of snapping through a
     singular pose.
+
+    ``start`` maps dof ids to a warm start. Coordinates it names begin there,
+    projected into their bounds, missing ones begin at zero, and the homotopy
+    from rest is skipped: a caller walking a sweep hands in the neighbouring
+    solution and stays on the branch it was already on.
     """
 
     active_closures: list[Joint] = []
