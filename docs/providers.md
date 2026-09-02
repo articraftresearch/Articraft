@@ -45,7 +45,20 @@ Set `OPENROUTER_HTTP_REFERER` and `OPENROUTER_APP_TITLE` if you want OpenRouter 
 These values are optional.
 
 OpenRouter reports token use and request cost when its API returns them. Articraft does not
-estimate the context percentage for arbitrary OpenRouter models.
+keep a context window catalog for OpenRouter models.
+
+Set `ARTICRAFT_OPENROUTER_CONTEXT_WINDOW_TOKENS` to the selected model's context window to
+enable conversation compaction — the number is on the model's OpenRouter page, or in
+`GET /api/v1/models` as `context_length`. Articraft replaces older turns with a compact
+summary when the conversation approaches that budget, and the live interface shows context
+use against it. When the value is unset, Articraft does not know the window and never
+compacts. Values between 1 and 36383 are rejected.
+
+The model's maximum output size is separate from its context window. If it is below
+8192, set `ARTICRAFT_OPENROUTER_SUMMARY_MAX_OUTPUT_TOKENS` to that limit or lower.
+This setting defaults to 8192 and must be positive. It caps summary requests only.
+A smaller limit requested by the agent is still respected. It does not change ordinary
+generation requests.
 
 ## Use the Python API
 

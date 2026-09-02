@@ -38,8 +38,8 @@ class OpenRouterModel:
 
     @property
     def context_window_tokens(self) -> int:
-        """Return unknown because OpenRouter accepts models without a local catalog."""
-        return 0
+        """Return the configured window because OpenRouter has no local model catalog."""
+        return self.config.openrouter_context_window_tokens
 
     async def query(
         self,
@@ -70,6 +70,33 @@ class OpenRouterModel:
             "cost": _response_cost(payload),
             "provider_content": provider_content,
             "response": payload,
+        }
+
+    async def summarize_context(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_output_tokens: int,
+    ) -> dict[str, Any]:
+        """Create a plain checkpoint with one completion call and no tools."""
+        request: dict[str, Any] = {
+            "model": self.config.openrouter_model,
+            "messages": _messages(messages),
+            "max_tokens": min(
+                max_output_tokens,
+                self.config.openrouter_summary_max_output_tokens,
+            ),
+        }
+        response = await self._send_with_retries(request)
+        payload = _response_payload(response)
+        _raise_for_provider_error(response.status_code, payload)
+        text, _, _ = _assistant_output(payload)
+        if not text:
+            raise ModelError("OpenRouter summary response did not contain text")
+        return {
+            "text": text,
+            "token_usage": _response_token_usage(payload),
+            "cost": _response_cost(payload),
         }
 
     async def close(self) -> None:
