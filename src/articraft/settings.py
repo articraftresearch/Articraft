@@ -119,6 +119,11 @@ class Settings(BaseSettings):
         ge=0,
         validation_alias="ARTICRAFT_OPENROUTER_CONTEXT_WINDOW_TOKENS",
     )
+    openrouter_summary_max_output_tokens: int = Field(
+        default=8_192,
+        ge=1,
+        validation_alias="ARTICRAFT_OPENROUTER_SUMMARY_MAX_OUTPUT_TOKENS",
+    )
 
     @field_validator("openrouter_context_window_tokens")
     @classmethod

@@ -25,3 +25,9 @@ def test_openrouter_context_window_accepts_zero_and_the_minimum() -> None:
     assert disabled.openrouter_context_window_tokens == 0
     minimum = Settings(openrouter_context_window_tokens=36_384)  # pyright: ignore[reportCallIssue]
     assert minimum.openrouter_context_window_tokens == 36_384
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_openrouter_summary_output_limit_must_be_positive(limit: int) -> None:
+    with pytest.raises(ValidationError, match="greater than or equal to 1"):
+        Settings(openrouter_summary_max_output_tokens=limit)  # pyright: ignore[reportCallIssue]

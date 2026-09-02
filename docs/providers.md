@@ -54,6 +54,12 @@ summary when the conversation approaches that budget, and the live interface sho
 use against it. When the value is unset, Articraft does not know the window and never
 compacts. Values between 1 and 36383 are rejected.
 
+The model's maximum output size is separate from its context window. If it is below
+8192, set `ARTICRAFT_OPENROUTER_SUMMARY_MAX_OUTPUT_TOKENS` to that limit or lower.
+This setting defaults to 8192 and must be positive. It caps summary requests only.
+A smaller limit requested by the agent is still respected. It does not change ordinary
+generation requests.
+
 ## Use the Python API
 
 Pass the same provider and model names to `generate()` or `generate_async()`:

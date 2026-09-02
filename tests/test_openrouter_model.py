@@ -294,7 +294,21 @@ def test_openrouter_model_runs_full_generate_compile_loop(tmp_path: Path) -> Non
     assert client.is_closed
 
 
-def test_openrouter_model_summarizes_context_without_tools() -> None:
+@pytest.mark.parametrize(
+    ("configured_limit", "requested_limit", "expected_limit"),
+    [(None, 8_192, 8_192), (5_120, 8_192, 5_120), (5_120, 1_024, 1_024)],
+)
+def test_openrouter_model_summarizes_context_without_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_limit: int | None,
+    requested_limit: int,
+    expected_limit: int,
+) -> None:
+    setting = "ARTICRAFT_OPENROUTER_SUMMARY_MAX_OUTPUT_TOKENS"
+    if configured_limit is None:
+        monkeypatch.delenv(setting, raising=False)
+    else:
+        monkeypatch.setenv(setting, str(configured_limit))
     model, _client, requests = model_with_responses(
         [
             response(
@@ -310,12 +324,12 @@ def test_openrouter_model_summarizes_context_without_tools() -> None:
                 {"role": "system", "content": "summarize"},
                 {"role": "user", "content": "<task>a box</task>"},
             ],
-            max_output_tokens=8_192,
+            max_output_tokens=requested_limit,
         )
     )
 
     body = request_json(requests[0])
-    assert body["max_tokens"] == 8_192
+    assert body["max_tokens"] == expected_limit
     assert "tools" not in body
     assert body["messages"][0] == {"role": "system", "content": "summarize"}
     assert result == {

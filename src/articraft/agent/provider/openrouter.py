@@ -82,7 +82,10 @@ class OpenRouterModel:
         request: dict[str, Any] = {
             "model": self.config.openrouter_model,
             "messages": _messages(messages),
-            "max_tokens": max_output_tokens,
+            "max_tokens": min(
+                max_output_tokens,
+                self.config.openrouter_summary_max_output_tokens,
+            ),
         }
         response = await self._send_with_retries(request)
         payload = _response_payload(response)
