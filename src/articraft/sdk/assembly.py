@@ -366,6 +366,28 @@ class ResolvedRigidBodyAssembly:
     def forward_kinematics(self, dof_positions: Mapping[str, float] | None = None) -> PhysicsState:
         """Pose the articulation tree and solve unspecified coordinates that close loops."""
 
+        positions, transforms = self._kinematics(dof_positions)
+        return self.validate_state(PhysicsState(transforms, dof_positions=positions))
+
+    def _kinematics(
+        self,
+        dof_positions: Mapping[str, float] | None = None,
+        *,
+        relax_limits: bool = False,
+        loop_start: Mapping[str, float] | None = None,
+    ) -> tuple[dict[str, float], dict[str, Mat4]]:
+        """Solve the tree and its loops, before the state is validated.
+
+        With ``relax_limits`` the solver ignores the limits on the coordinates
+        it derives, so a caller can ask where the mechanism reaches instead of
+        where the authored limits let it reach. Those coordinates can then land
+        outside their own limits, which is why this stays private:
+        ``forward_kinematics`` validates everything it hands out. ``loop_start``
+        seeds the loop solver with a neighbouring solution, so a sweep can
+        continue along one assembly branch instead of solving every pose from
+        rest.
+        """
+
         positions = {
             _as_name(name, field_name="joint position"): _finite(
                 value, field_name=f"joint position {name!r}"
@@ -406,6 +428,8 @@ class ResolvedRigidBodyAssembly:
                 closures,
                 self.articulations,
                 positions,
+                relax_limits=relax_limits,
+                start=loop_start,
             )
         try:
             transforms = _propagate_transforms(
@@ -419,7 +443,7 @@ class ResolvedRigidBodyAssembly:
                 "forward kinematics requires one spanning articulation tree; "
                 "provide a complete PhysicsState for this assembly"
             ) from exc
-        return self.validate_state(PhysicsState(transforms, dof_positions=positions))
+        return positions, transforms
 
 
 @dataclass
@@ -830,6 +854,9 @@ def _solve_closed_loops(
     closures: tuple[Joint, ...],
     articulations: tuple[ResolvedArticulation, ...],
     positions: dict[str, float],
+    *,
+    relax_limits: bool = False,
+    start: Mapping[str, float] | None = None,
 ) -> dict[str, float]:
     """Solve unspecified tree DOFs so every excluded constraint stays closed.
 
@@ -837,6 +864,11 @@ def _solve_closed_loops(
     Walking from the zero configuration to the requested pose keeps linkages on
     the assembly branch they were authored in instead of snapping through a
     singular pose.
+
+    ``start`` maps dof ids to a warm start. Coordinates it names begin there,
+    projected into their bounds, missing ones begin at zero, and the homotopy
+    from rest is skipped: a caller walking a sweep hands in the neighbouring
+    solution and stays on the branch it was already on.
     """
 
     active_closures: list[Joint] = []
@@ -864,12 +896,13 @@ def _solve_closed_loops(
     if not any(locked.values()):
         return positions
 
-    limits = tuple(dof.limits for _, dof in candidates)
+    # Relaxing takes the walls away from the coordinates the solver derives,
+    # so the ring reports where the mechanism reaches instead of where the
+    # authored limits allow it to reach. Supplied coordinates keep their own
+    # limits either way -- the caller is driving those.
+    limits = tuple(None if relax_limits else dof.limits for _, dof in candidates)
     periodic = tuple(
-        dof.limits is not None
-        and cast(JointAxis, dof.axis).is_rotational
-        and dof.limits[1] - dof.limits[0] >= 2.0 * math.pi - 1e-9
-        for _, dof in candidates
+        _is_periodic(dof, bound) for (_, dof), bound in zip(candidates, limits, strict=True)
     )
 
     def assemble(scale: float, values: np.ndarray) -> dict[str, float]:
@@ -934,12 +967,23 @@ def _solve_closed_loops(
         )
         return project(solution.x)
 
-    values = np.zeros(len(candidates), dtype=np.float64)
-    # With no unknowns left -- every ring coordinate supplied by the caller --
-    # there is nothing to solve, but the closure residual still decides
-    # whether the supplied pose keeps the loop assembled.
-    for step in range(1, (_LOOP_STEPS if candidates else 0) + 1):
-        values = solve_toward(step / _LOOP_STEPS, values)
+    if start is not None and candidates:
+        # A warm start is already on the branch the caller is walking, so the
+        # homotopy from rest is not needed: one full-scale solve tracks it.
+        values = project(
+            np.asarray(
+                [start.get(joint.dof_id(dof), 0.0) for joint, dof in candidates],
+                dtype=np.float64,
+            )
+        )
+        values = solve_toward(1.0, values)
+    else:
+        values = np.zeros(len(candidates), dtype=np.float64)
+        # With no unknowns left -- every ring coordinate supplied by the caller --
+        # there is nothing to solve, but the closure residual still decides
+        # whether the supplied pose keeps the loop assembled.
+        for step in range(1, (_LOOP_STEPS if candidates else 0) + 1):
+            values = solve_toward(step / _LOOP_STEPS, values)
 
     # One gate, equal to validate_state's per-axis tolerance: anything
     # accepted here passes validation, anything rejected names the loop.
@@ -970,6 +1014,19 @@ def _solve_closed_loops(
             "the mechanism cannot reach this pose"
         )
     return assemble(1.0, values)
+
+
+def _is_periodic(dof: JointDOF, limits: tuple[float, float] | None) -> bool:
+    """True when the coordinate turns full circle, so its limits are not a wall.
+
+    A hinge authored -pi..pi says "unconstrained", not "must reach every angle":
+    there is no seam at the ends, and no range claim for a mechanism to
+    contradict.
+    """
+
+    if limits is None or not cast(JointAxis, dof.axis).is_rotational:
+        return False
+    return limits[1] - limits[0] >= 2.0 * math.pi - 1e-9
 
 
 def _joint_path(

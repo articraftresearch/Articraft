@@ -362,6 +362,11 @@ _FAILURE_SPECS: dict[FailureKind, _FailureSpec] = {
         "ARTICULATION_SEPARATION",
         "A hinge or pivot pulls its child away from its parent during motion.",
     ),
+    FailureKind.LOOP_LIMITS: _FailureSpec(
+        "loop_limits",
+        "LOOP_LIMITS",
+        "A closed loop contradicts its own joint limits.",
+    ),
     FailureKind.AUTHORED: _FailureSpec(
         "test_failure",
         "FAILURE",

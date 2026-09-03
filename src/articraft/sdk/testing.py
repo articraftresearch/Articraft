@@ -32,8 +32,11 @@ from articraft.sdk.assembly import (
     JointAxis,
     JointDOF,
     PhysicsState,
+    ResolvedRigidBodyAssembly,
     RigidBodyAssembly,
     _frame_matrix,
+    _is_periodic,
+    _joint_path,
 )
 from articraft.sdk.bodies import RigidBody, RigidBodyRef
 from articraft.sdk.errors import LoopClosureError, ValidationError
@@ -63,6 +66,7 @@ class FailureKind(StrEnum):
     OVERLAP = "overlap"
     CONTACT = "contact"
     ARTICULATION_SEPARATION = "articulation_separation"
+    LOOP_LIMITS = "loop_limits"
     MISSING_MASS = "missing_mass"
     AUTHORED = "authored"
 
@@ -1405,6 +1409,222 @@ class TestContext:
         )
         return self._record(check_name, False, details, kind=FailureKind.ARTICULATION_SEPARATION)
 
+    def fail_if_loop_limits_contradict(
+        self,
+        *,
+        samples: int = 9,
+        tolerance: float = 1e-6,
+        overrun_fraction: float = 0.25,
+        max_solves: int = 1000,
+        name: str | None = None,
+    ) -> bool:
+        """Report joint limits that a closed loop's own motion contradicts.
+
+        `validate()` reads one joint at a time, so a limit pointing the wrong
+        way is legal on its own -- the ring is what makes it a lie, and the ring
+        is never sampled as a mechanism. The sweep walks each driver outward
+        from the rest pose with the derived coordinates unbounded, which shows
+        the motion the linkage itself asks for. Where that motion leaves a
+        follower's limits, the solve that respects them is the judge, and only
+        its failure to close the ring within them makes a case: when it solves every
+        accused pose instead, the limits blocked nothing, however far the
+        unbounded walk wandered to say otherwise. A driver
+        whose declared travel reaches past where the ring stops closing is
+        reported on its own. A full-circle coordinate makes no such claims --
+        it declares no wall for a mechanism to contradict.
+        """
+        samples = max(5, int(samples))
+        tolerance = _non_negative(tolerance, "tolerance")
+        overrun_fraction = _non_negative(overrun_fraction, "overrun_fraction")
+        max_solves = max(1, int(_non_negative(max_solves, "max_solves")))
+        check_name = name or f"fail_if_loop_limits_contradict(samples={samples})"
+        resolved = self.model.resolve()
+        tree = tuple(item.joint for item in resolved.joints if not item.exclude_from_articulation)
+        closures = tuple(item.joint for item in resolved.joints if item.exclude_from_articulation)
+        rings = [
+            (closure, path)
+            for closure in closures
+            if (path := _joint_path(tree, closure.body0, closure.body1)) is not None
+        ]
+        if not rings:
+            # Either no ring the tree spans, or a maximal-coordinate assembly
+            # posed from supplied body poses: there is no driver to sweep.
+            return self._record(check_name, True)
+
+        # One coordinate can sit on two rings. Driving it twice sweeps the same
+        # mechanism twice, so keep the first ring that reaches it.
+        planned: list[tuple[Joint, tuple[Joint, ...], Joint, JointDOF]] = []
+        seen: set[str] = set()
+        for closure, path in rings:
+            for joint in path:
+                for dof in joint.dofs:
+                    dof_id = joint.dof_id(dof)
+                    if dof.limits is None or dof_id in seen:
+                        continue
+                    seen.add(dof_id)
+                    planned.append((closure, path, joint, dof))
+        budget = max(1, max_solves // (3 * samples + 2 * _BOUNDARY_BISECTIONS))
+        if len(planned) > budget:
+            skipped = [joint.dof_id(dof) for _, _, joint, dof in planned[budget:]]
+            self.warn(
+                f"loop limit sweep covered {budget} of {len(planned)} ring coordinates at "
+                f"samples={samples}; these were not swept as drivers: {skipped!r}"
+            )
+            planned = planned[:budget]
+
+        # One line per defect, not per (driver, defect) pair: every coordinate on
+        # the ring drives the same mechanism, so the same bad limit is found
+        # again from each of them. Keep the sweep that shows the widest motion.
+        overrun: dict[str, str] = {}
+        contradicted: dict[str, tuple[float, str]] = {}
+        barely_moving: set[str] = set()
+        for closure, path, drive_joint, drive_dof in planned:
+            bounds = drive_dof.limits
+            if bounds is None:
+                continue
+            driver_id = drive_joint.dof_id(drive_dof)
+            declared = f"({bounds[0]:.4g}, {bounds[1]:.4g})"
+            sweep = _articulation_sweep_values(drive_joint, samples, drive_dof)
+            rotational_ids = frozenset(
+                joint.dof_id(dof)
+                for joint in path
+                for dof in joint.dofs
+                if cast(JointAxis, dof.axis).is_rotational
+            )
+            reached, probes, span_reached, out_of_reach = _swept_from_rest(
+                resolved, driver_id, sweep, rotational_ids
+            )
+            doorstep = {
+                value
+                for value in (
+                    min((v for v in sweep if v > 0.0), default=None),
+                    max((v for v in sweep if v < 0.0), default=None),
+                )
+                if value is not None
+            }
+            judged = sorted(reached + probes, key=lambda item: item[0])
+            held_cache: dict[float, dict[str, float] | None] = {}
+            # Slack is how ring coordinates are normally authored: a range a
+            # little wider than the mechanism's travel is not a defect. The
+            # overrun is measured as travel, not as a count of samples, so a
+            # sample grid whose end points sit on the declared walls cannot
+            # tip the verdict by itself.
+            declared_span = bounds[1] - bounds[0]
+            missing = declared_span - span_reached
+            if (
+                _is_periodic(drive_dof, bounds)
+                and span_reached < _BARELY_MOVES_FRACTION * declared_span
+                and closure.name not in barely_moving
+            ):
+                barely_moving.add(closure.name)
+                self.warn(
+                    f"loop={closure.name!r} driver={driver_id!r} is authored full circle but "
+                    f"the ring closes over only {span_reached:.4g} of it -- the loop barely "
+                    "moves"
+                )
+            if missing > overrun_fraction * declared_span and not _is_periodic(drive_dof, bounds):
+                overrun[driver_id] = (
+                    f"loop={closure.name!r} driver={driver_id!r} declared={declared}: the "
+                    f"mechanism's travel covers {span_reached:.4g} of the declared "
+                    f"{declared_span:.4g}, leaving {out_of_reach} of {len(sweep)} sampled "
+                    "poses out of reach -- this range is wider than the mechanism, whatever "
+                    "the follower limits say"
+                )
+            for joint in path:
+                for dof in joint.dofs:
+                    follower_id = joint.dof_id(dof)
+                    limits = dof.limits
+                    if limits is None or follower_id == driver_id:
+                        continue
+                    if _is_periodic(dof, limits):
+                        continue
+                    lower, upper = limits
+                    solutions = [
+                        (value, free, free[follower_id])
+                        for value, free in judged
+                        if follower_id in free
+                    ]
+                    outside = [
+                        (value, free, position)
+                        for value, free, position in solutions
+                        if not lower - tolerance <= position <= upper + tolerance
+                    ]
+                    if not outside:
+                        continue
+                    # The solve that respects the limits judges every excursion,
+                    # and only its failure makes a case. Succeeding at every
+                    # accused pose means the limits blocked nothing: the
+                    # unbounded walk has no branch guarantee near a singular
+                    # fold, so a disagreement on its own indicts the walk, not
+                    # the limits. Where the bounded solve does fail pinned, a
+                    # disagreement at the other accused poses is reported with
+                    # it: the limits are answering from another assembly branch.
+                    blocked: list[float] = []
+                    rerouted: list[tuple[float, float]] = []
+                    for value, free, _ in outside:
+                        held = _held_solution(resolved, driver_id, value, held_cache)
+                        if held is None:
+                            blocked.append(value)
+                            continue
+                        gap = _branch_gap(held, free, rotational_ids)
+                        if gap > _BRANCH_TOLERANCE:
+                            rerouted.append((value, gap))
+                    # A full-circle driver makes no range claim, so poses it
+                    # reaches only through a neighbour's stop are not motion
+                    # the linkage requires: a stop that leaves the mechanism
+                    # its motion around rest is authoring, not a contradiction.
+                    # A limit authored against the motion's own direction is
+                    # different -- limits must contain the zero configuration,
+                    # so such a limit jams the very first step away from rest,
+                    # and that is the signature this keeps.
+                    if (
+                        blocked
+                        and _is_periodic(drive_dof, bounds)
+                        and not any(any(abs(b - d) <= 1e-12 for d in doorstep) for b in blocked)
+                    ):
+                        blocked = []
+                    if not blocked:
+                        continue
+                    # "At least" must not read narrower than the declaration on
+                    # either side: the walk can die early on one side and the
+                    # sampled range under-span there, and a fix has to keep what
+                    # the author already declared as wanted travel.
+                    needs = [position for *_, position in solutions] + [lower, upper]
+                    named = sorted(blocked + [value for value, _ in rerouted])
+                    accused = len(blocked) + len(rerouted)
+                    line = (
+                        f"loop={closure.name!r} driver={driver_id!r} follower={follower_id!r} "
+                        f"declared=({lower:.4g}, {upper:.4g}) needs at least "
+                        f"({_round_out(min(needs), up=False):.4g}, "
+                        f"{_round_out(max(needs), up=True):.4g}) over driver "
+                        f"{named[0]:.4g}..{named[-1]:.4g}; the authored limits leave "
+                        f"{len(blocked)} of those {accused} poses unsolvable"
+                        + (
+                            f" and answer {len(rerouted)} from up to "
+                            f"{max(gap for _, gap in rerouted):.4g} away in joint "
+                            "coordinates -- a different assembly branch"
+                            if rerouted
+                            else ""
+                        )
+                    )
+                    span = max(needs) - min(needs)
+                    if follower_id not in contradicted or span > contradicted[follower_id][0]:
+                        contradicted[follower_id] = (span, line)
+
+        findings = [overrun[key] for key in sorted(overrun)] + [
+            contradicted[key][1] for key in sorted(contradicted)
+        ]
+        if not findings:
+            return self._record(check_name, True)
+        details = (
+            "A closed loop contradicts its own joint limits. Each joint's limits are legal on "
+            "their own, but sweeping the ring as a mechanism shows it needs motion those limits "
+            "forbid -- so the linkage jams, or quietly assembles the other way round. Widen the "
+            "limits named below, or narrow the driver's range to what the linkage can follow:\n"
+            + "\n".join(findings)
+        )
+        return self._record(check_name, False, details, kind=FailureKind.LOOP_LIMITS)
+
     def warn_if_absurd_dimensions(
         self,
         *,
@@ -1743,12 +1963,257 @@ def _pose_dicts(
     return result
 
 
+_SWEEP_SUBSTEPS = 3
+_BOUNDARY_BISECTIONS = 8
+# Solver noise at a singular fold reaches ~1e-4; real assembly branches sit
+# ~1e-1 apart. The gate lives in the decade between, and deliberately not at
+# `tolerance`, which measures limit compliance, not distance between solves.
+_BRANCH_TOLERANCE = 1e-3
+# Below this fraction of its declared range, a full-circle ring coordinate is
+# not articulating anything: the ring closes only in a sliver around rest, and
+# a structure that barely moves deserves a word even though unconstrained
+# coordinates make no range claim to contradict.
+_BARELY_MOVES_FRACTION = 0.01
+
+
+def _ring_solution(
+    resolved: ResolvedRigidBodyAssembly,
+    driver_id: str,
+    value: float,
+    *,
+    relax: bool,
+    start: Mapping[str, float] | None = None,
+) -> dict[str, float] | None:
+    """Ring coordinates for one driver pose, or None when the loop will not close."""
+
+    try:
+        positions, _ = resolved._kinematics(
+            {driver_id: float(value)}, relax_limits=relax, loop_start=start
+        )
+    except LoopClosureError:
+        return None
+    return positions
+
+
+def _continued_solution(
+    resolved: ResolvedRigidBodyAssembly,
+    driver_id: str,
+    prev_value: float,
+    prev_free: dict[str, float],
+    value: float,
+    rotational: frozenset[str],
+) -> dict[str, float] | None:
+    """Relaxed solve at ``value``, continued from a neighbouring solution.
+
+    A solve from rest is free to land on whichever assembly branch it finds,
+    and near a limiting position it does. Continuing from the neighbour keeps
+    the walk close to the branch it started on -- close, not provably on it,
+    which is why no case is ever filed on the walk's word alone. One warm solve
+    covers an ordinary step, judged by ``_stayed_local``: when the local
+    branch has no solution at the target, the solver converges somewhere far
+    instead of failing, and a whole-turn hop must not pass for continuation.
+    A rejected or failed step is retried in thirds before the pose is called
+    unreachable, so a hard solve is not mistaken for a wall.
+    """
+
+    free = _ring_solution(resolved, driver_id, value, relax=True, start=prev_free)
+    if free is not None and _stayed_local(prev_free, free, rotational):
+        return free
+    stepped = prev_free
+    low, high = min(prev_value, value), max(prev_value, value)
+    for step in range(1, _SWEEP_SUBSTEPS + 1):
+        if step == _SWEEP_SUBSTEPS:
+            # `prev + (value - prev)` is not `value` in floating point, and a
+            # sweep endpoint sits exactly on a driver's limit: recomputing it
+            # can land one ulp outside and trip the strict limit guard.
+            target = value
+        else:
+            target = prev_value + (value - prev_value) * (step / _SWEEP_SUBSTEPS)
+            target = min(max(target, low), high)
+        moved = _ring_solution(resolved, driver_id, target, relax=True, start=stepped)
+        if moved is None or not _stayed_local(stepped, moved, rotational):
+            return None
+        stepped = moved
+    return stepped
+
+
+def _stayed_local(
+    before: Mapping[str, float], after: Mapping[str, float], rotational: frozenset[str]
+) -> bool:
+    """True when a continuation step stayed on its own side of a half turn.
+
+    A hinge that hops more than a half turn in one step has not moved there:
+    it names a solution on the far side of the seam, and treating it as
+    continuation is how a lifted copy of the mechanism sneaks into the sweep.
+    """
+
+    return all(
+        abs(after[key] - value) <= math.pi
+        for key, value in before.items()
+        if key in after and key in rotational
+    )
+
+
+def _swept_from_rest(
+    resolved: ResolvedRigidBodyAssembly,
+    driver_id: str,
+    sweep: list[float],
+    rotational: frozenset[str],
+) -> tuple[
+    list[tuple[float, dict[str, float]]],
+    list[tuple[float, dict[str, float]]],
+    float,
+    int,
+]:
+    """Walk the sweep outward from the rest pose, and measure how far it gets.
+
+    The mechanism cannot pass through a pose where its ring will not close, so
+    each side of the sweep ends at the first value that fails, and everything
+    beyond it is counted out of reach without being solved. A bisection toward
+    each such edge then measures the reachable travel and probes the motion
+    close to it, where a follower moves fastest and a fixed grid is blindest.
+
+    Returns the reached samples, the boundary probes, the reachable travel,
+    and the number of sampled poses out of reach.
+    """
+
+    solved: dict[int, dict[str, float] | None] = {}
+    edges: list[float] = [0.0]
+    probes: list[tuple[float, dict[str, float]]] = []
+    for negative in (False, True):
+        side = sorted(
+            (index for index, value in enumerate(sweep) if (value < 0.0) == negative),
+            key=lambda index: abs(sweep[index]),
+        )
+        prev_value, prev_free = 0.0, None
+        alive = True
+        for index in side:
+            value = sweep[index]
+            if not alive:
+                solved[index] = None
+                continue
+            if prev_free is None:
+                free = _ring_solution(resolved, driver_id, value, relax=True)
+            else:
+                free = _continued_solution(
+                    resolved, driver_id, prev_value, prev_free, value, rotational
+                )
+            solved[index] = free
+            if free is not None:
+                prev_value, prev_free = value, free
+                continue
+            alive = False
+            if prev_free is None:
+                prev_free = _ring_solution(resolved, driver_id, prev_value, relax=True)
+            if prev_free is None:
+                edges.append(prev_value)
+            else:
+                found, edge = _reach_boundary(
+                    resolved, driver_id, prev_value, prev_free, value, rotational
+                )
+                probes.extend(found)
+                edges.append(edge)
+        if alive and side:
+            edges.append(sweep[side[-1]])
+    reached = [
+        (sweep[index], positions)
+        for index, positions in sorted(solved.items())
+        if positions is not None
+    ]
+    out_of_reach = sum(1 for positions in solved.values() if positions is None)
+    return reached, probes, max(edges) - min(edges), out_of_reach
+
+
+def _reach_boundary(
+    resolved: ResolvedRigidBodyAssembly,
+    driver_id: str,
+    good_value: float,
+    good_free: dict[str, float],
+    bad_value: float,
+    rotational: frozenset[str],
+) -> tuple[list[tuple[float, dict[str, float]]], float]:
+    """Bisect between a reachable driver value and an unreachable one.
+
+    The demand on a follower grows fastest against this edge, so the solutions
+    found on the way carry the part of the motion the sample grid steps over.
+    """
+
+    probes: list[tuple[float, dict[str, float]]] = []
+    for _ in range(_BOUNDARY_BISECTIONS):
+        middle = 0.5 * (good_value + bad_value)
+        free = _continued_solution(resolved, driver_id, good_value, good_free, middle, rotational)
+        if free is None:
+            bad_value = middle
+        else:
+            probes.append((middle, free))
+            good_value, good_free = middle, free
+    return probes, good_value
+
+
+def _held_solution(
+    resolved: ResolvedRigidBodyAssembly,
+    driver_id: str,
+    value: float,
+    cache: dict[float, dict[str, float] | None],
+) -> dict[str, float] | None:
+    """The solve that respects the authored limits, computed once per pose.
+
+    Only the poses the relaxed walk carries outside a limit need it, and on a
+    ring that agrees with its limits that is none of them.
+    """
+
+    if value not in cache:
+        cache[value] = _ring_solution(resolved, driver_id, value, relax=False)
+    return cache[value]
+
+
+def _branch_gap(
+    held: Mapping[str, float], free: Mapping[str, float], rotational: frozenset[str]
+) -> float:
+    """How far two solves of the same pose sit apart, in joint coordinates.
+
+    Whole turns of a hinge name the same pose, so they are removed before the
+    distance is read. What remains is real: two solves that agree land within
+    solver precision of each other, and a gap the size of a joint angle means
+    the limits routed the mechanism onto a different assembly branch.
+    """
+
+    gap = 0.0
+    for key, value in free.items():
+        if key not in held:
+            continue
+        difference = held[key] - value
+        if key in rotational:
+            difference -= 2.0 * math.pi * round(difference / (2.0 * math.pi))
+        gap = max(gap, abs(difference))
+    return gap
+
+
+def _round_out(value: float, *, up: bool) -> float:
+    """Round to four shown digits, away from the measured range.
+
+    The printed range is the one an author will copy back. Rounding toward the
+    range would hand out limits a hair narrower than the motion they came
+    from, which then fail again while printing the same numbers.
+    """
+
+    if value == 0.0 or not math.isfinite(value):
+        return value
+    quantum = 10.0 ** (math.floor(math.log10(abs(value))) - 3)
+    if quantum == 0.0 or not math.isfinite(quantum):
+        return value
+    scaled = value / quantum
+    rounded = math.ceil(scaled) if up else math.floor(scaled)
+    result = rounded * quantum
+    return result if math.isfinite(result) else value
+
+
 def _articulation_sweep_values(
     articulation: Joint, samples: int, dof: JointDOF | None = None
 ) -> list[float]:
     """Joint values to sample across an articulation's motion range.
 
-    The first value is the rest pose. A bounded joint sweeps lower..upper; a
+    A bounded joint sweeps lower..upper with both ends included; a
     continuous or unbounded joint samples a half turn (0..pi), which is enough to
     reveal a child that separates as it rotates.
     """
