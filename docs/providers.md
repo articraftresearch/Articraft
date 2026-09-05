@@ -8,7 +8,7 @@ Set the API key for the provider that you want to use:
 
 | Provider | API key | Default model | Reference images |
 | --- | --- | --- | --- |
-| OpenAI | `OPENAI_API_KEY` | `gpt-5.6` | Yes |
+| OpenAI | `OPENAI_API_KEY` | `gpt-6-astra` | Yes |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-5` | Yes |
 | Gemini | `GEMINI_API_KEY` | `gemini-3.6-flash` | Yes |
 | OpenRouter | `OPENROUTER_API_KEY` | `nvidia/nemotron-3-ultra-550b-a55b:free` | No |
