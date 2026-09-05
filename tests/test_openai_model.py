@@ -19,7 +19,7 @@ def run(awaitable):
 def response_event(
     text: str,
     *,
-    model: str = "gpt-5.6",
+    model: str = "gpt-6-astra",
     response_id: str = "resp_1",
     status: str = "completed",
     incomplete_details: dict[str, object] | None = None,
@@ -82,7 +82,7 @@ def patch_websocket(monkeypatch: pytest.MonkeyPatch, socket: FakeWebSocket) -> N
 
 
 def openai_model(**kwargs: Any) -> OpenAIModel:
-    kwargs.setdefault("openai_model", "gpt-5.6")
+    kwargs.setdefault("openai_model", "gpt-6-astra")
     kwargs.setdefault("openai_reasoning_effort", "high")
     return OpenAIModel(Settings(openai_api_key="sk-test", **kwargs))
 
@@ -104,7 +104,7 @@ def test_openai_model_uses_websocket(monkeypatch: pytest.MonkeyPatch) -> None:
     assert socket.sent == [
         {
             "type": "response.create",
-            "model": "gpt-5.6",
+            "model": "gpt-6-astra",
             "input": [{"role": "user", "content": "build a hinge"}],
             "reasoning": {"effort": "high"},
             "include": ["reasoning.encrypted_content"],
@@ -191,7 +191,7 @@ def test_openai_model_returns_estimated_cost(monkeypatch: pytest.MonkeyPatch) ->
 
     result = run(openai_model().query([{"role": "user", "content": "build"}]))
 
-    assert result["cost"] == 0.00515
+    assert result["cost"] == 0.0101
     assert result["token_usage"] == {
         "input_tokens": 1_000,
         "cached_input_tokens": 100,
@@ -248,10 +248,11 @@ def test_openai_model_returns_estimated_cost_for_gpt_5_6_family(
 
 def test_openai_model_exposes_context_window() -> None:
     model = openai_model()
-    assert model.config.openai_model == "gpt-5.6"
+    assert model.config.openai_model == "gpt-6-astra"
     assert isinstance(model, ContextSummarizer)
     assert DEFAULT_MAX_TURNS == 100
     assert model.context_window_tokens == 272_000
+    assert context_window_tokens_for("gpt-6-astra") == 272_000
     assert context_window_tokens_for("gpt-5.6-sol") == 272_000
     assert context_window_tokens_for("gpt-5.6") == 272_000
     assert context_window_tokens_for("gpt-5.6-terra") == 272_000
@@ -323,7 +324,7 @@ def test_openai_summary_resets_incremental_context(
             "output_tokens": 20,
             "total_tokens": 120,
         },
-        "cost": 0.0011,
+        "cost": 0.002,
     }
     assert socket.sent[1]["input"] == [{"role": "user", "content": "old work"}]
     assert socket.sent[1]["instructions"] == "summarize the work"

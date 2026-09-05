@@ -34,6 +34,7 @@ class _ModelSpec:
 
 # Prices are USD per million tokens: input, cached input, output, cache write.
 _MODELS = {
+    "gpt-6-astra": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 10.0, 1.0, 50.0, 12.5),
     "gpt-5.6-sol": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 5.0, 0.5, 30.0, 6.25),
     "gpt-5.6-terra": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 2.0, 0.2, 12.0, 2.5),
     "gpt-5.6-luna": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 0.2, 0.02, 1.2, 0.25),
