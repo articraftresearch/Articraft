@@ -493,13 +493,21 @@ def test_compile_path_reports_timeout(tmp_path) -> None:
     assert not run_dir.joinpath("result", ".compile-progress.json").exists()
 
 
-def test_isolated_process_timeout_cleans_descendants(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("worker_exits", "ignore_term"), [(False, False), (True, False), (True, True)]
+)
+def test_isolated_process_timeout_cleans_descendants(
+    tmp_path: Path, worker_exits: bool, ignore_term: bool
+) -> None:
     worker_pid_file = tmp_path / "worker.pid"
     child_pid_file = tmp_path / "child.pid"
+    signal_setup = "signal.signal(signal.SIGTERM, signal.SIG_IGN); " if ignore_term else ""
     child_code = (
-        "from pathlib import Path; import os, time; "
+        "from pathlib import Path; import os, signal, time; "
+        f"{signal_setup}"
         f"Path({str(child_pid_file)!r}).write_text(str(os.getpid()), encoding='utf-8'); "
-        "time.sleep(60)"
+        # A broken cleanup still returns so this regression cannot hang the suite.
+        "time.sleep(5)"
     )
     worker_code = f"""
 import os
@@ -515,13 +523,15 @@ for _ in range(100):
         break
     time.sleep(0.01)
 Path({str(worker_pid_file)!r}).write_text(str(os.getpid()), encoding="utf-8")
-time.sleep(60)
+{"" if worker_exits else "time.sleep(60)"}
 """
+    started = time.monotonic()
     result = _run_isolated_process(
         [sys.executable, "-c", worker_code], cwd=tmp_path, timeout_seconds=1
     )
 
     assert result.timed_out is True
+    assert time.monotonic() - started < 4
     _assert_process_exited(int(worker_pid_file.read_text()))
     _assert_process_exited(int(child_pid_file.read_text()))
 

@@ -198,8 +198,8 @@ def _stop_timed_out_worker(proc: subprocess.Popen[str]) -> tuple[str, str]:
 
 
 def _signal_worker_group(proc: subprocess.Popen[str], sig: signal.Signals) -> None:
-    if proc.poll() is not None:
-        return
+    # The worker may have exited while a child still holds its output pipes.
+    # Its process group remains the cleanup target until those children exit.
     try:
         os.killpg(proc.pid, sig)
     except ProcessLookupError:
