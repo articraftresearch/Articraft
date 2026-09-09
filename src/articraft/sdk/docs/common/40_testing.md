@@ -511,6 +511,7 @@ health allowances into a new context and runs these baseline checks before expor
 6. `warn_if_absurd_dimensions()`
 7. `fail_if_parts_overlap_in_current_pose()`
 8. `fail_if_articulation_separates_child()`
+9. `fail_if_loop_limits_contradict()` (only reaches a closed loop the articulation tree spans)
 
 If model validity fails, the worker stops the rest of the baseline pass. When the object is valid
 enough to inspect, model validity, mesh health, missing mass properties, and USDZ validation can
@@ -555,6 +556,42 @@ ctx.fail_if_part_contains_disconnected_geometry_islands(contact_tol=1e-6)
 ```
 
 Nested closed solids with positive volume intersection count as connected geometry.
+
+### Loop limits
+
+`fail_if_loop_limits_contradict(*, samples=9, tolerance=1e-6, overrun_fraction=0.25,
+max_solves=1000, name=None)` sweeps every bounded coordinate on a closed loop. The sweep walks
+outward from the rest pose. Each sample continues from its neighbour's solution, with the
+coordinates the solver derives unbounded, so the walk follows the motion the linkage asks for.
+Each side of the sweep ends at the first pose where the ring will not close. A bisection toward
+that edge measures the travel the mechanism covers. It also probes the motion close to the edge,
+where a follower moves fastest. The check names two defects.
+
+A follower whose limits exclude motion the linkage requires. Where the walk leaves a follower's
+authored limits, the solve that respects those limits is asked for the same pose. Only its
+failure to close the ring within them makes a case. When the driver is a full-circle coordinate,
+the case must also start at the first step away from rest. A stop that leaves the mechanism its
+motion around rest is authoring, not a contradiction. A full-circle driver claims no range that a
+stop could contradict. When it solves every accused pose instead, the
+limits blocked nothing. The disagreement then indicts the unbounded walk, which has no assembly
+branch guarantee near a singular fold. The report gives the declared range, the range the
+mechanism needs, and the driver poses where the two disagree. The needed range is rounded
+outward, so its numbers can be copied back as the new limits.
+
+A driver whose declared range is wider than the linkage can follow. This is reported once more
+than `overrun_fraction` of the declared travel lies past where the ring stops closing. The
+fraction measures travel rather than samples, so slack smaller than that stays quiet at every
+sweep density.
+
+A full-circle coordinate is never reported as a defect. A hinge authored `(-pi, pi)` says
+unconstrained. It does not claim that every angle is reachable. When such a ring closes over less
+than a hundredth of its declared range, the check warns that the loop barely moves.
+
+The walk costs about one loop solve per sample per coordinate. Each unreachable edge adds its
+bisection, and each pose a limit excludes adds one bounded solve. A coordinate on two rings is
+driven once. `max_solves` sizes the sweep: coordinates that do not fit are not driven, and a
+warning names them. The first coordinate is always driven, and fewer than five samples are raised
+to five, since a coarser grid cannot see the travel it walks.
 
 ### Scale warnings
 
