@@ -8,7 +8,7 @@ Set the API key for the provider that you want to use:
 
 | Provider | API key | Default model | Reference images |
 | --- | --- | --- | --- |
-| OpenAI | `OPENAI_API_KEY` | `gpt-5.6` | Yes |
+| OpenAI | `OPENAI_API_KEY` | `gpt-6-astra` | Yes |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-5` | Yes |
 | Gemini | `GEMINI_API_KEY` | `gemini-3.6-flash` | Yes |
 | OpenRouter | `OPENROUTER_API_KEY` | `nvidia/nemotron-3-ultra-550b-a55b:free` | No |
@@ -23,6 +23,24 @@ ANTHROPIC_API_KEY=your_key_here uv run articraft \
 ```
 
 ## Select a model
+
+OpenAI defaults to GPT-6 Astra with `high` reasoning effort. GPT-5.6 Sol remains
+available with `--model gpt-5.6-sol` or `ARTICRAFT_MODEL=gpt-5.6-sol`.
+The `gpt-5.6` alias also selects Sol.
+
+```shell
+uv run articraft --model gpt-5.6-sol "a folding chair"
+```
+
+Both models use the Responses API over WebSockets. Articraft keeps a 272,000-token
+working context budget and a 128,000-token output limit. Astra supports `low`,
+`medium`, `high`, `xhigh`, and `max` reasoning effort. It does not support `none`.
+See OpenAI's [Astra model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra)
+and [migration guide](https://developers.openai.com/api/docs/guides/latest-model).
+
+Cost estimates use OpenAI's [standard token prices](https://developers.openai.com/api/docs/pricing),
+including cached input and cache writes. Sol's current promotional pricing is
+available at least through November 21, 2026.
 
 Use `--model` to replace the default model:
 
