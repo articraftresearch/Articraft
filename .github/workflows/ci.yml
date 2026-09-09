@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -52,24 +51,8 @@ jobs:
       - name: Type check
         run: uv run --frozen basedpyright
 
-      - name: Download latest recorded tapes (best effort)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # The workflow may not exist yet on the default branch (renames land
-          # on branches first); a lookup failure just means no artifact yet.
-          run_id=$(gh run list --workflow record-tapes.yml --status success \
-            --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)
-          if [ -n "$run_id" ]; then
-            mkdir -p /tmp/ci-tapes
-            gh run download "$run_id" --name tapes --dir /tmp/ci-tapes || true
-            cp /tmp/ci-tapes/*.jsonl tests/tapes/ 2>/dev/null || true
-          fi
-
       - name: Test
-        # --replay: tape-backed tests replay offline in CI; a missing tape
-        # fails the job (locally they run live by default -- no tape is read)
-        run: uv run --frozen pytest -q --replay
+        run: uv run --frozen pytest -q -m 'not live and not volume'
 
   dist:
     name: dist (py${{ matrix.python-version }})

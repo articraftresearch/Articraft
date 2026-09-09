@@ -16,7 +16,6 @@ from harness import (
     GOOD_MAIN_PY,
     EventRecorder,
     ModelQuery,
-    ReplayHarness,
     Response,
     WarmEnvironment,
     calls,
@@ -381,21 +380,3 @@ def test_script_exhaustion_surfaces_as_a_model_failure(tmp_path: Path) -> None:
 
     assert artifacts.record.status == "error"
     assert "ScriptExhaustedError" in artifacts.record.error
-
-
-def test_hand_authored_tape_drives_a_real_run(
-    tmp_path: Path, replay_harness: ReplayHarness
-) -> None:
-    replay_harness.set(
-        "authored-box",
-        [write_main(GOOD_MAIN_PY), compile_workspace(), text("done from tape")],
-    )
-
-    artifacts = run_scenario(
-        "a box",
-        model=replay_harness.replay("authored-box"),
-        env=WarmEnvironment(output_dir=tmp_path),
-    )
-
-    assert artifacts.record.status == "success"
-    assert artifacts.result["message"] == "done from tape"

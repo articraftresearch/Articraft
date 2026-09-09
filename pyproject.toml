@@ -106,14 +106,10 @@ reportTypedDictNotRequiredAccess = false
 [[tool.basedpyright.executionEnvironments]]
 root = "tests"
 
-# The tape CLI also imports the test environment from tests/.
-[[tool.basedpyright.executionEnvironments]]
-root = "scripts"
-extraPaths = ["tests"]
-
 [tool.pytest.ini_options]
 addopts = "-m 'not volume'"
 markers = [
+    "live: real model calls using OPENAI_API_KEY from the environment or .env",
     "volume: opt-in load/concurrency stress tests (run with `-m volume`)",
 ]
 

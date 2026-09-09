@@ -94,7 +94,7 @@ Read the [provider guide](docs/providers.md) for API keys, models, and provider 
 Run the recorded generation test and the static checks before you send a change:
 
 ```shell
-uv run pytest -q --replay
+uv run pytest -q  # includes live model calls; needs OPENAI_API_KEY in .env
 uv run ruff check .
 ```
 

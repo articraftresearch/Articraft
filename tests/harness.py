@@ -1,6 +1,6 @@
 """Modular test environment for articraft.
 
-Verify the generation loop deeply without paying for model calls. Four
+Verify the generation loop deeply without paying for model calls. Three
 lanes, cheapest first:
 
 1. Unit lane -- call pure functions (SDK checks, compile feedback) directly;
@@ -12,10 +12,6 @@ lanes, cheapest first:
 3. Scripted agent lane -- :class:`ScriptedModel` plus :func:`run_scenario`
    drive the full agent loop (tools, reminders, compile freshness, record)
    with a deterministic model that can react to what the agent sends it.
-4. Tape lane -- :class:`ReplayHarness` manages any number of named
-   recordings: record one from a live (paid) model once, author one from a
-   scripted model for free, or install one by hand; then plug any of them
-   into :func:`run_scenario` by name for offline regression runs.
 
 The cold lane (``LocalWorkspace``, fresh worker per compile) stays the
 reference for the fresh-interpreter and installed-wheel contracts; both
@@ -28,23 +24,20 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
-import hashlib
 import inspect
 import itertools
 import json
 import os
 import queue
-import re
 import signal
 import subprocess
 import sys
 import threading
 import time
-from collections.abc import Awaitable, Callable, Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Generic, Literal, TypeVar, cast
+from typing import Any, ClassVar, Literal, TypeVar, cast
 
 from articraft.agent import Agent, Model, events
 from articraft.agent.record import Record, read_conversation
@@ -68,7 +61,6 @@ def fake_compile_payload(**overrides: Any) -> CompilePayload:
 
 
 T = TypeVar("T")
-Item = TypeVar("Item")
 
 Response = dict[str, Any]
 ToolCall = dict[str, Any]
@@ -189,15 +181,7 @@ def _normalize_response(response: Response) -> Response:
 
 
 class ScriptExhaustedError(RuntimeError):
-    """The agent asked for more turns than the script (or tape) provides."""
-
-
-class TapeError(RuntimeError):
-    """A recording is missing, empty, or otherwise unusable."""
-
-
-class TapeMismatchError(TapeError):
-    """A replayed run diverged from the recorded message trajectory."""
+    """The agent asked for more turns than the script provides."""
 
 
 @dataclass(frozen=True)
@@ -208,20 +192,22 @@ class ModelIdentity:
     openai_reasoning_effort: str = "low"
 
 
-class QueuedModel(Generic[Item]):
-    """Base for finite models: a queue of canned responses plus a query log.
+class ScriptedModel:
+    """A deterministic ``Model`` that plays a script of responses.
 
-    Subclasses keep only their semantics -- what a queued item is and how one
-    becomes a response. The queue itself (pop with a clear exhaustion error,
-    ``remaining``, ``assert_exhausted``) lives here once.
+    Each step is either a response dict (see :func:`text` and :func:`calls`)
+    or a callable receiving the :class:`ModelQuery` for this turn. Callables
+    may assert on the messages the agent sent, react to earlier tool outputs,
+    be ``async`` (e.g. block forever to test cancellation), or raise (to test
+    model failure handling). Querying past the last step raises
+    :class:`ScriptExhaustedError`, which the agent records as a model failure.
     """
 
-    noun: ClassVar[str] = "item"
     supports_images: bool = True
 
     def __init__(
         self,
-        items: Iterable[Item],
+        items: Iterable[Step],
         *,
         model_name: str = "gpt-test",
         reasoning_effort: str = "low",
@@ -237,10 +223,10 @@ class QueuedModel(Generic[Item]):
     def remaining(self) -> int:
         return len(self._queue)
 
-    def _next(self, query: ModelQuery) -> Item:
+    def _next(self, query: ModelQuery) -> Step:
         if not self._queue:
             raise ScriptExhaustedError(
-                f"agent queried turn {query.turn} beyond the {query.turn - 1} {self.noun}(s)"
+                f"agent queried turn {query.turn} beyond the {query.turn - 1} scripted step(s)"
             )
         return self._queue.pop(0)
 
@@ -248,26 +234,12 @@ class QueuedModel(Generic[Item]):
         """Fail when the agent finished without consuming the whole queue."""
         if self._queue:
             raise AssertionError(
-                f"{len(self._queue)} {self.noun}(s) were never consumed; "
+                f"{len(self._queue)} scripted step(s) were never consumed; "
                 "the agent finished earlier than expected"
             )
 
     async def close(self) -> None:
         self.close_calls += 1
-
-
-class ScriptedModel(QueuedModel[Step]):
-    """A deterministic ``Model`` that plays a script of responses.
-
-    Each step is either a response dict (see :func:`text` and :func:`calls`)
-    or a callable receiving the :class:`ModelQuery` for this turn. Callables
-    may assert on the messages the agent sent, react to earlier tool outputs,
-    be ``async`` (e.g. block forever to test cancellation), or raise (to test
-    model failure handling). Querying past the last step raises
-    :class:`ScriptExhaustedError`, which the agent records as a model failure.
-    """
-
-    noun: ClassVar[str] = "scripted step"
 
     async def query(
         self,
@@ -281,299 +253,6 @@ class ScriptedModel(QueuedModel[Step]):
         if inspect.isawaitable(response):
             response = await response
         return _normalize_response(response)
-
-
-# ---------------------------------------------------------------------------
-# Tape lane: record and replay models
-# ---------------------------------------------------------------------------
-
-
-def _fingerprint(messages: Messages, tools: list[dict[str, Any]] | None = None) -> str:
-    """Hash the structural shape of a request, not its payload text.
-
-    Covers message roles/types, tool-call names, call ids, and the offered
-    tool set: a run whose conversation or tool surface drifts from the
-    recording fails strict replay, while payload text (which embeds
-    machine-specific run paths) stays excluded.
-    """
-    structural: list[dict[str, Any]] = []
-    for message in messages:
-        entry: dict[str, Any] = {
-            "role": message.get("role"),
-            "type": message.get("type"),
-        }
-        for key in ("name", "call_id"):
-            if message.get(key):
-                entry[key] = message[key]
-        tool_calls = message.get("tool_calls")
-        if tool_calls:
-            entry["tool_calls"] = [call.get("name") for call in tool_calls]
-        structural.append(entry)
-    raw = json.dumps(
-        {
-            "messages": structural,
-            "tools": sorted(str(tool.get("name")) for tool in tools or []),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha1(raw.encode()).hexdigest()
-
-
-def _read_tape(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError as exc:
-            raise TapeError(f"invalid tape row {path}:{lineno}: {exc}") from exc
-    return rows
-
-
-def _append_tape_row(path: Path, row: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(row, default=str) + "\n")
-
-
-class RecordingModel:
-    """Wrap a live model and append every exchange to a JSONL tape.
-
-    Each line stores a structural fingerprint of the request messages plus the
-    full response dict. Record once with real credentials, commit or keep the
-    tape, then regression-test offline with :class:`ReplayModel`. Prefer
-    :meth:`ReplayHarness.record` over constructing this directly.
-    """
-
-    def __init__(self, model: Model, tape: Path | str):
-        self.model = model
-        self.tape = Path(tape)
-        self.queries: list[ModelQuery] = []
-        self.config = getattr(model, "config", None)
-        self.context_window_tokens = getattr(model, "context_window_tokens", 0)
-
-    async def query(
-        self,
-        messages: Messages,
-        *,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> Response:
-        _record_query(self.queries, messages, tools)
-        response = await self.model.query(messages, tools=tools)
-        _append_tape_row(
-            self.tape,
-            {"fingerprint": _fingerprint(messages, tools), "response": response},
-        )
-        return response
-
-    async def close(self) -> None:
-        await self.model.close()
-
-    def assert_exhausted(self) -> None:
-        """Delegate to the wrapped model when it is finite (e.g. scripted)."""
-        if isinstance(self.model, QueuedModel):
-            self.model.assert_exhausted()
-
-
-class ReplayModel(QueuedModel[dict[str, Any]]):
-    """Replay one tape recorded by :class:`RecordingModel`.
-
-    In strict mode every query's structural fingerprint (roles, message
-    types, tool-call names, call ids, the offered tool set) must match the
-    recording, so a run that diverges from the recorded trajectory fails
-    loudly. Payload contents are intentionally excluded: tool outputs embed
-    machine-specific run paths.
-    Rows without a fingerprint -- hand-authored via :meth:`ReplayHarness.set`
-    -- match any request. Prefer :meth:`ReplayHarness.replay` over
-    constructing this directly.
-    """
-
-    noun: ClassVar[str] = "tape row"
-
-    def __init__(
-        self,
-        tape: Path | str,
-        *,
-        strict: bool = True,
-        model_name: str = "gpt-replay",
-        reasoning_effort: str = "",
-    ):
-        super().__init__(
-            [row for row in _read_tape(Path(tape)) if "response" in row],
-            model_name=model_name,
-            reasoning_effort=reasoning_effort,
-        )
-        self._strict = strict
-
-    async def query(
-        self, messages: Messages, *, tools: list[dict[str, Any]] | None = None
-    ) -> Response:
-        query = _record_query(self.queries, messages, tools)
-        entry = self._next(query)
-        expected = str(entry.get("fingerprint") or "")
-        if self._strict and expected and expected != _fingerprint(messages, tools):
-            raise TapeMismatchError(
-                f"turn {query.turn} diverged from the recorded trajectory; "
-                "re-record the tape if this change is intentional"
-            )
-        return _normalize_response(entry["response"])
-
-
-ScenarioModel = ScriptedModel | RecordingModel | ReplayModel
-
-
-# ---------------------------------------------------------------------------
-# Tape lane: the replay harness
-# ---------------------------------------------------------------------------
-
-TAPE_ROOT = Path(__file__).resolve().parent / "tapes"
-_TAPE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
-
-
-def _tape_name(name: str) -> str:
-    value = str(name).strip()
-    if not _TAPE_NAME.fullmatch(value):
-        raise ValueError("tape name must be a simple file name (letters, digits, _ . -)")
-    return value
-
-
-class ReplayHarness:
-    """A named library of tape recordings for offline replay testing.
-
-    One recording is one ``<name>.jsonl`` tape under ``root``. Any number
-    of recordings coexist; each plugs into :func:`run_scenario` by name::
-
-        library = ReplayHarness(tmp_path / "tapes")
-
-        # record a run into a tape (paid with a live model, free with a
-        # ScriptedModel -- the cheap way to author one)
-        with library.record("hinged-box", model) as recording:
-            run(Agent(recording, env).run("a hinged box"))
-
-        # set: install a hand-authored recording without any run at all
-        library.set("plain-box", [calls(tool_call("compile")), text("done")])
-
-        # replay: plug any recording into a scenario by name
-        artifacts = run_scenario("a hinged box", model=library.replay("hinged-box"))
-
-        # erase: remove one recording, or clear() to wipe the library
-        library.erase("plain-box")
-
-    ``TAPE_ROOT`` (``tests/tapes/``) is the conventional root for
-    curated recordings; use a ``tmp_path`` root for ephemeral ones.
-    """
-
-    def __init__(self, root: Path | str = TAPE_ROOT):
-        self.root = Path(root)
-
-    def path(self, name: str) -> Path:
-        """The tape path for a recording name (validated, no traversal)."""
-        return self.root / f"{_tape_name(name)}.jsonl"
-
-    def has(self, name: str) -> bool:
-        return self.path(name).is_file()
-
-    def names(self) -> list[str]:
-        """All recording names in the library, sorted."""
-        if not self.root.is_dir():
-            return []
-        return sorted(path.stem for path in self.root.glob("*.jsonl"))
-
-    def entries(self, name: str) -> list[dict[str, Any]]:
-        """Parsed tape rows, e.g. to transform and re-``set`` a recording."""
-        path = self.path(name)
-        if not path.is_file():
-            raise TapeError(f"unknown recording: {name!r}")
-        return _read_tape(path)
-
-    @contextmanager
-    def record(
-        self,
-        name: str,
-        model: Model,
-        *,
-        meta: dict[str, Any] | None = None,
-    ) -> Iterator[RecordingModel]:
-        """Record a fresh tape for ``name`` from the exchanges in the block.
-
-        Any existing tape is replaced immediately. ``meta`` is stored as
-        a leading metadata row (e.g. the original prompt); replay skips it.
-        Exiting the block without a single recorded exchange raises
-        :class:`TapeError` -- an empty tape is always a broken
-        record. If the block raises, whatever was recorded stays on disk for
-        inspection (the next record replaces it).
-        """
-        path = self.path(name)
-        self.root.mkdir(parents=True, exist_ok=True)
-        path.unlink(missing_ok=True)
-        if meta:
-            _append_tape_row(path, {"meta": dict(meta)})
-        recorder = RecordingModel(model, path)
-        yield recorder
-        if not recorder.queries:
-            raise TapeError(f"record {name!r} recorded no exchanges")
-
-    def set(self, name: str, rows: Iterable[dict[str, Any]]) -> Path:
-        """Install a tape from response dicts or full tape rows.
-
-        Plain response dicts (built with :func:`text`/:func:`calls`) get no
-        fingerprint, so strict replay accepts them for any request. Full rows
-        (e.g. from :meth:`entries`) keep their fingerprints. Returns the
-        tape path.
-        """
-        normalized: list[dict[str, Any]] = []
-        for row in rows:
-            if "meta" in row:
-                normalized.append({"meta": row["meta"]})
-            elif "response" in row:
-                normalized.append(
-                    {
-                        "fingerprint": str(row.get("fingerprint") or ""),
-                        "response": row["response"],
-                    }
-                )
-            else:
-                normalized.append({"fingerprint": "", "response": _normalize_response(row)})
-        if not any("response" in row for row in normalized):
-            raise TapeError(f"refusing to install an empty recording: {name!r}")
-        path = self.path(name)
-        self.root.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "".join(json.dumps(row, default=str) + "\n" for row in normalized),
-            encoding="utf-8",
-        )
-        return path
-
-    def meta(self, name: str) -> dict[str, Any]:
-        """Metadata recorded with the tape (e.g. the prompt), or ``{}``."""
-        for row in self.entries(name):
-            if "meta" in row:
-                return dict(row["meta"])
-        return {}
-
-    def replay(self, name: str, *, strict: bool = True) -> ReplayModel:
-        """Plug recording ``name`` into a run as a :class:`ReplayModel`."""
-        if not self.has(name):
-            raise TapeError(f"unknown recording: {name!r}")
-        return ReplayModel(self.path(name), strict=strict)
-
-    def erase(self, name: str) -> bool:
-        """Remove one recording. True when one existed."""
-        path = self.path(name)
-        if not path.is_file():
-            return False
-        path.unlink()
-        return True
-
-    def clear(self) -> int:
-        """Remove every recording; returns how many were removed."""
-        removed = 0
-        for name in self.names():
-            self.erase(name)
-            removed += 1
-        return removed
 
 
 # ---------------------------------------------------------------------------
@@ -856,7 +535,7 @@ class RunArtifacts:
 
     result: dict[str, Any]
     record: Record
-    model: ScenarioModel | Model
+    model: Model
     recorder: EventRecorder
     run_dir: Path
 
@@ -877,7 +556,7 @@ def run_scenario(
     prompt: str,
     script: Iterable[Step] | None = None,
     *,
-    model: ScenarioModel | Model | None = None,
+    model: Model | None = None,
     env: LocalWorkspace | None = None,
     tmp_path: Path | None = None,
     run_id: str = "scenario",
@@ -885,11 +564,10 @@ def run_scenario(
     assert_exhausted: bool = True,
     on_event: Callable[[events.Event], None] | None = None,
 ) -> RunArtifacts:
-    """Run the full agent loop for free and return deep-inspectable artifacts.
+    """Run the full agent loop and return its artifacts.
 
     The model is a fresh :class:`ScriptedModel` built from ``script`` unless
-    ``model=`` plugs in something else -- e.g. one recording from a
-    :class:`ReplayHarness`, or a live :class:`~articraft.Model`. Pass
+    ``model=`` supplies a live :class:`~articraft.Model`. Pass
     ``env`` to choose the compile lane (:class:`WarmEnvironment` for speed)
     or ``tmp_path`` for a plain subprocess ``LocalWorkspace``. By default
     finite harness models must be consumed exactly; pass
