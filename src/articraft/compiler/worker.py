@@ -337,14 +337,11 @@ def _run_baseline_tests(
     diagnostics = tuple(
         failure for failure in report.failures if failure.kind not in blocking_kinds
     )
-    diagnostic_warnings = tuple(
-        f"Compiler diagnostic {failure.name}: {failure.details}" for failure in diagnostics
-    )
     return replace(
         report,
         passed=not blocking,
         failures=blocking,
-        warnings=_ordered_unique([*report.warnings, *diagnostic_warnings]),
+        diagnostics=diagnostics,
     )
 
 
@@ -387,6 +384,7 @@ def _merge_test_reports(authored_report: TestReport, baseline_report: TestReport
         allowed_mesh_issues=authored_report.allowed_mesh_issues,
         metrics=(*authored_report.metrics, *baseline_report.metrics),
         artifacts=(*authored_report.artifacts, *baseline_report.artifacts),
+        diagnostics=_ordered_unique([*authored_report.diagnostics, *baseline_report.diagnostics]),
     )
 
 

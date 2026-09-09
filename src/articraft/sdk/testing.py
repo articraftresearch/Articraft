@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -153,6 +153,8 @@ class TestReport:
     allowed_mesh_issues: tuple[AllowedMeshIssues, ...] = ()
     metrics: tuple[TestMetric, ...] = ()
     artifacts: tuple[TestArtifact, ...] = ()
+    diagnostics: tuple[TestFailure, ...] = ()
+    """Compiler checks that report a finding without blocking the export."""
 
 
 @dataclass
@@ -816,6 +818,22 @@ class TestContext:
     ) -> DistanceFinding:
         return self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
 
+    def _check_poses(
+        self,
+        poses: Sequence[PoseSample | Mapping[object, float]],
+        check: Callable[[], str | None],
+    ) -> list[str]:
+        failures: list[str] = []
+        for index, pose in enumerate(_pose_dicts(poses)):
+            try:
+                with self.pose(pose):
+                    details = check()
+            except LoopClosureError as exc:
+                details = f"unreachable: {exc}"
+            if details:
+                failures.append(f"sample={index} pose={pose!r} {details}")
+        return failures
+
     def expect_no_collision_at_poses(
         self,
         part_a: RigidBodyRef,
@@ -826,16 +844,11 @@ class TestContext:
         shape_b: str | None = None,
         name: str | None = None,
     ) -> bool:
-        failures: list[str] = []
-        for index, pose in enumerate(_pose_dicts(poses)):
-            try:
-                with self.pose(pose):
-                    query = self._collision_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
-            except LoopClosureError as exc:
-                failures.append(f"sample={index} pose={pose!r} unreachable: {exc}")
-                continue
-            if query.collided:
-                failures.append(f"sample={index} pose={pose!r} {_collision_details(query)}")
+        def check() -> str | None:
+            query = self._collision_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
+            return _collision_details(query) if query.collided else None
+
+        failures = self._check_poses(poses, check)
         return self._record(
             name
             or f"expect_no_collision_at_poses({_part_name(part_a, field_name='part_a')},"
@@ -861,18 +874,16 @@ class TestContext:
         maximum = None if maximum is None else _non_negative(maximum, "maximum")
         if maximum is not None and maximum < minimum:
             raise ValidationError("maximum must be greater than or equal to minimum")
-        failures: list[str] = []
         measured: list[float] = []
-        for index, pose in enumerate(_pose_dicts(poses)):
-            try:
-                with self.pose(pose):
-                    result = self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
-            except LoopClosureError as exc:
-                failures.append(f"sample={index} pose={pose!r} unreachable: {exc}")
-                continue
+
+        def check() -> str | None:
+            result = self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
             measured.append(result.distance)
             if result.distance < minimum or (maximum is not None and result.distance > maximum):
-                failures.append(f"sample={index} pose={pose!r} {_distance_details(result)}")
+                return _distance_details(result)
+            return None
+
+        failures = self._check_poses(poses, check)
         return self._record(
             name
             or f"expect_distance_at_poses({_part_name(part_a, field_name='part_a')},"
@@ -896,16 +907,14 @@ class TestContext:
         name: str | None = None,
     ) -> bool:
         tolerance = _non_negative(contact_tol, "contact_tol")
-        failures: list[str] = []
-        for index, pose in enumerate(_pose_dicts(poses)):
-            try:
-                with self.pose(pose):
-                    result = self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
-            except LoopClosureError as exc:
-                failures.append(f"sample={index} pose={pose!r} unreachable: {exc}")
-                continue
+
+        def check() -> str | None:
+            result = self._distance_query(part_a, part_b, shape_a=shape_a, shape_b=shape_b)
             if not result.collided and result.distance > tolerance:
-                failures.append(f"sample={index} pose={pose!r} {_distance_details(result)}")
+                return _distance_details(result)
+            return None
+
+        failures = self._check_poses(poses, check)
         return self._record(
             name
             or f"expect_contact_at_poses({_part_name(part_a, field_name='part_a')},"
@@ -931,15 +940,10 @@ class TestContext:
         outer_name = _part_name(outer_part, field_name="outer_part")
         axis_names = _axis_names(axes)
         margin = _non_negative(margin, "margin")
-        failures: list[str] = []
-        for sample_index, pose in enumerate(_pose_dicts(poses)):
-            try:
-                with self.pose(pose):
-                    inner_bounds = self._bounds(inner_name, inner_shape)
-                    outer_bounds = self._bounds(outer_name, outer_shape)
-            except LoopClosureError as exc:
-                failures.append(f"sample={sample_index} pose={pose!r} unreachable: {exc}")
-                continue
+
+        def check() -> str | None:
+            inner_bounds = self._bounds(inner_name, inner_shape)
+            outer_bounds = self._bounds(outer_name, outer_shape)
             failed_axes = [
                 axis_name
                 for axis_name in axis_names
@@ -951,10 +955,13 @@ class TestContext:
                 )
             ]
             if failed_axes:
-                failures.append(
-                    f"sample={sample_index} pose={pose!r} axes={failed_axes!r} "
-                    f"inner_bounds={inner_bounds!r} outer_bounds={outer_bounds!r}"
+                return (
+                    f"axes={failed_axes!r} inner_bounds={inner_bounds!r} "
+                    f"outer_bounds={outer_bounds!r}"
                 )
+            return None
+
+        failures = self._check_poses(poses, check)
         return self._record(
             name or f"expect_within_at_poses({inner_name},{outer_name})",
             not failures,

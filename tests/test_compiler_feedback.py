@@ -497,3 +497,31 @@ def test_traceback_location_prefers_the_last_workspace_frame() -> None:
 
     signal = report["signal_bundle"]["signals"][0]
     assert signal["details"] == "location=parts/lid.py:42 in hinge"
+
+
+def test_diagnostic_kind_survives_misleading_prose_and_an_authored_failure() -> None:
+    finding = TestFailure("named check", "Scale warning: a gap was measured", FailureKind.OVERLAP)
+    test_report = TestReport(
+        passed=False,
+        checks_run=1,
+        checks=(finding.name,),
+        failures=(finding,),
+        diagnostics=(finding,),
+    )
+    report = build_compile_report(status="failure", test_report=test_report)
+    failure, warning = report["signal_bundle"]["signals"]
+    assert (failure["kind"], failure["severity"], failure["source"], failure["blocking"]) == (
+        "real_overlap",
+        "failure",
+        "tests",
+        True,
+    )
+    assert (warning["kind"], warning["severity"], warning["source"], warning["blocking"]) == (
+        "real_overlap",
+        "warning",
+        "compiler",
+        False,
+    )
+    assert warning["check_name"] == finding.name
+    assert warning["details"] == finding.details
+    assert report["counts"] == {"failures": 1, "warnings": 1, "notes": 0}

@@ -14,6 +14,9 @@ import numpy as np
 from pxr import Usd, UsdPhysics
 
 from articraft import package_dir
+from articraft._usd import attribute as _usd_attribute
+from articraft._usd import bodies_scope as _bodies_scope
+from articraft._usd import reversed_tree_edges
 from articraft.sdk import JointAxis, JointDOF, PhysicsState, RigidBodyAssembly
 from articraft.sdk.assembly import (
     Joint,
@@ -87,15 +90,13 @@ def _read_version(path: Path) -> dict[str, object]:
         raise ValueError(f"could not open USDZ file: {path}")
 
     world = stage.GetDefaultPrim()
-    object_prims = [
-        prim
-        for prim in world.GetChildren()
-        if prim.GetChild("rigid_bodies") or prim.GetChild("parts")
-    ]
+    object_prims = [prim for prim in world.GetChildren() if _bodies_scope(prim)]
     if len(object_prims) != 1:
         raise ValueError(f"expected one articulated object in {path}")
     object_prim = object_prims[0]
 
+    bodies = _bodies_scope(object_prim)
+    assert bodies is not None
     parts = [
         {
             "name": _attribute(part, "name", part.GetName()),
@@ -103,17 +104,13 @@ def _read_version(path: Path) -> dict[str, object]:
             "shapes": _read_shapes(part),
             "mass": _read_mass(part),
         }
-        for part in (
-            object_prim.GetChild("rigid_bodies") or object_prim.GetChild("parts")
-        ).GetChildren()
+        for part in bodies.GetChildren()
     ]
 
     joint_prims = object_prim.GetChild("joints").GetChildren()
     articulations = [_read_joint(joint) for joint in joint_prims]
-    roots: set[object] = set()
-    for body in (
-        object_prim.GetChild("rigid_bodies") or object_prim.GetChild("parts")
-    ).GetChildren():
+    roots: set[str] = set()
+    for body in bodies.GetChildren():
         if body.HasAPI(UsdPhysics.ArticulationRootAPI):
             roots.add(str(_attribute(body, "name", body.GetName())))
     for joint in joint_prims:
@@ -218,7 +215,7 @@ def _read_legacy_joint(joint: Usd.Prim) -> dict[str, object]:
     }
 
 
-def _orient_joints(joints: list[dict[str, object]], roots: set[object]) -> None:
+def _orient_joints(joints: list[dict[str, object]], roots: set[str]) -> None:
     """Point every tree joint away from the root.
 
     ``body0``/``body1`` are symmetric in the assembly, but the viewer hangs the
@@ -230,24 +227,17 @@ def _orient_joints(joints: list[dict[str, object]], roots: set[object]) -> None:
         for joint in joints
         if not joint["closes_loop"] and "WORLD" not in (joint["parent"], joint["child"])
     ]
-    seen = set(roots)
-    while pending:
-        reachable = [j for j in pending if j["parent"] in seen or j["child"] in seen]
-        if not reachable:  # first joint, or the start of a separate component
-            reachable = [pending[0]]
-            seen.add(pending[0]["parent"])
-        for joint in reachable:
-            if joint["parent"] not in seen:
-                joint["parent"], joint["child"] = joint["child"], joint["parent"]
-                joint["origin"], joint["child_origin"] = joint["child_origin"], joint["origin"]
-                joint["axis"] = [-value for value in cast(list[float], joint["axis"])]
-                limits = cast(dict[str, float | None] | None, joint["motion_limits"])
-                if limits is not None:
-                    lower, upper = limits["lower"], limits["upper"]
-                    limits["lower"] = None if upper is None else -upper
-                    limits["upper"] = None if lower is None else -lower
-            seen.update((joint["parent"], joint["child"]))
-        pending = [joint for joint in pending if joint not in reachable]
+    edges = [(str(joint["parent"]), str(joint["child"])) for joint in pending]
+    for index in reversed_tree_edges(edges, roots):
+        joint = pending[index]
+        joint["parent"], joint["child"] = joint["child"], joint["parent"]
+        joint["origin"], joint["child_origin"] = joint["child_origin"], joint["origin"]
+        joint["axis"] = [-value for value in cast(list[float], joint["axis"])]
+        limits = cast(dict[str, float | None] | None, joint["motion_limits"])
+        if limits is not None:
+            lower, upper = limits["lower"], limits["upper"]
+            limits["lower"] = None if upper is None else -upper
+            limits["upper"] = None if lower is None else -lower
 
 
 def _read_shapes(part: Usd.Prim) -> list[dict[str, object]]:
@@ -339,10 +329,6 @@ def kinematics_from_usdz(path: Path) -> ResolvedRigidBodyAssembly | None:
         # A stage we cannot rebuild is not a failure: the viewer falls back to
         # posing along the tree, exactly as it did before.
         return None
-
-
-def _bodies_scope(prim: Usd.Prim) -> Usd.Prim | None:
-    return prim.GetChild("rigid_bodies") or prim.GetChild("parts") or None
 
 
 def _triple(prim: Usd.Prim, name: str) -> tuple[float, float, float]:
@@ -453,18 +439,8 @@ def _solve_pose(model: ResolvedRigidBodyAssembly, values: dict[str, float]) -> d
     }
 
 
-def _usd_attribute(prim: Usd.Prim, name: str, default=None):
-    """Read a schema attribute by its full USD name, no articraft prefix."""
-    attribute = prim.GetAttribute(name)
-    value = attribute.Get() if attribute else None
-    return default if value is None else value
-
-
 def _attribute(prim: Usd.Prim, name: str, default=None):
-    attribute = prim.GetAttribute(f"articraft:{name}")
-    value = attribute.Get() if attribute else None
-    if value is None:
-        return default
+    value = _usd_attribute(prim, f"articraft:{name}", default)
     if hasattr(value, "__len__") and hasattr(value, "__getitem__") and not isinstance(value, str):
         return [float(value[index]) for index in range(len(value))]
     return value

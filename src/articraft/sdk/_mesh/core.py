@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from numbers import Integral
-from typing import TYPE_CHECKING, Any, ClassVar, SupportsIndex, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, ClassVar, SupportsIndex, TypeAlias, TypeVar, cast
 
 import manifold3d
 import numpy as np
@@ -23,6 +23,7 @@ Vec3: TypeAlias = tuple[float, float, float]
 Face: TypeAlias = tuple[int, int, int]
 
 _EPS = 1e-10
+_Point = TypeVar("_Point", Vec2, Vec3)
 
 
 class _RevisionList(list[Any]):
@@ -1109,13 +1110,43 @@ def _interpolate_loft_rings(
     return result
 
 
-def _connect_loft_rings(
+def _resample_profile(
+    points: Sequence[_Point], count: int, *, closed: bool, epsilon: float = _EPS
+) -> list[_Point]:
+    if len(points) == count:
+        return list(points)
+    array = np.asarray(points, dtype=np.float64)
+    ring = np.vstack((array, array[:1])) if closed else array
+    lengths = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(ring, axis=0), axis=1))])
+    total = float(lengths[-1])
+    if total <= epsilon:
+        raise ValueError("profile perimeter must be positive")
+    targets = total * np.arange(count, dtype=np.float64) / (count if closed else count - 1)
+    columns = [np.interp(targets, lengths, ring[:, axis]) for axis in range(array.shape[1])]
+    return [
+        cast(_Point, tuple(float(value) for value in row)) for row in zip(*columns, strict=True)
+    ]
+
+
+def _ring_normal(points: Sequence[Vec3], *, epsilon: float = _EPS) -> Vec3:
+    centered = np.asarray(points, dtype=np.float64)
+    centered = centered - centered.mean(axis=0)
+    normal = np.cross(centered, np.roll(centered, -1, axis=0)).sum(axis=0)
+    length = float(np.linalg.norm(normal))
+    if length <= epsilon:
+        raise ValueError("loft profiles must enclose a non-zero planar area")
+    return cast(Vec3, tuple(float(value) for value in normal / length))
+
+
+def _connect_profile_rings(
     faces: list[Face],
     first_offset: int,
     second_offset: int,
     count: int,
+    *,
+    closed: bool = True,
 ) -> None:
-    for index in range(count):
+    for index in range(count if closed else count - 1):
         following = (index + 1) % count
         faces.extend(
             (
@@ -1154,7 +1185,7 @@ def _add_rounded_loft_cap(
         )
     ordered = [*reversed(ring_offsets), base_offset] if start else [base_offset, *ring_offsets]
     for first, second in pairwise(ordered):
-        _connect_loft_rings(faces, first, second, len(ring))
+        _connect_profile_rings(faces, first, second, len(ring))
     tip_index = len(vertices)
     vertices.append(_v_add(center, _v_scale(direction, cap_length)))
     terminal_ring = ordered[0] if start else ordered[-1]
@@ -1217,8 +1248,8 @@ class LoftGeometry(MeshGeometry):
         )
         outer_end = len(outer_loft.vertices) - count
         inner_end = inner_offset + len(inner_loft.vertices) - count
-        _connect_loft_rings(faces, inner_offset, 0, count)
-        _connect_loft_rings(faces, outer_end, inner_end, count)
+        _connect_profile_rings(faces, inner_offset, 0, count)
+        _connect_profile_rings(faces, outer_end, inner_end, count)
 
         result = cls.__new__(cls)
         MeshGeometry.__init__(result, vertices=vertices, faces=faces)
@@ -1260,27 +1291,7 @@ class LoftGeometry(MeshGeometry):
             if cap_length <= 0.0 or not math.isfinite(cap_length):
                 raise ValueError("loft cap_length must be finite and positive")
 
-        def ring_center(ring: Sequence[Vec3]) -> Vec3:
-            return (
-                sum(point[0] for point in ring) / len(ring),
-                sum(point[1] for point in ring) / len(ring),
-                sum(point[2] for point in ring) / len(ring),
-            )
-
-        def ring_normal(ring: Sequence[Vec3]) -> Vec3:
-            center = ring_center(ring)
-            normal = (0.0, 0.0, 0.0)
-            for index, point in enumerate(ring):
-                following = ring[(index + 1) % len(ring)]
-                normal = _v_add(
-                    normal,
-                    _v_cross(_v_sub(point, center), _v_sub(following, center)),
-                )
-            if _v_norm(normal) <= _EPS:
-                raise ValueError("loft profiles must enclose a non-zero planar area")
-            return _v_normalize(normal)
-
-        centers = [ring_center(ring) for ring in rings]
+        centers = [_mean_point(ring) for ring in rings]
         center_span_count = len(rings) if close_path else len(rings) - 1
         if any(
             _v_norm(_v_sub(centers[(index + 1) % len(rings)], centers[index])) <= _EPS
@@ -1289,12 +1300,12 @@ class LoftGeometry(MeshGeometry):
             raise ValueError("adjacent loft profiles must have distinct centers")
 
         if closed:
-            reference_normal = ring_normal(rings[0])
+            reference_normal = _ring_normal(rings[0])
             if not close_path and _v_dot(reference_normal, _v_sub(centers[-1], centers[0])) < 0.0:
                 rings = [list(reversed(ring)) for ring in rings]
                 reference_normal = _v_scale(reference_normal, -1.0)
             for index in range(1, len(rings)):
-                current_normal = ring_normal(rings[index])
+                current_normal = _ring_normal(rings[index])
                 if _v_dot(current_normal, reference_normal) < 0.0:
                     rings[index] = list(reversed(rings[index]))
                     current_normal = _v_scale(current_normal, -1.0)
@@ -1312,23 +1323,15 @@ class LoftGeometry(MeshGeometry):
 
         vertices = [point for ring in rings for point in ring]
         faces: list[Face] = []
-        segment_count = count if closed else count - 1
         path_segment_count = len(rings) if close_path else len(rings) - 1
         for ring_index in range(path_segment_count):
-            start = ring_index * count
-            following_start = ((ring_index + 1) % len(rings)) * count
-            for point_index in range(segment_count):
-                following = (point_index + 1) % count
-                faces.extend(
-                    (
-                        (start + point_index, start + following, following_start + following),
-                        (
-                            start + point_index,
-                            following_start + following,
-                            following_start + point_index,
-                        ),
-                    )
-                )
+            _connect_profile_rings(
+                faces,
+                ring_index * count,
+                ((ring_index + 1) % len(rings)) * count,
+                count,
+                closed=closed,
+            )
         if cap and closed and not close_path:
             if cap_style == "round":
                 _add_rounded_loft_cap(
@@ -1374,8 +1377,8 @@ class LoftGeometry(MeshGeometry):
                     (order[a], order[b], order[c])
                     for a, b, c in _triangulate_simple([projected[index] for index in order])
                 ]
-                center = ring_center(ring)
-                neighbor = ring_center(rings[neighbor_index])
+                center = _mean_point(ring)
+                neighbor = _mean_point(rings[neighbor_index])
                 outward = _v_sub(center, neighbor)
                 for a, b, c in triangles:
                     face = (offset + a, offset + b, offset + c)
