@@ -40,6 +40,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --group sim --frozen
 
+      - name: Set up Node for viewer behavior tests
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
       - name: Check repository hygiene
         run: uv run --frozen python scripts/check_repo_hygiene.py
 
