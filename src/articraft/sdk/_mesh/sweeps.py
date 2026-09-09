@@ -15,8 +15,10 @@ from articraft.sdk._mesh.core import (
     SphereGeometry,
     Vec2,
     Vec3,
+    _connect_profile_rings,
     _ensure_ccw,
     _profile_2d,
+    _resample_profile,
     _triangulate_simple,
     _v_add,
     _v_cross,
@@ -347,27 +349,6 @@ def _path_frames(
     return normals, binormals
 
 
-def _resample_profile(points: Sequence[Vec2], count: int, *, closed: bool) -> list[Vec2]:
-    if len(points) == count:
-        return list(points)
-    array = np.asarray(points, dtype=np.float64)
-    ring = np.vstack((array, array[:1])) if closed else array
-    lengths = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(ring, axis=0), axis=1))])
-    total = float(lengths[-1])
-    if total <= _EPS:
-        raise ValueError("sweep profile perimeter must be positive")
-    divisor = count if closed else count - 1
-    targets = total * np.arange(count, dtype=np.float64) / divisor
-    return [
-        (float(x), float(y))
-        for x, y in zip(
-            np.interp(targets, lengths, ring[:, 0]),
-            np.interp(targets, lengths, ring[:, 1]),
-            strict=True,
-        )
-    ]
-
-
 def _profile_distance(a: Sequence[Vec2], b: Sequence[Vec2]) -> float:
     return sum(
         (left[0] - right[0]) ** 2 + (left[1] - right[1]) ** 2
@@ -574,22 +555,6 @@ def _profile_at(
                 for start, end in zip(start_profile, end_profile, strict=True)
             ]
     return list(profiles[-1].points)
-
-
-def _connect_profile_rings(
-    faces: list[tuple[int, int, int]],
-    first_offset: int,
-    second_offset: int,
-    count: int,
-) -> None:
-    for index in range(count):
-        following = (index + 1) % count
-        faces.extend(
-            (
-                (first_offset + index, first_offset + following, second_offset + following),
-                (first_offset + index, second_offset + following, second_offset + index),
-            )
-        )
 
 
 def _rounded_cap_length(profile: Sequence[Vec2], requested: float | None) -> float:

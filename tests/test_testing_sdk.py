@@ -551,7 +551,16 @@ def test_pose_rejects_out_of_limit_values_at_entry() -> None:
         pass
 
 
-def test_pose_sweeps_record_unreachable_loop_poses() -> None:
+@pytest.mark.parametrize(
+    "check",
+    [
+        "expect_no_collision_at_poses",
+        "expect_distance_at_poses",
+        "expect_contact_at_poses",
+        "expect_within_at_poses",
+    ],
+)
+def test_pose_sweeps_record_unreachable_loop_poses(check: str) -> None:
     """A sweep past a ring's reachable range is a recorded failure, not a crash."""
 
     model = _swing_arm()
@@ -566,7 +575,9 @@ def test_pose_sweeps_record_unreachable_loop_poses() -> None:
     context = TestContext(model)
 
     poses = context.sample_joint("hinge")
-    assert not context.expect_no_collision_at_poses("base", "arm", poses=poses)
+    before = context.part_world_point("arm", (3.0, 0.0, 0.0))
+    assert not getattr(context, check)("base", "arm", poses=poses)
+    assert context.part_world_point("arm", (3.0, 0.0, 0.0)) == pytest.approx(before)
 
     failures = context.report().failures
     assert failures and "unreachable" in failures[0].details

@@ -309,10 +309,18 @@ def run_tests() -> TestReport:
     result = env.compile_path(run_dir)
 
     assert result["status"] == "success"
-    assert any(
-        "fail_if_parts_overlap_in_current_pose" in warning
-        for warning in result["test_report"]["warnings"]
+    diagnostic = next(
+        finding for finding in result["test_report"]["diagnostics"] if finding["kind"] == "overlap"
     )
+    assert diagnostic["name"] == "fail_if_parts_overlap_in_current_pose()"
+    signal = next(
+        signal
+        for signal in result["compile_report"]["signal_bundle"]["signals"]
+        if signal["kind"] == "real_overlap"
+    )
+    assert signal["severity"] == "warning"
+    assert signal["source"] == "compiler"
+    assert not signal["blocking"]
     assert Path(result["usdz"]).is_file()
 
 

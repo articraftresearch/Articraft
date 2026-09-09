@@ -41,6 +41,10 @@ from pxr import (
 )
 from scipy.spatial.transform import Rotation  # pyright: ignore[reportMissingTypeStubs]
 
+from articraft._usd import attribute as _attr
+from articraft._usd import bodies_scope as _bodies_scope
+from articraft._usd import reversed_tree_edges
+
 # USD joint prim type -> MuJoCo joint kind. A fixed joint welds the bodies,
 # which MuJoCo expresses by nesting them with no joint at all.
 _JOINT_TYPES: dict[str, str | None] = {
@@ -233,38 +237,32 @@ class _Scene:
         and swap the ones facing the wrong way.
         """
 
-        pending = self.tree_joints
-        seen = {self.articulation_root} if self.articulation_root in self.parts else set()
-        while pending:
-            reachable = [j for j in pending if j.parent in seen or j.child in seen]
-            if not reachable:  # no root marked, or a separate component
-                reachable = [pending[0]]
-                seen.add(pending[0].parent)
-            for joint in reachable:
-                if joint.parent not in seen:
-                    joint.parent, joint.child = joint.child, joint.parent
-                    joint.anchor, joint.parent_anchor = joint.parent_anchor, joint.anchor
-                    # MJCF wants the axis in the child body's frame. After the
-                    # swap the child is body0, so negating the body1-frame
-                    # axis is only right when both bodies rest unrotated; use
-                    # the axis as body0 expresses it instead.
-                    joint.axis = _negated(joint.axis_in_parent)
-                    joint.lower, joint.upper = (
-                        (None if joint.upper is None else -joint.upper),
-                        (None if joint.lower is None else -joint.lower),
-                    )
-                    joint.extra_axes = tuple(
-                        (
-                            kind,
-                            _negated(axis_in_parent),
-                            _negated(axis),
-                            (None if high is None else -high),
-                            (None if low is None else -low),
-                        )
-                        for kind, axis, axis_in_parent, low, high in joint.extra_axes
-                    )
-                seen.update((joint.parent, joint.child))
-            pending = [joint for joint in pending if joint not in reachable]
+        joints = self.tree_joints
+        roots = {self.articulation_root} if self.articulation_root in self.parts else set()
+        edges = [(joint.parent, joint.child) for joint in joints]
+        for index in reversed_tree_edges(edges, roots):
+            joint = joints[index]
+            joint.parent, joint.child = joint.child, joint.parent
+            joint.anchor, joint.parent_anchor = joint.parent_anchor, joint.anchor
+            # MJCF wants the axis in the child body's frame. After the
+            # swap the child is body0, so negating the body1-frame
+            # axis is only right when both bodies rest unrotated; use
+            # the axis as body0 expresses it instead.
+            joint.axis = _negated(joint.axis_in_parent)
+            joint.lower, joint.upper = (
+                (None if joint.upper is None else -joint.upper),
+                (None if joint.lower is None else -joint.lower),
+            )
+            joint.extra_axes = tuple(
+                (
+                    kind,
+                    _negated(axis_in_parent),
+                    _negated(axis),
+                    (None if high is None else -high),
+                    (None if low is None else -low),
+                )
+                for kind, axis, axis_in_parent, low, high in joint.extra_axes
+            )
 
     def root(self) -> str:
         children = {joint.child for joint in self.tree_joints}
@@ -700,16 +698,6 @@ def _build_spec(usdz: Path) -> Any:
     return spec
 
 
-def _bodies_scope(prim: Usd.Prim) -> Usd.Prim | None:
-    """The scope holding an object's rigid bodies, under either schema.
-
-    A v1 stage calls it ``parts``; a rigid-body graph calls it
-    ``rigid_bodies``. Both hold one prim per body, which is all a reader needs.
-    """
-
-    return prim.GetChild("rigid_bodies") or prim.GetChild("parts") or None
-
-
 _D6_AXES = {
     "transX": ("slide", (1.0, 0.0, 0.0)),
     "transY": ("slide", (0.0, 1.0, 0.0)),
@@ -1032,12 +1020,6 @@ def _mesh_arrays(prim: Usd.Prim) -> tuple[np.ndarray, np.ndarray]:
     if not np.all(counts == 3):
         raise ValueError(f"{prim.GetPath()} is not triangulated")
     return points, indices.reshape(-1, 3)
-
-
-def _attr(prim: Usd.Prim, name: str, default: Any = None) -> Any:
-    attribute = prim.GetAttribute(name)
-    value = attribute.Get() if attribute else None
-    return default if value is None else value
 
 
 def _number(value: Any) -> float | None:

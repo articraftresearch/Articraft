@@ -198,7 +198,11 @@ def _signals_from_report(report: dict[str, Any]) -> list[CompileSignal]:
         _warning_signal(str(item)) for item in report.get("warnings", []) if str(item).strip()
     ]
     signals += [_allowance_signal(str(a)) for a in report.get("allowances", []) if str(a).strip()]
-    signals += [_failure_signal(f) for f in report.get("failures", [])]
+    signals += [_test_signal(f) for f in report.get("failures", [])]
+    signals += [
+        _test_signal({**finding, "source": "compiler"}, severity="warning")
+        for finding in report.get("diagnostics", [])
+    ]
     signals += [
         _artifact_signal(artifact)
         for artifact in report.get("artifacts", [])
@@ -309,7 +313,6 @@ def _warning_signal(text: str) -> CompileSignal:
 @dataclass(frozen=True)
 class _FailureSpec:
     signal_kind: str
-    code_suffix: str
     summary: str
     compiler_summary: str | None = None
     compiler_group: SignalGroup = "qc"
@@ -320,57 +323,48 @@ class _FailureSpec:
 _FAILURE_SPECS: dict[FailureKind, _FailureSpec] = {
     FailureKind.MODEL_VALIDITY: _FailureSpec(
         "model_validity",
-        "MODEL_VALIDITY",
         "Model validation failed.",
         compiler_summary="Compiler model validation failed.",
         compiler_group="build",
     ),
     FailureKind.MESH_HEALTH: _FailureSpec(
         "mesh_health",
-        "MESH_HEALTH",
         "Unhealthy mesh geometry was found.",
         compiler_summary="Compiler mesh health validation failed.",
     ),
     FailureKind.MISSING_MASS: _FailureSpec(
         "missing_mass",
-        "MISSING_MASS",
         "A part has no mass properties while physics is enabled.",
         compiler_group="build",
     ),
     FailureKind.ISOLATED_PART: _FailureSpec(
         "isolated_part",
-        "ISOLATED_PART",
         "Floating or disconnected parts were found.",
     ),
     FailureKind.DISCONNECTED_GEOMETRY: _FailureSpec(
         "disconnected_geometry",
-        "DISCONNECTED_GEOMETRY",
         "A part contains disconnected geometry islands.",
     ),
     FailureKind.OVERLAP: _FailureSpec(
         "real_overlap",
-        "REAL_OVERLAP",
         "A mesh check found overlapping parts.",
     ),
     FailureKind.CONTACT: _FailureSpec(
         "exact_contact_gap",
-        "EXACT_CONTACT_GAP",
         "A contact check found a gap where contact was expected.",
     ),
     FailureKind.ARTICULATION_SEPARATION: _FailureSpec(
         "articulation_separation",
-        "ARTICULATION_SEPARATION",
         "A hinge or pivot pulls its child away from its parent during motion.",
     ),
     FailureKind.AUTHORED: _FailureSpec(
         "test_failure",
-        "FAILURE",
         "",
     ),
 }
 
 
-def _failure_signal(failure: dict[str, Any]) -> CompileSignal:
+def _test_signal(failure: dict[str, Any], *, severity: Severity = "failure") -> CompileSignal:
     name = str(failure["name"])
     details = str(failure.get("details") or "")
     try:
@@ -382,7 +376,7 @@ def _failure_signal(failure: dict[str, Any]) -> CompileSignal:
         source = "tests"
     spec = _FAILURE_SPECS[kind]
     compiler_owned = source == "compiler"
-    prefix = "QC" if compiler_owned else "TEST"
+    prefix = "WARN" if severity == "warning" else "QC" if compiler_owned else "TEST"
     if kind is FailureKind.AUTHORED:
         owner = "Compiler check" if compiler_owned else "Authored test"
         summary = f"{owner} failed: {name}"
@@ -391,12 +385,14 @@ def _failure_signal(failure: dict[str, Any]) -> CompileSignal:
             spec.compiler_summary if compiler_owned and spec.compiler_summary else spec.summary
         )
     group = spec.compiler_group if compiler_owned else "qc"
-    return _failure(
+    return CompileSignal(
+        severity,
         spec.signal_kind,
-        f"{prefix}_{spec.code_suffix}",
+        f"{prefix}_{'FAILURE' if kind is FailureKind.AUTHORED else spec.signal_kind.upper()}",
         summary,
-        name,
         details,
+        blocking=severity == "failure",
+        check_name=name,
         source=source,
         group=group,
     )
@@ -560,32 +556,10 @@ def _summary(status: Status, signals: list[CompileSignal]) -> str:
     counts = _counts(signals)
     header = f"status={status} failures={counts['failures']} warnings={counts['warnings']} notes={counts['notes']}"
     if first := next(iter(_failures(signals)), None):
-        return f"{header}\nPrimary issue: {_primary_issue(first)}"
+        return f"{header}\nPrimary issue: {first.summary}"
     if counts["warnings"]:
         return f"{header}\nPrimary issue: compile passed with warnings."
     return f"{header}\nCompile passed cleanly."
-
-
-def _primary_issue(signal: CompileSignal) -> str:
-    issues = {
-        "compile_timeout": "the compile exceeded its time limit.",
-        "missing_run_tests": "generated script is missing required run_tests().",
-        "invalid_run_tests_report": "run_tests() returned the wrong type.",
-        "model_validity": "compiler-owned model validation failed.",
-        "mesh_health": "compiler-owned mesh health validation failed.",
-        "isolated_part": (
-            "compiler-owned connectivity checks found isolated parts."
-            if signal.source == "compiler"
-            else "an authored test found isolated parts."
-        ),
-        "real_overlap": "mesh checks found overlapping parts that need classification.",
-        "missing_exact_geometry": "a check references missing named geometry.",
-        "exact_contact_gap": "a contact check found separation where contact was expected.",
-        "disconnected_geometry": "a part contains disconnected geometry islands.",
-        "articulation_separation": "an articulation separates its child part during motion.",
-        "test_failure": "a required authored test failed.",
-    }
-    return issues.get(signal.kind, signal.summary)
 
 
 _RUNTIME_RULES = (

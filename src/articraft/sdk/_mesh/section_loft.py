@@ -8,7 +8,7 @@ from typing import Literal, cast
 import numpy as np
 import trimesh
 
-from articraft.sdk._mesh.core import LoftGeometry, MeshGeometry
+from articraft.sdk._mesh.core import LoftGeometry, MeshGeometry, _resample_profile, _ring_normal
 from articraft.sdk._mesh.sweeps import (
     _initial_frame,
     _path_frames,
@@ -153,27 +153,17 @@ def _coerce_spec(
 
 
 def _resample_loop(points: Sequence[Vec3], count: int) -> list[Vec3]:
-    if len(points) == count:
-        return list(points)
-    array = np.asarray(points, dtype=np.float64)
-    ring = np.vstack((array, array[:1]))
-    lengths = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(ring, axis=0), axis=1))])
-    total = float(lengths[-1])
-    if total <= 1e-12:
-        raise ValidationError("loft section perimeter must be non-zero")
-    targets = total * np.arange(count, dtype=np.float64) / count
-    columns = [np.interp(targets, lengths, ring[:, axis]) for axis in range(3)]
-    return [(float(x), float(y), float(z)) for x, y, z in zip(*columns, strict=True)]
+    try:
+        return _resample_profile(points, count, closed=True, epsilon=1e-12)
+    except ValueError as exc:
+        raise ValidationError("loft section perimeter must be non-zero") from exc
 
 
-def _loop_normal(points: Sequence[Vec3]) -> np.ndarray:
-    centered = np.asarray(points, dtype=np.float64)
-    centered = centered - centered.mean(axis=0)
-    normal = np.cross(centered, np.roll(centered, -1, axis=0)).sum(axis=0)
-    length = float(np.linalg.norm(normal))
-    if length <= 1e-12:
-        raise ValidationError("loft section must enclose a non-zero planar area")
-    return normal / length
+def _loop_normal(points: Sequence[Vec3]) -> Vec3:
+    try:
+        return _ring_normal(points, epsilon=1e-12)
+    except ValueError as exc:
+        raise ValidationError("loft section must enclose a non-zero planar area") from exc
 
 
 def _align_loop(reference: Sequence[Vec3], candidate: Sequence[Vec3]) -> list[Vec3]:
@@ -259,25 +249,13 @@ def _path_adjusted_sections(spec: SectionLoftSpec, count: int) -> list[list[Vec3
         up_hint=spec.up_hint,
         frame_mode=spec.frame_mode,
     )
+    base_frame = np.asarray((base_normal, base_binormal, baseline_tangent))
     oriented: list[list[Vec3]] = []
     for index, section in enumerate(sections):
-        adjusted_center = np.mean(np.asarray(adjusted[index], dtype=np.float64), axis=0)
-        ring: list[Vec3] = []
-        for point in section:
-            relative = np.asarray(point, dtype=np.float64) - centers[index]
-            local = (
-                float(np.dot(relative, base_normal)),
-                float(np.dot(relative, base_binormal)),
-                float(np.dot(relative, baseline_tangent)),
-            )
-            placed = (
-                adjusted_center
-                + np.asarray(normals[index]) * local[0]
-                + np.asarray(binormals[index]) * local[1]
-                + np.asarray(tangents[index]) * local[2]
-            )
-            ring.append(cast(Vec3, tuple(float(value) for value in placed)))
-        oriented.append(ring)
+        local = (np.asarray(section) - centers[index]) @ base_frame.T
+        frame = np.asarray((normals[index], binormals[index], tangents[index]))
+        placed = local @ frame + np.mean(adjusted[index], axis=0)
+        oriented.append([(float(x), float(y), float(z)) for x, y, z in placed])
     return oriented
 
 
