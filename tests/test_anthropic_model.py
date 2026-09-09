@@ -141,7 +141,16 @@ def add_tool_results(
     )
 
 
-def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost() -> None:
+@pytest.mark.parametrize(
+    ("pricing_date", "expected_cost"),
+    [(date(2026, 8, 31), 0.00246), (date(2026, 9, 1), 0.00369)],
+)
+def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost(
+    monkeypatch: pytest.MonkeyPatch, pricing_date: date, expected_cost: float
+) -> None:
+    monkeypatch.setattr(
+        "articraft.agent.provider.anthropic.date", SimpleNamespace(today=lambda: pricing_date)
+    )
     model, client = anthropic_model(
         [
             text_response(
@@ -179,7 +188,7 @@ def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost() -> Non
     assert result["text"] == "result"
     assert result["tool_calls"] == []
     assert result["provider_content"] == [{"type": "text", "text": "result"}]
-    assert result["cost"] == 0.00246
+    assert result["cost"] == expected_cost
     assert result["token_usage"] == {
         "input_tokens": 1_000,
         "output_tokens": 20,
