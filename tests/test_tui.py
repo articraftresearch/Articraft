@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 
+import pytest
 from rich.console import Console
 
 from articraft.agent import events
@@ -137,10 +138,11 @@ def test_renderer_shows_token_usage_bar() -> None:
     assert "(0.3%)" in out
 
 
-def test_renderer_uses_gpt_5_6_sol_context_window() -> None:
+@pytest.mark.parametrize("model_name", ["gpt-6-astra", "gpt-5.6-sol"])
+def test_renderer_uses_openai_context_window(model_name: str) -> None:
     renderer, console = _renderer()
 
-    renderer.handle(events.RunStarted("run-x", "gpt-5.6-sol", "a box", "low"))
+    renderer.handle(events.RunStarted("run-x", model_name, "a box", "low"))
     renderer.handle(events.TurnStarted(1))
     renderer.handle(
         events.AssistantMessage(

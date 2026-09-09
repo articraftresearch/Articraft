@@ -18,7 +18,7 @@ _MAX_OUTPUT_TOKENS = 128_000
 _RETRY_BASE_SECONDS = 0.5
 _RETRY_MAX_SECONDS = 20.0
 _WEBSOCKET_OPEN_TIMEOUT_SECONDS = 20.0
-# Codex caps the 1.05M API window at 272K to avoid much higher cost and lower quality.
+# Keep the working budget below the API's higher pricing tier above 272K input tokens.
 _CODEX_CONTEXT_WINDOW_TOKENS = 272_000
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,10 @@ class _ModelSpec:
 
 
 # Prices are USD per million tokens: input, cached input, output, cache write.
+# https://developers.openai.com/api/docs/pricing
 _MODELS = {
-    "gpt-5.6-sol": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 5.0, 0.5, 30.0, 6.25),
+    "gpt-6-astra": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 10.0, 1.0, 50.0, 12.5),
+    "gpt-5.6-sol": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 4.0, 0.4, 20.0, 5.0),
     "gpt-5.6-terra": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 2.0, 0.2, 12.0, 2.5),
     "gpt-5.6-luna": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 0.2, 0.02, 1.2, 0.25),
 }
