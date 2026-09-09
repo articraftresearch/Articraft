@@ -8,19 +8,23 @@ runs).
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 import conftest
 import pytest
+import test_live_generation
 from harness import (
     RecordingModel,
     ReplayHarness,
     ReplayModel,
     ScriptedModel,
+    calls,
     run,
     text,
+    tool_call,
 )
 
 
@@ -82,6 +86,14 @@ def test_default_runs_live_when_no_tape_exists(
 
     with opener() as model:
         assert run(model.query([]))["text"] == "live"
+
+
+def test_live_generation_can_finish_after_a_tenth_turn_compile(tmp_path: Path) -> None:
+    model = ScriptedModel(
+        [*[text("Still working.") for _ in range(9)], calls(tool_call("compile")), text("Done.")]
+    )
+
+    test_live_generation.test_box_generation(lambda: nullcontext(model), tmp_path)
 
 
 def test_replay_replays_an_existing_tape(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

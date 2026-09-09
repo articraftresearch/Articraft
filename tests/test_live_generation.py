@@ -15,6 +15,8 @@ from pathlib import Path
 
 from harness import WarmEnvironment, run_scenario
 
+from articraft.settings import DEFAULT_MAX_TURNS
+
 
 def test_box_generation(tape_model, tmp_path: Path) -> None:
     with tape_model() as model:
@@ -22,6 +24,7 @@ def test_box_generation(tape_model, tmp_path: Path) -> None:
             "a simple box",
             model=model,
             env=WarmEnvironment(output_dir=tmp_path),
+            max_turns=DEFAULT_MAX_TURNS,
         )
     assert artifacts.record.status == "success"
     assert artifacts.record.result.endswith(".usdz")
