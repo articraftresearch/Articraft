@@ -1,9 +1,5 @@
-name: record-tapes
+name: live-tests
 
-# Records the live generation tests into tapes and uploads them as the
-# `tapes` artifact. The main CI workflow downloads the latest artifact
-# and replays it offline, so replay coverage tracks the real model without
-# paying on every PR. Run by hand any time; also weekly.
 # Requires the OPENAI_API_KEY repository secret.
 
 on:
@@ -15,12 +11,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: record-tapes
+  group: live-tests
   cancel-in-progress: false
 
 jobs:
-  record:
-    name: record
+  live:
+    name: live
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -43,15 +39,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --frozen
 
-      - name: Record live generations into tapes
+      - name: Test live generation
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: uv run --frozen pytest tests/test_live_generation.py --record -q
-
-      - name: Upload tapes
-        uses: actions/upload-artifact@v4
-        with:
-          name: tapes
-          path: tests/tapes/*.jsonl
-          retention-days: 30
-          if-no-files-found: error
+        run: uv run --frozen pytest -q -m live
