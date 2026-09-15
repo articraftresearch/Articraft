@@ -60,8 +60,8 @@ class OpenRouterModel:
         payload = _response_payload(response)
         _raise_for_provider_error(response.status_code, payload)
         text, tool_calls, provider_content = _assistant_output(payload)
-        if not text and not tool_calls:
-            raise ModelError("OpenRouter response did not contain text or tool calls")
+        if not text and not tool_calls and not provider_content:
+            raise ModelError("OpenRouter response did not contain text, reasoning, or tool calls")
 
         return {
             "text": text,
