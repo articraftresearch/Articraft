@@ -5,6 +5,7 @@ from articraft.agent.provider.anthropic import AnthropicModel
 from articraft.agent.provider.anthropic import (
     context_window_tokens_for as anthropic_context_window_tokens_for,
 )
+from articraft.agent.provider.atlascloud import AtlasCloudModel
 from articraft.agent.provider.gemini import GeminiModel
 from articraft.agent.provider.gemini import (
     context_window_tokens_for as gemini_context_window_tokens_for,
@@ -18,6 +19,8 @@ from articraft.settings import Settings
 
 
 def create_model(settings: Settings) -> Model:
+    if settings.provider == "atlascloud":
+        return AtlasCloudModel(settings)
     if settings.provider == "openrouter":
         return OpenRouterModel(settings)
     if settings.provider == "anthropic":
@@ -37,6 +40,7 @@ def context_window_tokens_for(model: str) -> int | None:
 
 __all__ = [
     "AnthropicModel",
+    "AtlasCloudModel",
     "GeminiModel",
     "OpenAIModel",
     "OpenRouterModel",
