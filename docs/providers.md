@@ -1,6 +1,6 @@
 # Model providers
 
-Articraft supports OpenAI, Anthropic, Gemini, and OpenRouter. OpenAI is the default.
+Articraft supports OpenAI, Anthropic, Gemini, OpenRouter, and Atlas Cloud. OpenAI is the default.
 
 ## Configure a provider
 
@@ -12,6 +12,7 @@ Set the API key for the provider that you want to use:
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-5` | Yes |
 | Gemini | `GEMINI_API_KEY` | `gemini-3.6-flash` | Yes |
 | OpenRouter | `OPENROUTER_API_KEY` | `nvidia/nemotron-3-ultra-550b-a55b:free` | No |
+| Atlas Cloud | `ATLASCLOUD_API_KEY` | `openai/gpt-4.1-mini` | No |
 
 You can put the key in `.env` or set it for one command. Do not commit API keys.
 
@@ -77,6 +78,32 @@ The model's maximum output size is separate from its context window. If it is be
 This setting defaults to 8192 and must be positive. It caps summary requests only.
 A smaller limit requested by the agent is still respected. It does not change ordinary
 generation requests.
+
+## Use Atlas Cloud
+
+The `atlascloud` adapter uses the [Chat Completions API](https://www.atlascloud.ai/docs/llm-protocols)
+at `https://api.atlascloud.ai/v1/chat/completions`. It supports text and function calls;
+reference images are not supported by this adapter. Choose a tool-capable model and
+use its exact Atlas Cloud model ID, including the vendor prefix:
+
+```shell
+ATLASCLOUD_API_KEY=your_key_here uv run articraft \
+  --provider atlascloud --model openai/gpt-4.1-mini "a folding chair"
+```
+
+`ARTICRAFT_ATLASCLOUD_MODEL` sets the model without `--model`.
+`ARTICRAFT_ATLASCLOUD_MAX_OUTPUT_TOKENS` defaults to 8192 and caps both ordinary
+and summary requests; set it within the selected model's output limit.
+`ARTICRAFT_ATLASCLOUD_REQUEST_TIMEOUT_SECONDS` defaults to 900.
+Requests are sent once, without automatic retries, since a failed connection may
+still correspond to a billable generation.
+
+Token use is recorded. Cost remains zero in the run record because this adapter
+does not estimate Atlas Cloud pricing; zero does not mean the request was free.
+For conversation compaction, set `ARTICRAFT_ATLASCLOUD_CONTEXT_WINDOW_TOKENS` to
+the selected model's context window. The default 0 leaves compaction disabled;
+nonzero values must be at least 36384. Obtain the limits from the current Atlas
+Cloud model catalog instead of reusing another provider's model limits.
 
 ## Use the Python API
 

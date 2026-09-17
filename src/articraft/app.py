@@ -33,11 +33,12 @@ def generate(
         resolve_path=True,
         help="Local reference image for reconstruction.",
     ),
-    provider: Literal["openai", "gemini", "anthropic", "openrouter"] | None = typer.Option(
+    provider: Literal["openai", "gemini", "anthropic", "openrouter", "atlascloud"]
+    | None = typer.Option(
         None,
         "--provider",
         case_sensitive=False,
-        help="Model provider to use: openai, gemini, anthropic, or openrouter.",
+        help="Model provider to use: openai, gemini, anthropic, openrouter, or atlascloud.",
     ),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use."),
     output_dir: Path | None = typer.Option(None, "--output-dir", help="Run output directory."),
@@ -73,8 +74,9 @@ def generate(
         typer.echo(f"reference image does not exist: {image}", err=True)
         raise typer.Exit(2)
     settings = _settings(provider, model, output_dir, effort, compile_timeout, physics)
-    if image is not None and settings.provider == "openrouter":
-        typer.echo("OpenRouter does not support reference images.", err=True)
+    if image is not None and settings.provider in {"openrouter", "atlascloud"}:
+        name = "OpenRouter" if settings.provider == "openrouter" else "Atlas Cloud adapter"
+        typer.echo(f"{name} does not support reference images.", err=True)
         raise typer.Exit(1)
     use_tui = tui if tui is not None else sys.stdout.isatty()
     try:
@@ -304,7 +306,7 @@ def _default_output_dir() -> Path:
 
 
 def _settings(
-    provider: Literal["openai", "gemini", "anthropic", "openrouter"] | None,
+    provider: Literal["openai", "gemini", "anthropic", "openrouter", "atlascloud"] | None,
     model: str | None,
     output_dir: Path | None,
     effort: str | None,
