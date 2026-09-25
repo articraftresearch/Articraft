@@ -24,23 +24,35 @@ ANTHROPIC_API_KEY=your_key_here uv run articraft \
 
 ## Select a model
 
-OpenAI defaults to GPT-6 Astra with `high` reasoning effort. GPT-5.6 Sol remains
-available with `--model gpt-5.6-sol` or `ARTICRAFT_MODEL=gpt-5.6-sol`.
-The `gpt-5.6` alias also selects Sol.
+OpenAI defaults to GPT-6 Astra with `high` reasoning effort. Select GPT-6 Sol
+with `--model gpt-6-sol` or `ARTICRAFT_MODEL=gpt-6-sol`:
 
 ```shell
-uv run articraft --model gpt-5.6-sol "a folding chair"
+uv run articraft --model gpt-6-sol "a folding chair"
 ```
 
 Both models use the Responses API over WebSockets. Articraft keeps a 272,000-token
 working context budget and a 128,000-token output limit. Astra supports `low`,
-`medium`, `high`, `xhigh`, and `max` reasoning effort. It does not support `none`.
+`medium`, `high`, `xhigh`, and `max` reasoning effort. GPT-6 Sol also supports `none`.
 See OpenAI's [Astra model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra)
-and [migration guide](https://developers.openai.com/api/docs/guides/latest-model).
+and [Sol model documentation](https://developers.openai.com/api/docs/models/gpt-6-sol).
 
 Cost estimates use OpenAI's [standard token prices](https://developers.openai.com/api/docs/pricing),
-including cached input and cache writes. Sol's current promotional pricing is
-available at least through November 21, 2026.
+including cached input and cache writes. GPT-5.6 Sol remains available with
+`--model gpt-5.6-sol`; the `gpt-5.6` alias still selects GPT-5.6 Sol.
+
+Select Claude Opus 5.5 with `--provider anthropic --model claude-opus-5-5`, or
+set `ARTICRAFT_PROVIDER=anthropic` and `ARTICRAFT_ANTHROPIC_MODEL=claude-opus-5-5`:
+
+```shell
+uv run articraft --provider anthropic --model claude-opus-5-5 "a folding chair"
+```
+
+Opus 5.5 uses adaptive thinking by default. Articraft preserves its thinking blocks
+between tool calls and uses a 272,000-token working context budget with a
+128,000-token output limit. Cost estimates include its model-specific cache-read
+rate and both five-minute and one-hour cache writes. See Anthropic's
+[Opus 5.5 documentation](https://platform.claude.com/docs/en/models/opus-5-5/overview).
 
 Use `--model` to replace the default model:
 

@@ -142,11 +142,15 @@ def add_tool_results(
 
 
 @pytest.mark.parametrize(
-    ("pricing_date", "expected_cost"),
-    [(date(2026, 8, 31), 0.00246), (date(2026, 9, 1), 0.00369)],
+    ("model_name", "pricing_date", "expected_cost"),
+    [
+        ("claude-sonnet-5", date(2026, 8, 31), 0.00246),
+        ("claude-sonnet-5", date(2026, 9, 1), 0.00369),
+        ("claude-opus-5-5", date(2026, 9, 22), 0.00491),
+    ],
 )
 def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost(
-    monkeypatch: pytest.MonkeyPatch, pricing_date: date, expected_cost: float
+    monkeypatch: pytest.MonkeyPatch, model_name: str, pricing_date: date, expected_cost: float
 ) -> None:
     monkeypatch.setattr(
         "articraft.agent.provider.anthropic.date", SimpleNamespace(today=lambda: pricing_date)
@@ -160,7 +164,8 @@ def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost(
                 cache_creation_input_tokens=100,
                 cache_read_input_tokens=50,
             )
-        ]
+        ],
+        anthropic_model=model_name,
     )
     tool = {
         "type": "function",
@@ -200,7 +205,7 @@ def test_anthropic_model_sends_messages_tools_and_returns_text_and_cost(
         "total_tokens": 1_170,
     }
     request = client.messages.requests[0]
-    assert request["model"] == "claude-sonnet-5"
+    assert request["model"] == model_name
     assert request["max_tokens"] == 128_000
     assert request["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert request["system"] == "write clean code"
@@ -230,7 +235,8 @@ def test_anthropic_model_records_real_sdk_blocks_without_null_fields() -> None:
     assert result["provider_content"] == [{"type": "text", "text": "done"}]
 
 
-def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
+@pytest.mark.parametrize("model_name", ["claude-sonnet-5", "claude-opus-5-5"])
+def test_anthropic_model_preserves_all_thinking_across_tool_rounds(model_name: str) -> None:
     first_content = [
         {
             "type": "thinking",
@@ -267,7 +273,8 @@ def test_anthropic_model_preserves_all_thinking_across_tool_rounds() -> None:
             SimpleNamespace(content=first_content),
             SimpleNamespace(content=second_content),
             text_response("done"),
-        ]
+        ],
+        anthropic_model=model_name,
     )
     messages: list[dict[str, Any]] = [{"role": "user", "content": "build"}]
 
@@ -553,7 +560,13 @@ def test_anthropic_model_marks_tool_errors() -> None:
     }
 
 
-def test_anthropic_model_prices_mixed_cache_durations() -> None:
+@pytest.mark.parametrize(
+    ("model_name", "expected_cost"),
+    [("claude-opus-5", 0.0066375), ("claude-opus-5-5", 0.005305)],
+)
+def test_anthropic_model_prices_mixed_cache_durations(
+    model_name: str, expected_cost: float
+) -> None:
     usage = {
         "input_tokens": 1_000,
         "output_tokens": 20,
@@ -563,7 +576,7 @@ def test_anthropic_model_prices_mixed_cache_durations() -> None:
         "cache_read_input_tokens": 25,
     }
 
-    assert _response_cost("claude-opus-5", usage) == 0.0066375
+    assert _response_cost(model_name, usage) == expected_cost
 
 
 def test_anthropic_model_reads_cache_duration_breakdown() -> None:
@@ -674,6 +687,7 @@ def test_anthropic_model_exposes_conservative_context_window() -> None:
     assert context_window_tokens_for("claude-mythos-5") == 272_000
     assert context_window_tokens_for("claude-sonnet-5") == 272_000
     assert context_window_tokens_for("claude-opus-5") == 272_000
+    assert context_window_tokens_for("claude-opus-5-5") == 272_000
     assert context_window_tokens_for("claude-haiku-4-5") is None
 
 

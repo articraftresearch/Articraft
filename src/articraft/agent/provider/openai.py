@@ -36,6 +36,7 @@ class _ModelSpec:
 # https://developers.openai.com/api/docs/pricing
 _MODELS = {
     "gpt-6-astra": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 10.0, 1.0, 50.0, 12.5),
+    "gpt-6-sol": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 2.0, 0.2, 10.0, 2.5),
     "gpt-5.6-sol": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 4.0, 0.4, 20.0, 5.0),
     "gpt-5.6-terra": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 2.0, 0.2, 12.0, 2.5),
     "gpt-5.6-luna": _ModelSpec(_CODEX_CONTEXT_WINDOW_TOKENS, 0.2, 0.02, 1.2, 0.25),

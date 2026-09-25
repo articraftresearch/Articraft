@@ -205,6 +205,7 @@ def test_openai_model_returns_estimated_cost(monkeypatch: pytest.MonkeyPatch) ->
     ("model_name", "expected_cost"),
     [
         ("gpt-6-astra", 0.0106),
+        ("gpt-6-sol", 0.00212),
         ("gpt-5.6-sol", 0.00424),
         ("gpt-5.6", 0.00424),
         ("gpt-5.6-terra", 0.00216),
@@ -256,6 +257,7 @@ def test_openai_model_exposes_context_window() -> None:
     assert DEFAULT_MAX_TURNS == 100
     assert model.context_window_tokens == 272_000
     assert context_window_tokens_for("gpt-6-astra") == 272_000
+    assert context_window_tokens_for("gpt-6-sol") == 272_000
     assert context_window_tokens_for("gpt-5.6-sol") == 272_000
     assert context_window_tokens_for("gpt-5.6") == 272_000
     assert context_window_tokens_for("gpt-5.6-terra") == 272_000

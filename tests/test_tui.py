@@ -138,8 +138,10 @@ def test_renderer_shows_token_usage_bar() -> None:
     assert "(0.3%)" in out
 
 
-@pytest.mark.parametrize("model_name", ["gpt-6-astra", "gpt-5.6-sol"])
-def test_renderer_uses_openai_context_window(model_name: str) -> None:
+@pytest.mark.parametrize(
+    "model_name", ["gpt-6-astra", "gpt-6-sol", "gpt-5.6-sol", "claude-opus-5-5"]
+)
+def test_renderer_uses_provider_context_window(model_name: str) -> None:
     renderer, console = _renderer()
 
     renderer.handle(events.RunStarted("run-x", model_name, "a box", "low"))

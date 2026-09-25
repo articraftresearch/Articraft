@@ -16,7 +16,6 @@ _COMPACTION_BETA = "compact-2026-01-12"
 _COMPACTION_TRIGGER_TOKENS = 50_000
 _CACHE_WRITE_5M_MULTIPLIER = 1.25
 _CACHE_WRITE_1H_MULTIPLIER = 2.0
-_CACHE_READ_MULTIPLIER = 0.1
 _SONNET_5_STANDARD_PRICING_START = date(2026, 9, 1)
 
 
@@ -24,12 +23,14 @@ _SONNET_5_STANDARD_PRICING_START = date(2026, 9, 1)
 class _Prices:
     input_price: float
     output_price: float
+    cache_read_multiplier: float = 0.1
 
 
 _MODEL_PRICES = {
     "claude-fable-5": _Prices(input_price=10.00, output_price=50.00),
     "claude-mythos-5": _Prices(input_price=10.00, output_price=50.00),
     "claude-opus-5": _Prices(input_price=5.00, output_price=25.00),
+    "claude-opus-5-5": _Prices(input_price=4.00, output_price=20.00, cache_read_multiplier=0.05),
     "claude-sonnet-5": _Prices(input_price=2.00, output_price=10.00),
 }
 _SONNET_5_STANDARD_PRICES = _Prices(
@@ -435,7 +436,9 @@ def _response_cost(model: str, usage: dict[str, int], *, today: date | None = No
             usage.get("input_tokens", 0) * prices.input_price
             + cache_creation_5m_input_tokens * prices.input_price * _CACHE_WRITE_5M_MULTIPLIER
             + cache_creation_1h_input_tokens * prices.input_price * _CACHE_WRITE_1H_MULTIPLIER
-            + usage.get("cache_read_input_tokens", 0) * prices.input_price * _CACHE_READ_MULTIPLIER
+            + usage.get("cache_read_input_tokens", 0)
+            * prices.input_price
+            * prices.cache_read_multiplier
             + usage.get("output_tokens", 0) * prices.output_price
         )
         / 1_000_000,
