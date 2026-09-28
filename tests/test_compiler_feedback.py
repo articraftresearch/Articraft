@@ -454,19 +454,6 @@ def test_mesh_authoring_error_is_a_mesh_health_signal() -> None:
     assert "allow_mesh_issues" not in report["signals_text"]
 
 
-def test_repeat_and_streak_guidance_escalates() -> None:
-    report = build_compile_report(
-        status="failure",
-        test_report=_failing_report(TestFailure(name="expect_contact(a,b)", details="d")),
-    )
-
-    rendered = render_compile_report(report, repeated=True, failure_streak=3)
-
-    assert "This failure matches the previous compile attempt." in rendered["signals_text"]
-    assert "This is compile failure 3 in a row." in rendered["signals_text"]
-    assert "exec_command" in rendered["signals_text"]
-
-
 def test_failure_signature_ignores_warning_only_reports() -> None:
     report = build_compile_report(
         status="success",

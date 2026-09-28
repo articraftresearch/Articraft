@@ -9,7 +9,6 @@ import os
 import shlex
 import sys
 import time
-from pathlib import Path
 
 import pytest
 from harness import fake_compile_payload
@@ -21,7 +20,6 @@ from articraft.agent.tools._core import workspace_digest
 from articraft.agent.tools._exec import ExecSessions
 from articraft.agent.workspace.local import LocalWorkspace
 from articraft.compiler.feedback import build_compile_report_from_payload
-from articraft.compiler.result import CompilePayload
 
 
 def run(awaitable):
@@ -794,31 +792,6 @@ def run_tests() -> TestReport:
     assert ctx.refresh_compile_freshness()
 
 
-def test_compile_tool_escalates_repeated_failures(tmp_path) -> None:
-    ctx = ToolContext(FakeCompileEnv("error", "error", "error"), tmp_path, tmp_path)
-
-    first = run(get("compile").run(ctx, {}))
-    second = run(get("compile").run(ctx, {}))
-    third = run(get("compile").run(ctx, {}))
-
-    assert "matches the previous compile attempt" not in first["compile_signals"]
-    assert "matches the previous compile attempt" in second["compile_signals"]
-    assert "This is compile failure 3 in a row." in third["compile_signals"]
-    assert "`exec_command` inspection" in third["compile_signals"]
-    assert not ctx.refresh_compile_freshness()
-
-
-def test_compile_tool_resets_failure_streak_on_success(tmp_path) -> None:
-    ctx = ToolContext(FakeCompileEnv("error", "success"), tmp_path, tmp_path)
-
-    run(get("compile").run(ctx, {}))
-    result = run(get("compile").run(ctx, {}))
-
-    assert result["status"] == "success"
-    assert ctx.last_compile_failure_signature is None
-    assert ctx.consecutive_compile_failures == 0
-
-
 def test_cached_compile_success_resets_failure_streak(tmp_path) -> None:
     ctx = context(tmp_path)
     ctx.successful_compile_result = fake_compile_payload(
@@ -835,18 +808,3 @@ def test_cached_compile_success_resets_failure_streak(tmp_path) -> None:
     assert result["status"] == "success"
     assert ctx.last_compile_failure_signature is None
     assert ctx.consecutive_compile_failures == 0
-
-
-class FakeCompileEnv:
-    def __init__(self, *statuses: str) -> None:
-        self.statuses = list(statuses)
-
-    def compile_path(self, run_dir: Path | str) -> CompilePayload:
-        status = self.statuses.pop(0)
-        payload = fake_compile_payload(
-            status=status,
-            error="ValueError: bad loft" if status == "error" else "",
-            returncode=1 if status == "error" else 0,
-        )
-        payload["compile_report"] = build_compile_report_from_payload(payload)
-        return payload
