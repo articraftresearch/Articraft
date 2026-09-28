@@ -345,6 +345,64 @@ def test_openrouter_model_summarizes_context_without_tools(
     run(model.close())
 
 
+@pytest.mark.parametrize(
+    "reasoning",
+    [
+        {"reasoning": "The lid needs a hinge first."},
+        {"reasoning_details": [{"type": "reasoning.encrypted", "data": "opaque"}]},
+    ],
+)
+def test_openrouter_model_returns_reasoning_only_response(reasoning: dict[str, Any]) -> None:
+    model, _client, _requests = model_with_responses([response(text="", **reasoning)])
+
+    result = run(model.query([{"role": "user", "content": "hello"}]))
+
+    assert result["text"] == ""
+    assert result["tool_calls"] == []
+    assert result["provider_content"] == [{"type": "openrouter_reasoning", **reasoning}]
+    run(model.close())
+
+
+def test_openrouter_model_reasoning_only_turn_does_not_end_the_run(tmp_path: Path) -> None:
+    model, client, requests = model_with_responses(
+        [
+            response(text="", reasoning="The lid needs a hinge first."),
+            response(
+                tool_calls=[
+                    function_call(
+                        "write",
+                        {"path": "main.py", "content": GOOD_MAIN_PY},
+                        call_id="call_write",
+                    )
+                ]
+            ),
+            response(tool_calls=[function_call("compile", {}, call_id="call_compile")]),
+            response(text="done"),
+        ]
+    )
+    agent = Agent(model, LocalWorkspace(output_dir=tmp_path), max_turns=4)
+
+    result = run(agent.run("a box", run_id="openrouter-reasoning-only"))
+
+    assert result["status"] == "success"
+    assert len(requests) == 4
+    replayed = [m for m in request_json(requests[1])["messages"] if m["role"] == "assistant"]
+    assert replayed[-1] == {
+        "role": "assistant",
+        "content": None,
+        "reasoning": "The lid needs a hinge first.",
+    }
+    assert client.is_closed
+
+
+def test_openrouter_model_rejects_response_without_text_reasoning_or_tool_calls() -> None:
+    model, _client, _requests = model_with_responses([response(text=None)])
+
+    with pytest.raises(ModelError, match="did not contain text, reasoning, or tool calls"):
+        run(model.query([{"role": "user", "content": "hello"}]))
+    run(model.close())
+
+
 def test_openrouter_model_rejects_summary_without_text() -> None:
     model, _client, _requests = model_with_responses([response(text=None)])
 
