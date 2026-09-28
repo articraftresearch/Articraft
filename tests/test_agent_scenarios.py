@@ -139,15 +139,16 @@ def test_agent_repairs_a_missing_run_tests_with_real_signals(tmp_path: Path) -> 
 
 def test_repeat_failure_guidance_escalates_across_compiles(tmp_path: Path) -> None:
     env = WarmEnvironment(output_dir=tmp_path)
+    broken_main = "raise ValueError('bad loft')\n"
 
     artifacts = run_scenario(
         "a box",
         [
-            write_main(BROKEN_NO_RUN_TESTS),
+            write_main(broken_main),
             compile_workspace(),
-            write_main(BROKEN_NO_RUN_TESTS),
+            write_main(broken_main),
             compile_workspace(),
-            write_main(BROKEN_NO_RUN_TESTS),
+            write_main(broken_main),
             compile_workspace(),
             write_main(GOOD_MAIN_PY),
             compile_workspace(),
@@ -164,6 +165,7 @@ def test_repeat_failure_guidance_escalates_across_compiles(tmp_path: Path) -> No
     assert "matches the previous compile attempt" not in signals[0]
     assert "matches the previous compile attempt" in signals[1]
     assert "compile failure 3 in a row" in signals[2]
+    assert "`exec_command` inspection" in signals[2]
 
 
 def test_a_cached_success_does_not_recompile(tmp_path: Path) -> None:
@@ -275,13 +277,14 @@ render_view(
 
 
 def test_failure_streak_resets_after_a_successful_compile(tmp_path: Path) -> None:
-    """A success clears the streak: the next failure is not flagged as repeated."""
+    """A success clears both repetition and escalation for the next failure."""
     env = WarmEnvironment(output_dir=tmp_path)
 
     artifacts = run_scenario(
         "a box",
         [
             write_main(BROKEN_NO_RUN_TESTS),
+            compile_workspace(),
             compile_workspace(),
             write_main(GOOD_MAIN_PY),
             compile_workspace(),
@@ -292,16 +295,18 @@ def test_failure_streak_resets_after_a_successful_compile(tmp_path: Path) -> Non
             text("done"),
         ],
         env=env,
-        max_turns=9,
+        max_turns=10,
     )
 
     assert artifacts.record.status == "success"
     # the final write restores the exact content of the earlier successful
     # compile, so the freshness cache serves it without a worker call
-    assert env.compile_count == 3
+    assert env.compile_count == 4
     signals = compile_signals_shown(artifacts.tool_outputs())
     assert "matches the previous compile attempt" not in signals[0]
-    assert "matches the previous compile attempt" not in signals[2]
+    assert "matches the previous compile attempt" in signals[1]
+    assert "matches the previous compile attempt" not in signals[3]
+    assert "compile failure 3 in a row" not in signals[3]
 
 
 def test_overlap_allowance_flows_through_the_real_worker(tmp_path: Path) -> None:
