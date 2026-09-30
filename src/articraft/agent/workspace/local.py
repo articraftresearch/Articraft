@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 from articraft import package_dir
 from articraft.agent._child_process import child_environment
 from articraft.agent.record import Record
-from articraft.compiler.feedback import with_compile_report
 from articraft.compiler.result import CompilePayload, CompileResult
 from articraft.settings import DEFAULT_COMPILE_TIMEOUT_SECONDS, DEFAULT_OUTPUT_DIR
 
@@ -227,6 +226,8 @@ def _finalize_result(
     result: CompileResult,
     returncode: int | None,
 ) -> CompilePayload:
+    from articraft.compiler.feedback import with_compile_report
+
     return with_compile_report(result.to_payload(include_returncode=True, returncode=returncode))
 
 

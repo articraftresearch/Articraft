@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from articraft.agent.tools._core import Tool, ToolContext, schema, workspace_digest
-from articraft.compiler.feedback import compile_failure_signature, render_compile_report
 from articraft.compiler.result import CompilePayload
 
 _AGENT_FACING_KEYS = frozenset(
@@ -69,6 +68,8 @@ async def _compile_path(context: ToolContext) -> CompilePayload:
 
 
 def _internal_result(context: ToolContext, result: CompilePayload) -> CompilePayload:
+    from articraft.compiler.feedback import compile_failure_signature, render_compile_report
+
     compile_report = result.get("compile_report")
     if isinstance(compile_report, dict):
         signature = compile_failure_signature(compile_report)
