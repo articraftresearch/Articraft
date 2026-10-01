@@ -24,7 +24,7 @@ from articraft.agent.provider.anthropic import anthropic_api_key_value
 from articraft.agent.workspace import LocalWorkspace
 from articraft.settings import Settings, get_settings
 
-Provider = Literal["openai", "gemini", "anthropic", "openrouter"]
+Provider = Literal["openai", "gemini", "anthropic", "openrouter", "atlascloud"]
 GenerationStatus = Literal["success", "error"]
 Event = events.Event
 EventHandler = Callable[[Event], None]
@@ -189,6 +189,7 @@ def _resolved_settings(
             "gemini": "gemini_model",
             "openai": "openai_model",
             "openrouter": "openrouter_model",
+            "atlascloud": "atlascloud_model",
         }[selected_provider]
         updates[model_key] = model
 
@@ -198,6 +199,13 @@ def _resolved_settings(
 
 
 def _missing_provider_settings(settings: Settings) -> list[str]:
+    if settings.provider == "atlascloud":
+        missing = []
+        if not (settings.atlascloud_api_key or "").strip():
+            missing.append("ATLASCLOUD_API_KEY")
+        if not settings.atlascloud_model.strip():
+            missing.append("ARTICRAFT_ATLASCLOUD_MODEL or --model")
+        return missing
     if settings.provider == "openrouter":
         missing = []
         if not (settings.openrouter_api_key or "").strip():
