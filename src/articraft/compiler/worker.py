@@ -324,6 +324,8 @@ def _run_baseline_tests(
         ctx.fail_if_parts_overlap_in_current_pose()
     with tracker.phase("checking articulation motion"):
         ctx.fail_if_articulation_separates_child()
+    with tracker.phase("checking loop joint limits"):
+        ctx.fail_if_loop_limits_contradict()
     report = _without_allowance_notes(ctx.report())
     # Most baseline checks report as diagnostics so a run still produces a model.
     # Missing mass is different: with the physics lane on, a part without mass has
