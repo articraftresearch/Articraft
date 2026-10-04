@@ -101,7 +101,7 @@
 
     function renderVersions(){document.querySelector("#versions").innerHTML=state.data.versions.map(version=>`<button class="version ${version===state.version?"active":""}" data-id="${esc(version.id)}" ${version===state.version?'aria-current="true"':""}>${esc(version.filename)}</button>`).join("");document.querySelectorAll("[data-id]").forEach(button=>button.addEventListener("click",()=>load(state.data.versions.find(version=>version.id===button.dataset.id))));}
 
-    async function load(version){const loadId=++serial;state.version=version;state.simulation=version.trajectory??null;state.playingSimulation=false;state.palette=contrastingPalette(version.model.parts.length);state.selected=null;renderVersions();status(`Loading ${version.filename}`);if(state.root){scene.remove(state.root);dispose(state.root);state.root=null;}state.parts.clear();state.joints.clear();try{const usd=await new USDLoader().loadAsync(`/models/${encodeURIComponent(version.id)}.usdz`);if(loadId!==serial){dispose(usd);return;}state.root=robot(usd,version.model);scene.add(state.root);renderParts();renderTree();paint();fit();status("");}catch(error){console.error(error);status(`Could not load ${version.filename}`);}}
+    async function load(version){const loadId=++serial;state.version=version;state.dragging=null;state.lastGood=null;state.simulation=version.trajectory??null;state.playingSimulation=false;state.palette=contrastingPalette(version.model.parts.length);state.selected=null;renderVersions();status(`Loading ${version.filename}`);if(state.root){scene.remove(state.root);dispose(state.root);state.root=null;}state.parts.clear();state.joints.clear();try{const usd=await new USDLoader().loadAsync(`/models/${encodeURIComponent(version.id)}.usdz`);if(loadId!==serial){dispose(usd);return;}state.root=robot(usd,version.model);scene.add(state.root);renderParts();renderTree();paint();fit();status("");}catch(error){console.error(error);status(`Could not load ${version.filename}`);}}
 
     function robot(usd,model){const scope=usd.getObjectByName("rigid_bodies")||usd.getObjectByName("parts");if(!scope)throw new Error("USDZ has no rigid bodies");const root=new THREE.Group();for(const spec of model.parts){const node=scope.children.find(child=>child.name===spec.usd_name);if(!node)throw new Error(`Missing part ${spec.name}`);node.removeFromParent();node.updateMatrix();const meshes=[];node.traverse(child=>{if(child.isMesh)meshes.push(child);});applyMaterials(meshes,spec.shapes);meshes.forEach(child=>{child.userData.original=materials(child).map(material=>({color:material.color?.clone(),opacity:material.opacity,transparent:material.transparent,depthWrite:material.depthWrite}));});root.add(node);state.parts.set(spec.name,{node,meshes,rest:node.matrix.clone()});}for(const spec of model.articulations)if(!spec.closes_loop)state.joints.set(spec.name,{spec,value:0,input:null,current:null});poseTree();return root;}
 
@@ -128,11 +128,14 @@
     async function poseOnServer(){
       if(state.solving){state.queued=true;return;}
       state.solving=true;state.queued=false;
-      const values={};state.joints.forEach((joint,name)=>{values[name]=joint.value;});
+      const version=state.version,driver=state.dragging;
+      // One joint drives a closed loop. The solver derives the followers.
+      const values=driver?{[driver.spec.name]:driver.value}:{};
       try{
-        const response=await fetch(`/api/pose/${state.version.id}`,{method:"POST",body:JSON.stringify(values)});
+        const response=await fetch(`/api/pose/${version.id}`,{method:"POST",body:JSON.stringify(values)});
         if(response.ok){
           const solved=await response.json();
+          if(version!==state.version)return;
           for(const[name,flat]of Object.entries(solved.bodies)){
             const entry=state.parts.get(name);
             // set() takes row major, which is how the server flattens them.
@@ -141,13 +144,13 @@
           // Followers moved too, so their sliders must say so.
           for(const[dof,value]of Object.entries(solved.dofs)){
             const joint=state.joints.get(dof.slice(0,dof.lastIndexOf(".")));
-            if(!joint||joint===state.dragging)continue;
+            if(!joint||joint===driver)continue;
             joint.value=value;
             if(joint.input)joint.input.value=value;
             if(joint.current)joint.current.textContent=format(joint.spec,value);
           }
           state.lastGood=values;
-        }else if(state.lastGood){
+        }else if(version===state.version&&state.lastGood){
           // The mechanism cannot reach this pose. Keep the last one it could.
           for(const[name,value]of Object.entries(state.lastGood)){
             const joint=state.joints.get(name);
@@ -158,23 +161,38 @@
           }
         }
       }catch(error){/* the server went away; leave the last pose on screen */}
-      state.solving=false;
-      if(state.queued)poseOnServer();
+      finally{
+        state.solving=false;
+        if(state.queued){state.queued=false;pose();}
+      }
     }
-    function move(name,value){const joint=state.joints.get(name);if(!joint)return;joint.value=value;if(state.version?.model.solver==="server"){state.dragging=joint;poseOnServer();}else poseTree();}
+    function pose(){if(state.version?.model.solver==="server")return poseOnServer();poseTree();}
+    function move(name,value){const joint=state.joints.get(name);if(!joint)return;joint.value=value;state.dragging=joint;pose();}
     function phaseOffset(name,index){let hash=0;for(const character of name)hash=(hash*33+character.charCodeAt(0))%4096;return THREE.MathUtils.euclideanModulo(hash/4096+index*.61803398875,1);}
     function motionValue(joint,elapsed,index){const limits=joint.spec.motion_limits,lower=limits?.lower,upper=limits?.upper;if(joint.spec.type==="continuous"){const phase=elapsed*preview.continuousSpeed/(Math.PI*2)+phaseOffset(joint.spec.name,index);return THREE.MathUtils.euclideanModulo(phase*Math.PI*2+Math.PI,Math.PI*2)-Math.PI;}const hasRange=Number.isFinite(lower)&&Number.isFinite(upper)&&upper>lower,span=hasRange?upper-lower:joint.spec.type==="prismatic"?.24:Math.PI*2/3,speed=joint.spec.type==="prismatic"?preview.linearSpeed:preview.angularSpeed,cycle=Math.max(preview.minimumCycle,span*2/speed),phase=THREE.MathUtils.euclideanModulo(elapsed/cycle+phaseOffset(joint.spec.name,index),1),wave=.5-.5*Math.cos(phase*Math.PI*2);return hasRange?THREE.MathUtils.lerp(lower,upper,wave):(wave*2-1)*span/2;}
-    function animateMotion(elapsed){let index=0;state.joints.forEach(joint=>{if(joint.spec.type==="fixed")return;const value=motionValue(joint,elapsed,index++);joint.value=value;if(joint.input)joint.input.value=String(value);if(joint.current)joint.current.textContent=format(joint.spec,value);});poseTree();}
+    function animateMotion(elapsed){
+      const joints=[...state.joints.values()].filter(joint=>joint.spec.type!=="fixed");
+      const server=state.version?.model.solver==="server";
+      const drivers=server?joints.slice(0,1):joints;
+      state.dragging=server?drivers[0]:null;
+      drivers.forEach((joint,index)=>{
+        const value=motionValue(joint,elapsed,index);
+        joint.value=value;
+        if(joint.input)joint.input.value=String(value);
+        if(joint.current)joint.current.textContent=format(joint.spec,value);
+      });
+      pose();
+    }
     function animateSimulation(elapsed){const sim=state.simulation;if(!sim||!sim.frames.length)return;const span=sim.frames.length/sim.fps,frame=sim.frames[Math.min(sim.frames.length-1,Math.floor((elapsed%span)*sim.fps))];for(const[name,pose]of Object.entries(frame.bodies??{})){const entry=state.parts.get(name);if(!entry)continue;entry.node.position.set(...pose.pos);const[w,x,y,z]=pose.quat;entry.node.quaternion.set(x,y,z,w);entry.node.updateMatrix();}for(const[name,value]of Object.entries(frame.dofs??{})){const joint=state.joints.get(name);if(joint){joint.value=value;if(joint.input)joint.input.value=String(value);if(joint.current)joint.current.textContent=format(joint.spec,value);}}}
 
-    function setPlayingSimulation(enabled){state.playingSimulation=enabled;state.simulationStartedAt=performance.now();if(enabled)state.previewMotion=false;else poseTree();renderTree();syncOptions();}
+    function setPlayingSimulation(enabled){state.playingSimulation=enabled;state.simulationStartedAt=performance.now();if(enabled)state.previewMotion=false;else pose();renderTree();syncOptions();}
 
     function setPlayingSimulationOff(){if(state.playingSimulation)state.playingSimulation=false;}
 
     function syncOptions(){document.querySelector("#part-colors").setAttribute("aria-checked",String(state.partColors));const previewButton=document.querySelector("#preview-motion");previewButton.disabled=!state.version?.model.can_pose;previewButton.setAttribute("aria-checked",String(state.previewMotion));const play=document.querySelector("#play-simulation");play.hidden=!state.simulation;play.setAttribute("aria-checked",String(state.playingSimulation));}
     function setPartColors(enabled){state.partColors=enabled;if(!enabled)state.selected=null;renderParts();paint();syncOptions();}
-    function setPreviewMotion(enabled){if(enabled&&!state.version?.model.can_pose)return;state.previewMotion=enabled;if(enabled)setPlayingSimulationOff();state.previewStartedAt=performance.now();if(!enabled)poseTree();renderTree();syncOptions();}
-    function reset(){setPreviewMotion(false);state.joints.forEach(joint=>{joint.value=0;});poseTree();renderTree();}
+    function setPreviewMotion(enabled){if(enabled&&!state.version?.model.can_pose)return;state.previewMotion=enabled;if(enabled)setPlayingSimulationOff();state.previewStartedAt=performance.now();renderTree();syncOptions();}
+    function reset(){setPreviewMotion(false);state.joints.forEach(joint=>{joint.value=0;});state.dragging=null;state.lastGood=null;pose();renderTree();}
     function fit(){if(!state.root)return;const box=new THREE.Box3().setFromObject(state.root),center=box.getCenter(new THREE.Vector3()),span=Math.max(box.getSize(new THREE.Vector3()).length(),.1);camera.near=span/1000;camera.far=span*100;camera.position.copy(center).add(new THREE.Vector3(span*.95,-span*1.15,span*.8));camera.updateProjectionMatrix();controls.target.copy(center);controls.update();grid.position.z=state.simulation?0:box.min.z-span*.01;grid.scale.setScalar(Math.max(span/5,.02));}
     function dispose(root){root.traverse(object=>{if(object.geometry)object.geometry.dispose();if(object.material)materials(object).forEach(material=>material.dispose());});}
     function status(text){document.querySelector("#status").textContent=text;}
