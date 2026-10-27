@@ -3,9 +3,12 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import numpy as np
+import pytest
 import trimesh
 
-from articraft.sdk import mesh_overlaps
+from articraft import sdk
+from articraft.sdk import ValidationError, mesh_overlaps
 
 
 def _box(extents: tuple[float, float, float], centre: tuple[float, float, float]):
@@ -43,3 +46,20 @@ def test_importing_mesh_overlaps_loads_no_geometry_kernel() -> None:
     code = "import sys; from articraft.sdk import mesh_overlaps; print('build123d' in sys.modules)"
     ran = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert ran.stdout.strip() == "False"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        trimesh.Trimesh(vertices=np.zeros((3, 3)), faces=np.zeros((0, 3), dtype=int)),
+        trimesh.Trimesh([[0, 0, 0], [1, 0, 0], [np.nan, 1, 0]], [[0, 1, 2]], process=False),
+    ],
+)
+def test_a_mesh_without_faces_or_with_a_non_finite_vertex_is_refused(bad) -> None:
+    with pytest.raises(ValidationError):
+        mesh_overlaps({"bad": [bad], "box": [_box((1, 1, 1), (0, 0, 0))]})
+
+
+def test_every_sdk_export_resolves() -> None:
+    assert set(sdk.__all__) == set(sdk._HOME)
+    assert all(getattr(sdk, name) is not None for name in sdk.__all__)

@@ -598,8 +598,9 @@ the same rule to meshes outside an assembly. `meshes` maps a part name to triang
 already in world coordinates. Meshes of one part are never compared.
 
 It returns one `CollisionQuery` for each overlapping mesh pair. A query names its two parts and
-the index of each mesh within its part (`shape_a`, `shape_b`). Its `ContactInfo` contacts each
-have a position, normal, and depth. Importing `mesh_overlaps` does not load build123d.
+the index of each mesh within its part (`shape_a`, `shape_b`). Its `ContactInfo` contacts carry
+a position, normal, and depth when the collision library reports them. A mesh with no faces or a
+non-finite vertex raises `ValidationError`. Importing `mesh_overlaps` does not load build123d.
 
 ## Choose checks
 

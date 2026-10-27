@@ -15,6 +15,8 @@ import manifold3d
 import numpy as np
 import trimesh
 
+from articraft.sdk.errors import ValidationError
+
 Vec3: TypeAlias = tuple[float, float, float]
 Bounds: TypeAlias = tuple[Vec3, Vec3]
 
@@ -71,6 +73,10 @@ def mesh_overlaps(
     against each other; each query names its mesh by its index in the part.
     """
 
+    for part, part_meshes in meshes.items():
+        for index, mesh in enumerate(part_meshes):
+            if len(mesh.faces) == 0 or not np.isfinite(mesh.vertices).all():
+                raise ValidationError(f"{part} mesh {index} needs faces and finite vertices")
     entries = [
         _CollisionEntry(
             part_name=part,
