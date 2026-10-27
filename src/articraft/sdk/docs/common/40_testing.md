@@ -591,6 +591,17 @@ unallowed shape pair for each part pair, chosen by overlap depth and volume.
 The baseline check uses the rest pose. Use `with ctx.pose(...)` and an authored exact check when a
 different pose is important to the requested mechanism.
 
+### Overlap of placed meshes
+
+`mesh_overlaps(meshes, *, overlap_tol=0.005, overlap_volume_tol=5e-7, max_contacts=16)` applies
+the same rule to meshes outside an assembly. `meshes` maps a part name to triangle meshes that are
+already in world coordinates. Meshes of one part are never compared.
+
+It returns one `CollisionQuery` for each overlapping mesh pair. A query names its two parts and
+the index of each mesh within its part (`shape_a`, `shape_b`). Its `ContactInfo` contacts carry
+a position, normal, and depth when the collision library reports them. A mesh with no faces or a
+non-finite vertex raises `ValidationError`. Importing `mesh_overlaps` does not load build123d.
+
 ## Choose checks
 
 Checks are design evidence. Do not delete or simplify visible geometry only to make a check pass.
