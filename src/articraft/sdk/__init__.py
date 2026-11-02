@@ -29,73 +29,182 @@ Six threads run through this package:
 
 from __future__ import annotations
 
-from articraft.sdk._mesh.core import (
-    BoxGeometry,
-    CapsuleGeometry,
-    ConeGeometry,
-    CylinderGeometry,
-    DomeGeometry,
-    ExtrudeGeometry,
-    ExtrudeWithHolesGeometry,
-    LatheGeometry,
-    LoftGeometry,
-    MeshGeometry,
-    RoundedBoxGeometry,
-    SphereGeometry,
-    SuperellipsoidGeometry,
-    TorusGeometry,
-)
-from articraft.sdk._mesh.health import (
-    MeshHealthFinding,
-    MeshHealthIssue,
-    MeshHealthReport,
-    analyze_mesh_health,
-)
-from articraft.sdk._mesh.sweeps import (
-    ArcPipeGeometry,
-    PipeGeometry,
-    SweepGeometry,
-    WirePolylineGeometry,
-)
-from articraft.sdk.assembly import (
-    Articulation,
-    Joint,
-    JointAxis,
-    JointDOF,
-    PhysicsState,
-    RigidBodyAssembly,
-)
-from articraft.sdk.bodies import RigidBody
-from articraft.sdk.errors import LoopClosureError, SDKError, ValidationError
-from articraft.sdk.frames import WORLD, BodyFrame, JointFrame
-from articraft.sdk.mass import MassProperties
-from articraft.sdk.materials import Material
-from articraft.sdk.physics import EARTH_GRAVITY, BodyState, PhysicsScene
-from articraft.sdk.testing import (
-    AllowedMeshIssues,
-    AllowedOverlap,
-    DistanceFinding,
-    FailureKind,
-    GeometryMetrics,
-    PoseSample,
-    TestArtifact,
-    TestContext,
-    TestFailure,
-    TestMetric,
-    TestReport,
-)
-from articraft.sdk.visual import (
-    ImagePoint,
-    LineOverlay,
-    MeridionalSectionView,
-    ModelView,
-    MotionStripView,
-    PointOverlay,
-    Reticle,
-    SectionView,
-    annotate_image,
-    render_view,
-)
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from articraft.sdk._mesh.core import (
+        BoxGeometry,
+        CapsuleGeometry,
+        ConeGeometry,
+        CylinderGeometry,
+        DomeGeometry,
+        ExtrudeGeometry,
+        ExtrudeWithHolesGeometry,
+        LatheGeometry,
+        LoftGeometry,
+        MeshGeometry,
+        RoundedBoxGeometry,
+        SphereGeometry,
+        SuperellipsoidGeometry,
+        TorusGeometry,
+    )
+    from articraft.sdk._mesh.health import (
+        MeshHealthFinding,
+        MeshHealthIssue,
+        MeshHealthReport,
+        analyze_mesh_health,
+    )
+    from articraft.sdk._mesh.sweeps import (
+        ArcPipeGeometry,
+        PipeGeometry,
+        SweepGeometry,
+        WirePolylineGeometry,
+    )
+    from articraft.sdk._overlap import CollisionQuery, ContactInfo, mesh_overlaps
+    from articraft.sdk.assembly import (
+        Articulation,
+        Joint,
+        JointAxis,
+        JointDOF,
+        PhysicsState,
+        RigidBodyAssembly,
+    )
+    from articraft.sdk.bodies import RigidBody
+    from articraft.sdk.errors import LoopClosureError, SDKError, ValidationError
+    from articraft.sdk.frames import WORLD, BodyFrame, JointFrame
+    from articraft.sdk.mass import MassProperties
+    from articraft.sdk.materials import Material
+    from articraft.sdk.physics import EARTH_GRAVITY, BodyState, PhysicsScene
+    from articraft.sdk.testing import (
+        AllowedMeshIssues,
+        AllowedOverlap,
+        DistanceFinding,
+        FailureKind,
+        GeometryMetrics,
+        PoseSample,
+        TestArtifact,
+        TestContext,
+        TestFailure,
+        TestMetric,
+        TestReport,
+    )
+    from articraft.sdk.visual import (
+        ImagePoint,
+        LineOverlay,
+        MeridionalSectionView,
+        ModelView,
+        MotionStripView,
+        PointOverlay,
+        Reticle,
+        SectionView,
+        annotate_image,
+        render_view,
+    )
+
+# Each name loads its own module when first used: checking placed meshes for overlap
+# (`mesh_overlaps`) never loads build123d.
+_HOMES = {
+    "articraft.sdk._overlap": (
+        "CollisionQuery",
+        "ContactInfo",
+        "mesh_overlaps",
+    ),
+    "articraft.sdk._mesh.core": (
+        "BoxGeometry",
+        "CapsuleGeometry",
+        "ConeGeometry",
+        "CylinderGeometry",
+        "DomeGeometry",
+        "ExtrudeGeometry",
+        "ExtrudeWithHolesGeometry",
+        "LatheGeometry",
+        "LoftGeometry",
+        "MeshGeometry",
+        "RoundedBoxGeometry",
+        "SphereGeometry",
+        "SuperellipsoidGeometry",
+        "TorusGeometry",
+    ),
+    "articraft.sdk._mesh.health": (
+        "MeshHealthFinding",
+        "MeshHealthIssue",
+        "MeshHealthReport",
+        "analyze_mesh_health",
+    ),
+    "articraft.sdk._mesh.sweeps": (
+        "ArcPipeGeometry",
+        "PipeGeometry",
+        "SweepGeometry",
+        "WirePolylineGeometry",
+    ),
+    "articraft.sdk.assembly": (
+        "Articulation",
+        "Joint",
+        "JointAxis",
+        "JointDOF",
+        "PhysicsState",
+        "RigidBodyAssembly",
+    ),
+    "articraft.sdk.bodies": ("RigidBody",),
+    "articraft.sdk.errors": (
+        "LoopClosureError",
+        "SDKError",
+        "ValidationError",
+    ),
+    "articraft.sdk.frames": (
+        "WORLD",
+        "BodyFrame",
+        "JointFrame",
+    ),
+    "articraft.sdk.mass": ("MassProperties",),
+    "articraft.sdk.materials": ("Material",),
+    "articraft.sdk.physics": (
+        "EARTH_GRAVITY",
+        "BodyState",
+        "PhysicsScene",
+    ),
+    "articraft.sdk.testing": (
+        "AllowedMeshIssues",
+        "AllowedOverlap",
+        "DistanceFinding",
+        "FailureKind",
+        "GeometryMetrics",
+        "PoseSample",
+        "TestArtifact",
+        "TestContext",
+        "TestFailure",
+        "TestMetric",
+        "TestReport",
+    ),
+    "articraft.sdk.visual": (
+        "ImagePoint",
+        "LineOverlay",
+        "MeridionalSectionView",
+        "ModelView",
+        "MotionStripView",
+        "PointOverlay",
+        "Reticle",
+        "SectionView",
+        "annotate_image",
+        "render_view",
+    ),
+}
+_HOME = {name: module for module, names in _HOMES.items() for name in names}
+
+
+def __getattr__(name: str) -> Any:
+    module = _HOME.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})
+
 
 __all__ = [
     "EARTH_GRAVITY",
@@ -108,7 +217,9 @@ __all__ = [
     "BodyState",
     "BoxGeometry",
     "CapsuleGeometry",
+    "CollisionQuery",
     "ConeGeometry",
+    "ContactInfo",
     "CylinderGeometry",
     "DistanceFinding",
     "DomeGeometry",
@@ -158,5 +269,6 @@ __all__ = [
     "WirePolylineGeometry",
     "analyze_mesh_health",
     "annotate_image",
+    "mesh_overlaps",
     "render_view",
 ]

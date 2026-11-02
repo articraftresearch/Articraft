@@ -24,6 +24,7 @@ from articraft.sdk._collision import (
 )
 from articraft.sdk._mesh.core import geometry_to_trimesh
 from articraft.sdk._mesh.health import MeshHealthIssue, analyze_mesh_health
+from articraft.sdk._overlap import DEFAULT_OVERLAP_TOLERANCE, DEFAULT_OVERLAP_VOLUME_TOLERANCE
 from articraft.sdk._values import _as_vec3 as _vec3
 from articraft.sdk._values import _finite, _non_negative
 from articraft.sdk.assembly import (
@@ -43,8 +44,6 @@ from articraft.sdk.materials import LIBRARY
 
 DEFAULT_MESH_TOLERANCE = 0.001
 DEFAULT_CONTACT_TOLERANCE = 1e-6
-DEFAULT_OVERLAP_TOLERANCE = 0.005
-DEFAULT_OVERLAP_VOLUME_TOLERANCE = 5e-7
 
 
 class FailureKind(StrEnum):
