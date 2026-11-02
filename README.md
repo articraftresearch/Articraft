@@ -49,7 +49,7 @@ Pass one local image when you want Articraft to reconstruct an object:
 uv run articraft --image reference.png "reconstruct this desk lamp"
 ```
 
-OpenAI, Anthropic, and Gemini accept reference images. OpenRouter accepts text only.
+OpenAI, Anthropic, and Gemini accept reference images. OpenRouter and Atlas Cloud accept text only.
 
 ## Use the Python API
 
@@ -85,7 +85,7 @@ The simulator can also test sliding friction and released joints. Read the
 
 ## Select a model provider
 
-OpenAI is the default provider. You can also use Anthropic, Gemini, or OpenRouter.
+OpenAI is the default provider. You can also use Anthropic, Gemini, OpenRouter, or Atlas Cloud.
 
 Read the [provider guide](docs/providers.md) for API keys, models, and provider limits.
 

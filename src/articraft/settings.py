@@ -37,7 +37,7 @@ class Settings(BaseSettings):
         default=DEFAULT_OUTPUT_DIR,
         validation_alias="ARTICRAFT_OUTPUT_DIR",
     )
-    provider: Literal["openai", "gemini", "anthropic", "openrouter"] = Field(
+    provider: Literal["openai", "gemini", "anthropic", "openrouter", "atlascloud"] = Field(
         default=DEFAULT_PROVIDER,
         validation_alias="ARTICRAFT_PROVIDER",
     )
@@ -96,6 +96,29 @@ class Settings(BaseSettings):
         gt=0.0,
         validation_alias="ARTICRAFT_GEMINI_REQUEST_TIMEOUT_SECONDS",
     )
+    atlascloud_model: str = Field(
+        default="openai/gpt-4.1-mini", validation_alias="ARTICRAFT_ATLASCLOUD_MODEL"
+    )
+    atlascloud_api_key: str | None = Field(default=None, validation_alias="ATLASCLOUD_API_KEY")
+    atlascloud_request_timeout_seconds: float = Field(
+        default=900.0, gt=0.0, validation_alias="ARTICRAFT_ATLASCLOUD_REQUEST_TIMEOUT_SECONDS"
+    )
+    atlascloud_max_output_tokens: int = Field(
+        default=8_192, ge=1, validation_alias="ARTICRAFT_ATLASCLOUD_MAX_OUTPUT_TOKENS"
+    )
+    atlascloud_context_window_tokens: int = Field(
+        default=0, ge=0, validation_alias="ARTICRAFT_ATLASCLOUD_CONTEXT_WINDOW_TOKENS"
+    )
+
+    @field_validator("atlascloud_context_window_tokens")
+    @classmethod
+    def _atlascloud_window_floor(cls, value: int) -> int:
+        if 0 < value < 36_384:
+            raise ValueError(
+                "ARTICRAFT_ATLASCLOUD_CONTEXT_WINDOW_TOKENS must be 0 (disabled) or at least 36384"
+            )
+        return value
+
     openrouter_model: str = Field(
         default=DEFAULT_OPENROUTER_MODEL,
         validation_alias="ARTICRAFT_OPENROUTER_MODEL",
@@ -156,6 +179,8 @@ class Settings(BaseSettings):
 
     @property
     def selected_model(self) -> str:
+        if self.provider == "atlascloud":
+            return self.atlascloud_model
         if self.provider == "openrouter":
             return self.openrouter_model
         if self.provider == "anthropic":
